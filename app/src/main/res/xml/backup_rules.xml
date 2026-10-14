@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- 会话与用量属于用户数据，但 API Key 存在加密存储中，不参与备份 -->
+    <include domain="file" path="conversations/" />
+    <include domain="file" path="usage/" />
+    <exclude domain="sharedpref" path="dsh_secure_keys.xml" />
+    <exclude domain="sharedpref" path="dsh_settings.xml" />
+</full-backup-content>

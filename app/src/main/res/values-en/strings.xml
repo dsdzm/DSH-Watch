@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH Feiyu</string>
+    <string name="notification_channel_streaming">Generating</string>
+    <string name="notification_channel_streaming_desc">Keeps the connection alive while streaming</string>
+    <string name="notification_title">DSH is generating</string>
+    <string name="notification_stop">Stop</string>
+    <string name="notification_channel_alarm">Alarms</string>
+    <string name="notification_channel_alarm_desc">Alarms created by the AI assistant</string>
+    <string name="notification_alarm_body">Time is up</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的背景：深蓝渐变。
+  看板娘是深蓝色调，用浅背景会显得脏，深底反而把角色托出来。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:startColor="#1B3A6B"
+        android:centerColor="#142A50"
+        android:endColor="#0B1220"
+        android:type="linear" />
+</shape>

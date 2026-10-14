@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  允许明文 HTTP。
+
+  为什么必须开：DSH 服务器模式要连你电脑上跑的 dsh-workspace，典型地址就是
+  http://192.168.1.20:3090 —— 局域网内一般没有证书。
+
+  targetSdk >= 28 时系统默认禁止明文，如果不声明这一条，
+  连 http:// 地址会直接抛 IOException（表现为「网络请求失败」），而且报错信息很难懂。
+
+  安全边界：本 App 只访问你自己配置的地址，不做任何第三方上报。
+  跨公网请务必使用 https:// 或 Tailscale/WireGuard。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

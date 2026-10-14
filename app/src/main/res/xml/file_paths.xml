@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  导出工作空间产物时用到的 FileProvider 路径。
+
+  ⚠️ 这里必须把**内部**和**外部私有**两个位置都列上。
+  因为「文件存放位置」默认就是外部私有目录（用户能用数据线直接拷），
+  而 FileProvider 的 <files-path> 只映射内部 files/ ——
+  少一个 external-files-path，切到外部目录后所有导出都会抛
+  IllegalArgumentException: Failed to find configured root，且被上层 runCatching 吞掉，
+  表现就是「点导出什么都没发生」。
+
+  cache/share 是最后一道兜底：文件不在上面任何一处时（例如用户手工换过位置），
+  先复制一份到缓存目录再分享，保证导出永远有结果。
+
+  这三个目录都在应用私有沙盒内，API Key 之类的敏感数据不在其中。
+-->
+<paths>
+    <files-path name="workspace" path="workspace/" />
+    <external-files-path name="workspace_ext" path="workspace/" />
+    <cache-path name="share_cache" path="share/" />
+</paths>

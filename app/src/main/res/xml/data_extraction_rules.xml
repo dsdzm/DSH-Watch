@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="conversations/" />
+        <include domain="file" path="usage/" />
+        <exclude domain="sharedpref" path="dsh_secure_keys.xml" />
+        <exclude domain="sharedpref" path="dsh_settings.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="dsh_secure_keys.xml" />
+    </device-transfer>
+</data-extraction-rules>

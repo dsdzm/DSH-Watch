@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH肥鱼</string>
+    <string name="notification_channel_streaming">AI 生成中</string>
+    <string name="notification_channel_streaming_desc">保持流式回答时的网络连接</string>
+    <string name="notification_title">DSH 正在生成</string>
+    <string name="notification_stop">停止</string>
+    <string name="notification_channel_alarm">闹钟</string>
+    <string name="notification_channel_alarm_desc">由 AI 助手设置的手表闹钟</string>
+    <string name="notification_alarm_body">时间到了</string>
+</resources>
