@@ -143,29 +143,33 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ### 3.4 正式签名
 
-**本工程已经带了一个可用的签名文件**，所以 `./gradlew :app:assembleRelease` 直接就能出可安装的包：
+本工程**不包含签名密钥** —— `.gitignore` 已排除 `*.jks` / `*.keystore` / `keystore.properties`，
+密钥与口令只保存在你自己的机器上，不会进入仓库。
 
-`keystore.properties`（已在 `.gitignore` 中，不会被提交）：
+要产出可安装的正式包，在自己机器上创建 `keystore.properties`：
 
 ```properties
-storeFile=/workspace/dsh-watch/dsh-watch.jks
-storePassword=dshwatch2026
+storeFile=../dsh-watch.jks        # 指向你自己的密钥文件（切勿提交）
+storePassword=<你的密钥库口令>
 keyAlias=dsh
-keyPassword=dshwatch2026
+keyPassword=<你的密钥口令>
 ```
 
-`dsh-watch.jks` 证书指纹（SHA-256）：
+**密钥安全（比口令更要紧的是文件本身）**
+
+- Android 要求同包名的更新**必须使用同一套密钥** —— 密钥文件一旦丢失，
+  就再也无法给已安装用户推送更新（只能改包名重发，或让用户卸载重装、数据全丢）；
+  请务必备份到项目之外
+- 口令泄露 + 密钥文件泄露 = 他人可以伪造"同签名"的更新包，
+  让老用户在正常升级流程里装上恶意版本
+- 建议把 `dsh-watch.jks` 与口令交给密码管理器保存，不要放进任何代码仓库或云盘共享目录
+
+`dsh-watch.jks` 证书指纹（SHA-256，**公开信息**，可用于校验某个 APK 是否由本密钥签名）：
+
 `70:43:7A:7F:33:BE:37:46:BB:DA:17:9A:A1:5B:8C:F2:56:A3:27:68:C9:88:34:AD:DA:C9:8B:42:8B:F3:1F:94`
 
-> ✅ 这个密钥**已定为长期发布密钥**（RSA 2048，有效期至 2056 年）。
-> 后续所有版本都要继续用它签名，老用户才能直接覆盖升级。
->
-> ⚠️ 密码 `dshwatch2026` 是公开的；但比密码更要紧的是**把 `dsh-watch.jks` 备份到项目之外** ——
-> Android 要求同包名的更新必须使用同一套密钥，文件一旦丢失，
-> 就再也无法给已安装的用户推送更新（只能改包名重发，或者让用户卸载重装、数据全丢）。
-> 证书指纹与备份要求见 `dsh-watch-keystore/KEYSTORE-README.md`。
->
 > 没有 `keystore.properties` 时 release 仍可构建，只是产出未签名 APK。
+> 提交前可用 `git check-ignore -v dsh-watch.jks keystore.properties` 确认这两个文件确实被忽略。
 
 ---
 

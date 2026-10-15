@@ -165,9 +165,10 @@ Material 3 设计 · 深浅色主题 · Android 12+ 动态取色 · 中英双语
 
 - [ ] **发布用 release 包**（`DSH-Watch-v1.0-release.apk`），不要发 debug 包
       —— debug 包名带 `.debug`，体积 30MB，且调试开关是打开的
-- [x] **签名密钥已确定**：即项目自带的 `dsh-watch.jks`（别名 `dsh`，有效期至 2056-10）。
+- [x] **签名密钥已确定**：`dsh-watch.jks`（别名 `dsh`，有效期至 2056-10），
+      **保存在本地、不入仓库**（`.gitignore` 已排除 `*.jks` 与 `keystore.properties`）。
       发布前请确认它已备份到**项目之外**的地方 —— 密钥丢失后无法再给已安装用户推送更新。
-      证书指纹与备份要求见 `dsh-watch-keystore/KEYSTORE-README.md`
+      证书指纹见 README「3.4 正式签名」
 - [ ] 附上 SHA-256，方便用户校验
 - [ ] 准备 3–5 张截图（建议：对话页 / 工具卡片与产物 / 工作空间 / 设置 / 关于）
 - [ ] 在说明里写清「**首次使用需要自行配置 API Key**」，避免用户装完不知道下一步
