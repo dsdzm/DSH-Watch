@@ -77,6 +77,20 @@ class ToolContext(
     val todos: TodoBoard? = null,
     /** 需要界面才能完成的动作（打开页面、弹预览） */
     val uiActions: UiActionChannel? = null,
+    /**
+     * 读当前设置（本地执行开关、超时、云端编译配置等）。
+     *
+     * 用函数而不是值：设置在运行期间会被用户改（比如刚在设置页打开了本地执行），
+     * 而 [ToolContext] 是构造时快照的 —— 传值会让工具一直看到旧设置，
+     * 表现为"我明明打开了开关，模型还说没开"。
+     */
+    val settings: () -> com.dshwatch.domain.model.AppSettings = {
+        com.dshwatch.domain.model.AppSettings()
+    },
+    /** 云端编译的 run 记录（按会话分键）；lite 之外都可用 */
+    val cloudRuns: com.dshwatch.domain.agent.cloud.CloudRunStore? = null,
+    /** GitHub API 入口（token 由 AppContainer 从加密存储里取），未配置时为 null */
+    val github: com.dshwatch.domain.agent.cloud.GitHubApi? = null,
 ) {
     fun requireContext(): Context =
         appContext ?: error("该工具需要 Android Context，当前运行环境没有提供")
@@ -99,6 +113,11 @@ class ToolContext(
         alarms = alarms,
         todos = todos,
         uiActions = uiActions,
+        // 新字段必须在这里同步 —— 漏掉不会编译报错，但换会话后工具会静默看不到设置，
+        // 那种 bug 极难定位（ToolContextTest 专门钉住这一点）
+        settings = settings,
+        cloudRuns = cloudRuns,
+        github = github,
     )
 
     /** 模型给的路径 → 工作空间内的全局相对路径（落在本会话目录之下）。null = 路径非法 */

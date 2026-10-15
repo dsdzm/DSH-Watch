@@ -57,31 +57,37 @@ Kotlin + Jetpack Compose + **Material Design 3**，自带两套后端：**直连
 
 | 文件 | 大小 | 说明 |
 | --- | --- | --- |
-| `dist/DSH-Watch-v1.2-release.apk` | **5.0 MB** | 推荐。R8 混淆 + 资源压缩 + v1/v2/v3 全签名 |
-| `dist/DSH-Watch-v1.2-debug.apk` | 30 MB | 未压缩、包名带 `.debug`，可和正式版共存，用于排查问题 |
+| `dist/DSH-Watch-v1.3-lite-release.apk` | **6.3 MB** | 推荐（不含 Python）。R8 + 资源压缩 + v1/v2/v3 全签名 |
+| `dist/DSH-Watch-v1.3-full-release.apk` | **26.5 MB** | 含 Python 引擎（CPython 3.11），仅 arm64-v8a |
+| `dist/DSH-Watch-v1.3-lite-debug.apk` | 32 MB | 未压缩，包名带 `.debug`，可与正式版共存 |
+| `dist/DSH-Watch-v1.3-full-debug.apk` | 52 MB | 同上，含 Python（两个 ABI，便于模拟器调试） |
 | `dist/SHA256SUMS.txt` | — | 校验和 |
+
+lite 与 full **同一包名、同一签名**，可互相覆盖安装、数据不丢。
 
 安装（手表开 USB/Wi-Fi 调试后）：
 
 ```bash
-adb install -r dist/DSH-Watch-v1.2-release.apk
+adb install -r dist/DSH-Watch-v1.3-lite-release.apk
 ```
 
 没有 adb 的话，把 APK 传到手表上，用文件管理器点开安装（需允许「安装未知来源应用」）。
 
-**本次构建验证结果**（Android SDK Build-Tools 35.0.0 / AGP 8.7.3 / Gradle 8.11.1 / JDK 20）：
+**本次构建验证结果**（Android SDK Build-Tools 35.0.0 / AGP 8.7.3 / Gradle 8.11.1）：
 
 ```
-> Task :app:assembleDebug     BUILD SUCCESSFUL
-> Task :app:testDebugUnitTest BUILD SUCCESSFUL   （251 个测试全部通过）
-> Task :app:assembleRelease   BUILD SUCCESSFUL
+> Task :app:testDebugUnitTest  BUILD SUCCESSFUL   （352 个测试全部通过）
+> Task :app:assembleRelease                  (lite) BUILD SUCCESSFUL   6.3 MB
+> Task :app:assembleRelease -PwithPython     (full) BUILD SUCCESSFUL  26.5 MB
 
-package       com.dshwatch   v1.2 (versionCode 10)
+package       com.dshwatch   v1.3 (versionCode 11)
 minSdk        28   ← Android 9
 targetSdk     34
-签名          v1(JAR)=✓  v2=✓  v3=✓   签名者 CN=DSH Watch
-测试分布      ChatEngine 21 · 工作空间存储 25 · 源码校验 24 · 构建器 19
-              · 表达式求值 17 · 路径归一化 15 · 协议序列 10 · 工具表 9
+签名          v1(JAR)=✓  v2=✓  v3=✓   签名者 CN=DSH Watch（与 1.0/1.2 同一密钥）
+full 包内容    libpython3.11.so + Chaquopy 运行时（arm64-v8a）
+lite 包内容    无任何 libpython / chaquopy（已解包核对）
+测试分布      ChatEngine 21 · 工作空间存储 25 · 源码校验 24 · 构建器 19 · 执行引擎 53
+              · 路径归一化 15 · 表达式求值 17 · 协议序列 10 · 工具表 9 · 云端 31
               · 性能档 9 · Markdown 8 · SSE 6 · Token 估算 6 · 用量聚合 6
               · 工具名映射 4 · 线程上下文 3 · 产物透传 3 · 参数解析 9
 ```
@@ -111,6 +117,29 @@ cd dsh-watch
 # 产物
 # app/build/outputs/apk/debug/app-debug.apk
 ```
+
+#### 两种安装包：lite 与 full
+
+Python 引擎（CPython 约 20MB）是**可选**的，所以从构建入口分两个包：
+
+```bash
+# lite：不含 Python，约 7MB（shell + JS 执行仍可用）
+./gradlew :app:assembleRelease
+
+# full：含 Python 引擎，约 30MB（仅 arm64-v8a）
+./gradlew :app:assembleRelease -PwithPython=true
+```
+
+两个包**同一包名、同一签名**，可以互相覆盖安装，数据不丢。
+
+> 实现上为什么用 Gradle 属性而不是 product flavor：Chaquopy 是模块级插件，
+> 一旦 apply 就会给**所有变体**塞进 libpython，官方没有「某个变体不打包」的开关。
+> 所以改成按属性条件 apply 插件，并且**对 Chaquopy 的调用全走反射**
+> （见 `domain/agent/exec/ReflectionPythonEngine.kt`）——
+> 这样同一份 main 源码集在两种构建下都能编过，不需要维护两套源码目录。
+>
+> **首次构建 full 包时如果报「Could not find target-x.y.z-...zip」**：
+> 那是镜像对未缓存产物的首次请求失败（文件其实存在），加 `--refresh-dependencies` 重跑即可。
 
 安装到手表（手表需开启开发者模式 + USB/Wi-Fi 调试）：
 
@@ -1183,6 +1212,12 @@ id 前缀一次生成就再也不变。
 
 ### 18.1 「编译」在手表上的真实边界
 
+> **v1.3 补充**：本节写于 1.2 时期。1.3 之后边界变了 ——
+> **Python 可以在本机真的跑起来**（Chaquopy + CPython 3.11，仅 full 包），
+> 真正的编译（编 apk、gradle、gcc）交给云端 GitHub Actions。
+> 也就是说「本机只能静态校验」这条结论已经被后面的版本推翻了一半，详见第十九节。
+> 下面保留原文，是为了记录当时的判断依据。
+
 先把话说清楚：**这台设备上没有真正的编译器** —— 没有 CPython、没有 JDK、没有 Kotlin 编译器。
 不是「没接」，是物理上装不下：Kotlin 编译器光堆就要几百 MB，编译一个文件在手表 CPU 上要几分钟，
 而 APK 现在总共 5MB。任何声称「在手表上编译出可执行文件」的实现都是假的。
@@ -1293,7 +1328,7 @@ Python 缩进混了 tab 和空格、`if` 后面忘了冒号。这些**全都能�
 | --- | --- |
 | `Bash` / `LSP` / `NotebookEdit` / `EnterWorktree` | 手表上没有 shell、没有语言服务、没有 git 工作区 |
 | `Agent`（子智能体） | 一次子任务要额外一轮完整 API 调用，手表上等待时间与 token 成本都翻倍；同一件事用 `todo_write` + 多步循环更划算 |
-| `Skill`（内置技能） | 概念本身有价值，但它需要按任务裁剪工具集，与「技能包」的文件分发机制绑定；目前用 22→28 个工具 + 系统提示引导已经够，硬做反而是半成品 |
+| `Skill`（内置技能） | 概念本身有价值，但它需要按任务裁剪工具集，与「技能包」的文件分发机制绑定；目前用 22→31 个工具 + 系统提示引导已经够，硬做反而是半成品 |
 | `TaskCreate/TaskGet/TaskUpdate/TaskList`（四个工具） | 合成一个 `todo_write`：每次调用都要一次往返，而清单只有几行，细粒度操作不划算 |
 | `ImageGen` / `VideoGen` | 手表上没有意义（屏幕放不下，也没有消费场景） |
 | 表格处理（`sheetagent`） | 与 `build_project` 的能力重叠，且手表上编辑 Excel 不现实 |
@@ -1301,7 +1336,7 @@ Python 缩进混了 tab 和空格、`if` 后面忘了冒号。这些**全都能�
 | `library_search` / `LibraryUpload` / IMA / 腾讯文档 | 依赖外部账号与云端服务，与「直连自己的 API Key、数据不出设备」的定位冲突 |
 | `WebSearch` 之外的检索 | 已有 `web_search` + `http_fetch` 两个入口，够用 |
 
-### 18.4 现在的工具集（28 个）
+### 18.4 当时的工具集（28 个；1.3 之后是 31 个，见第十九节）
 
 | 类别 | 工具 |
 | --- | --- |
@@ -1312,6 +1347,8 @@ Python 缩进混了 tab 和空格、`if` 后面忘了冒号。这些**全都能�
 | 构建 | `build_project` |
 | 交互 | `ask_user` `todo_write` `open_file` `open_screen` |
 | 提醒日程 | `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
+
+> v1.3 新增 `run_script`（本机执行）、`cloud_build` / `cloud_job`（云端编译），共 31 个。
 
 28 个工具的函数声明大约占 3–4k token。这个开销是换来「模型知道该用什么」的代价，
 目前没有做裁剪 —— 如果实测发现某些供应商的上下文吃紧，
@@ -1328,3 +1365,130 @@ Python 缩进混了 tab 和空格、`if` 后面忘了冒号。这些**全都能�
   实体解码（`&amp;lt;` 只解一层）、nav/footer 可选用、大页面压缩比
 - `SessionScopeTest` 新增 3 个 —— Python 项目自动挑入口并报出「文件:行号」、
   校验通过时**不造假的产物**、Kotlin 源码同样被检查
+
+---
+
+## 十九、v1.3 —— 本机执行 + 云端编译
+
+1.2 之后最明显的缺口是：**模型写的代码验证不了结果对不对**。
+
+`build_project` 的静态检查能抓出括号不配平、缩进混用、漏冒号 —— 这类占了出错的大头，
+但它抓不出变量名打错、索引越界、逻辑写反、路径不对。用户的实际流程于是变成：
+让 AI 写 → 拷到电脑上跑 → 报错 → 回来描述给 AI → 来回几轮。
+每一轮都要重新贴代码、重建上下文。**在手表上跑一次比这个便宜一个数量级。**
+
+1.3 补上这一步，分两层：本机能跑的当场跑，本机跑不了的交给云端。
+
+### 19.1 本机执行（`run_script`）
+
+| 语言 | 引擎 | 能力 | 硬限制 |
+| --- | --- | --- | --- |
+| shell | 设备上真实的 `/system/bin/sh` | 管道、重定向、`grep`/`sed`/`awk` 全都能用 | 需要设备有这个二进制（会运行时探测） |
+| JavaScript | Rhino 1.9.1（纯 Java） | ES6 大部分语法 | **不支持 async/await**；无 DOM、无 `fetch` |
+| Python | CPython 3.11（Chaquopy，仅 full 包） | 真解释器，标准库可用 | 装不了第三方包 |
+
+三个引擎共用一套执行闸门与结果格式。
+
+**输出为什么保留「头 + 尾」而不是只留头**：一个脚本打印了两千行日志，
+最后三行才是 `Traceback`。只截头等于把最有用的信息扔掉。
+实现上是双缓冲（头一半、尾一半），内存占用恒定 —— 输出 100MB 也不会 OOM。
+
+**超时怎么做的（三种语言不一样）**：
+
+- shell：`destroyForcibly()`，干脆利落
+- JavaScript：Rhino 只有在**解释模式**（`optimizationLevel = -1`）下才会回调指令观察者，
+  观察者里抛异常才能真正打断 `while(true){}`。默认的编译模式跑字节码，观察者根本不触发 ——
+  那样超时是假的。单元测试专门钉住了这条：超时后必须断言**线程真的结束了**
+  （`stillRunning == false`），否则就是一个线程在后台空转烧 CPU，而用户只看到"超时了"。
+- Python：**Chaquopy 与 App 同进程，Kotlin 侧没有安全手段终止它**（官方文档明说）。
+  所以用两条兜底：Python 侧 `sys.settrace` 装死线守卫（能拦住纯 Python 死循环），
+  Kotlin 侧等不到就放弃等待并把结果标为「可能仍在后台运行」。
+  闸门会保持占用，设置页提供「强制释放」这个逃生口 —— 宁可挡住新任务，
+  也不让失控脚本叠加（那是手表上唯一能让用户开不了机的做法）。
+
+**输出重定向到文件而不是管道**，这里踩过两个坑：管道不持续排空会把子进程堵死在写操作上；
+超时杀掉 `sh` 之后，脚本起的子进程（`sleep 30` 之类）变成孤儿并继续持有写端，
+读线程会一直阻塞 —— 而且 JVM 在另一线程阻塞读时 `close()` 要等锁，救不回来。
+改成文件之后，孤儿进程爱跑多久跑多久，我们读完自己的文件就走。
+
+### 19.2 安全：默认关闭 + 每次确认
+
+这个工具的权限比其它所有工具加起来都大，所以：
+
+- **出厂关闭**，由用户在「设置 → 执行与编译」显式打开
+- `run_script` / `cloud_build` / `cloud_job` 走 `ALWAYS_CONFIRM_TOOLS`：
+  **无视「总是允许」和「全自动」**，每次都必须点确认。
+  点过一次"总是允许"就永久放行任意代码执行，风险不对等，所以这里刻意不给"记住"的机会。
+- 工作目录锁定在当前会话目录；环境变量**清空后重建**（只放 PATH/HOME/TMPDIR/LANG），
+  绝不注入任何凭据
+- 全局同时只允许一个脚本；输出有上限；超时强制结束
+
+需要说清楚的边界：shell 子进程与 App **同 UID**，能访问 App 私有目录 ——
+这是 Android 的现实，不是漏洞。它的边界是「拿不到其它应用的数据、没有 root」，
+而不是沙箱隔离。所以靠的是限制 + 显式确认，而不是隔离。
+
+### 19.3 云端编译（`cloud_build` / `cloud_job`）
+
+手表上没有 JDK、Android SDK、Kotlin 编译器，这些需求本地永远做不到。
+`cloud_build` 把它们交给用户自己的 GitHub 仓库（Actions）：
+
+```
+write_file 写源码 → cloud_build 触发 workflow → 轮询到结束
+  → 下载 artifact 解压到 artifacts/ → 返回结论 + 链接 + 日志尾部
+```
+
+配套 `cloud_job` 管后续：`status` 看步骤结论、`logs` 看日志尾部、`artifacts` 补下载、`cancel` 取消。
+
+**几个不得不这么写的地方**：
+
+- 只走 `api.github.com`：`github.com` 的网页端点在部分网络下不可达（`git push` 会直接失败），
+  而 API 一直可用
+- 触发接口返回两种形态：新版给 `workflow_run_id`，老版本是 `204` 无 body。
+  后者只能按「时间窗 + 分支 + event」去找运行 —— **不能用 run_number 猜**，
+  否则多会话同时触发会读到别人的日志
+- artifact 下载是 `302` 到 Azure 预签名地址，**那个地址 1 分钟过期**，拿到就立刻写盘
+- 日志可能几十 MB，只取尾部
+
+**模板**（`app/src/main/assets/cloud/`，设置页一键装进你的仓库）：
+
+| 模板 | 用途 |
+| --- | --- |
+| `dsh-run.yml` | 执行任意命令（`inputs.command`），产物从 `dsh-out/` 上传 |
+| `dsh-build.yml` | 构建本项目 APK（JDK 17 + Android SDK，支持 `with_python`） |
+
+命令经**环境变量**传给 `bash -c`，而不是直接插值进 `run:` ——
+后者会被 YAML 与 shell 的双重转义规则咬到，出错极难排查。
+
+**代价必须说清楚**：这条路会把源码发到你的仓库、跑在 GitHub 的机器上。
+所以它默认关闭、每次确认，用的必须是用户自己的仓库 ——
+「数据不出设备」是本 App 的**默认立场**，而不是全部立场；
+用户显式开启云端、并在确认框里看到目标仓库时，选择权在他手上。
+
+### 19.4 两种安装包
+
+| 包 | 体积 | Python | 说明 |
+| --- | --- | --- | --- |
+| lite | 约 7MB | ❌ | shell + JS 执行仍可用 |
+| full | 约 30MB | ✅ | 仅 arm64-v8a（libpython 是原生库） |
+
+同一包名、同一签名，可互相覆盖安装。
+lite 版里调 Python 不会假装成功，而是明确说「这个安装不含 Python 引擎，可装 full 版，或改用云端执行」。
+
+### 19.5 测试
+
+352 个（新增 101 个）：
+
+- `JsRunnerTest` 10 个 —— 含 `while(true){}` 超时、**超时后线程必须已结束**、
+  脚本自己 catch 异常也不能吞掉超时、对象 `print` 走 JSON
+- `ShellRunnerTest` 10 个 —— 真跑 `/bin/sh`：退出码、stderr 分离、
+  **环境变量被清空后只剩白名单**、大输出不卡死、超时被杀
+- `OutputFilesTest` 8 个 —— 大文件头尾读取、**UTF-8 随机偏移不产生乱码**
+  （随机 seek 必然落在汉字中间字节上）
+- `ExecTruncateTest` 9 个 —— 头尾保留、代理对不被切半、超限后继续消费
+- `GitHubApiTest` 13 个 —— 时间窗匹配 run（含时钟偏差容忍）、
+  跨分支不串、产物/步骤解析、日志尾部
+- `CloudRunStoreTest` 9 个 / `ScriptToolsTest` 12 个 / `CloudToolsTest` 9 个
+  —— 未开开关/未配仓库/未配令牌时的提示必须**包含下一步该做什么**
+- `PythonBridgeTest` 10 个 —— 解析跨语言返回的 JSON、lite 路径（类不存在）
+- `ExecGuardTest` 6 个 —— 并发闸门与强制释放
+- `ToolContextTest` 5 个 —— `withSession` 必须同步拷新字段（漏了不报错，只会静默看不到设置）

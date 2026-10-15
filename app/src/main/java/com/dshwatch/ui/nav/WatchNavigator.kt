@@ -20,6 +20,7 @@ sealed interface Screen {
     data object Workspace : Screen
     data class WorkspacePreview(val path: String) : Screen
     data class Input(val initial: String = "") : Screen
+    data object ExecSettings : Screen
 }
 
 /**
@@ -79,6 +80,7 @@ class WatchNavigator internal constructor(
             Screen.Diagnostics -> "diag"
             Screen.Workspace -> "ws"
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
+            Screen.ExecSettings -> "exec"
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
         }
@@ -95,6 +97,7 @@ class WatchNavigator internal constructor(
                 "about" -> Screen.About
                 "diag" -> Screen.Diagnostics
                 "ws" -> Screen.Workspace
+                "exec" -> Screen.ExecSettings
                 "wsp" -> Screen.WorkspacePreview(parts.getOrNull(1).orEmpty())
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())

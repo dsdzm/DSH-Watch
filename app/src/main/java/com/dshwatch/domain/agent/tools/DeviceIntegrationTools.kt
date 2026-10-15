@@ -105,10 +105,11 @@ object DeviceIntegrationTools {
         override val name = "open_screen"
         override val description =
             "打开 App 内的某个页面，把用户直接送到该去的地方。" +
-                "当你需要用户手动做某件事时（配置 API Key、查看用量、看工作空间产物、跑连接诊断），" +
-                "调用它，而不是只在回答里描述路径。" +
+                "当你需要用户手动做某件事时（配置 API Key、查看用量、看工作空间产物、跑连接诊断、" +
+                "开启本地执行或云端编译），调用它，而不是只在回答里描述路径。" +
                 "可用页面：settings（设置）、providers（供应商配置）、usage（用量统计）、" +
-                "workspace（工作空间文件）、sessions（历史会话）、diagnostics（连接诊断）、about（关于）。"
+                "workspace（工作空间文件）、sessions（历史会话）、diagnostics（连接诊断）、" +
+                "about（关于）、exec（执行与编译：本地脚本执行 / 云端编译的开关与配置）。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -145,12 +146,15 @@ object DeviceIntegrationTools {
                 "sessions", "session", "会话", "历史会话" -> UiActionChannel.SCREEN_SESSIONS
                 "diagnostics", "diagnostic", "诊断", "连接诊断" -> UiActionChannel.SCREEN_DIAGNOSTICS
                 "about", "关于" -> UiActionChannel.SCREEN_ABOUT
+                "exec", "execution", "执行", "本地执行", "云端编译", "执行与编译" ->
+                    UiActionChannel.SCREEN_EXEC
                 else -> null
             }
         }
 
         private fun label(screen: String) = when (screen) {
             UiActionChannel.SCREEN_SETTINGS -> "设置"
+            UiActionChannel.SCREEN_EXEC -> "执行与编译"
             UiActionChannel.SCREEN_PROVIDERS -> "供应商配置"
             UiActionChannel.SCREEN_USAGE -> "用量统计"
             UiActionChannel.SCREEN_WORKSPACE -> "工作空间"

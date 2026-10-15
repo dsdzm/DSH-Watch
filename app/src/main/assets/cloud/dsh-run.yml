@@ -1,0 +1,64 @@
+# DSH 通用云端执行模板
+#
+# 由手表端 App 的 cloud_build 工具触发（workflow_dispatch）。
+# 用途：在云端跑手表上跑不了的东西 —— 编译、跑测试、生成二进制。
+#
+# 约定：命令请把产物写到 dsh-out/ 目录，这个目录会被作为 artifact 上传，
+# 手表端会自动下载并解压到当前会话工作目录的 artifacts/ 下。
+
+name: DSH Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: '要执行的命令（产物请写到 dsh-out/ 目录）'
+        required: true
+        type: string
+      artifact_name:
+        description: '产物名称'
+        required: false
+        type: string
+        default: dsh-output
+      artifact_path:
+        description: '要上传的路径（glob，默认 dsh-out）'
+        required: false
+        type: string
+        default: dsh-out
+      retention_days:
+        description: '产物保留天数'
+        required: false
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 防跑飞：一个死循环命令不该占满整个账户的额度
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare output dir
+        run: mkdir -p dsh-out
+
+      - name: Execute
+        # 命令经环境变量传入再由 bash 执行：
+        # 直接插值进 run: 会被 YAML 与 shell 的双重转义规则咬到
+        # （引号、$、反引号都可能变形），这条路上出错极难排查。
+        env:
+          DSH_COMMAND: ${{ inputs.command }}
+        run: bash -c "$DSH_COMMAND"
+
+      - name: Upload artifacts
+        # always()：失败时也要把日志/中间产物留下，否则手表端只能看到"失败了"三个字
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.artifact_path }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.retention_days }}

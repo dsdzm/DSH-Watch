@@ -45,6 +45,23 @@
 -dontwarn com.google.crypto.tink.**
 -dontwarn com.google.errorprone.annotations.**
 
+# ---------- Rhino（本地 JS 执行）----------
+# Rhino 大量使用反射与运行时字节码生成（ClassFileWriter），混淆后会直接崩，
+# 且 debug 包不开 R8 测不出来 —— 必须在 release 上验证。
+-keep class org.mozilla.javascript.** { *; }
+-dontwarn org.mozilla.javascript.**
+# core 包里有引用了桌面 JDK 类型的可选分支，Android 上不存在，忽略即可
+-dontwarn java.beans.**
+-dontwarn java.awt.**
+-dontwarn javax.script.**
+-dontwarn org.mozilla.classfile.**
+
+# ---------- Chaquopy（仅 full 包含 Python 时存在）----------
+# 引擎通过反射调用（Class.forName / getMethod），类名是字符串字面量，
+# R8 看不到引用就会整包剥掉 —— 保留整个包。
+-keep class com.chaquo.python.** { *; }
+-dontwarn com.chaquo.python.**
+
 # ---------- 关闭日志（release 移除 android.util.Log）----------
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);

@@ -10,6 +10,10 @@ coroutines = "1.9.0"
 serialization = "1.7.3"
 datastore = "1.1.1"
 securityCrypto = "1.1.0-alpha06"
+# 本地脚本执行：JS 引擎（纯 Java，不引入原生库）
+rhino = "1.9.1"
+# 本地脚本执行：可选的 Python 引擎（MIT，仅 full 包打包）
+chaquopy = "17.1.0"
 junit = "4.13.2"
 truth = "1.4.4"
 
@@ -37,6 +41,10 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
+# 只引 core：rhino-engine / -tools / -xml 依赖 javax.script 与 java.awt，
+# Android 上没有，且 tools 里的 Global 能读写文件、起进程 —— 是安全隐患。
+rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
+
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 truth = { group = "com.google.truth", name = "truth", version.ref = "truth" }
 
@@ -45,3 +53,5 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+# 只在 -PwithPython=true 时 apply（见 app/build.gradle.kts）
+chaquopy-python = { id = "com.chaquo.python", version.ref = "chaquopy" }

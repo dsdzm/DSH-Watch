@@ -824,6 +824,7 @@ private fun ModelPickerDialog(
 private fun openScreen(nav: WatchNavigator, key: String) {
     val target = when (key) {
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_SETTINGS -> Screen.Settings
+        com.dshwatch.domain.agent.UiActionChannel.SCREEN_EXEC -> Screen.ExecSettings
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_PROVIDERS -> Screen.Providers
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_USAGE -> Screen.Usage
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_WORKSPACE -> Screen.Workspace

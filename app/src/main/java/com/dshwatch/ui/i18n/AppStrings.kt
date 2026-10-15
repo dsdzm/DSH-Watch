@@ -194,6 +194,31 @@ interface AppStrings {
     val clearUsage: String
     val clearUsageConfirm: String
 
+    // 执行与云端编译
+    val execSectionTitle: String
+    val execSectionDesc: String
+    val execScreenTitle: String
+    val execEnable: String
+    val execEnableDesc: String
+    val execTimeoutLabel: String
+    val execMaxOutputLabel: String
+    val execSecondsSuffix: String
+    val execForceRelease: String
+    val execForceReleaseDesc: String
+    val execPythonReady: String
+    val execPythonMissing: String
+    val execConfirmNotice: String
+    val cloudEnable: String
+    val cloudEnableDesc: String
+    val cloudRepoLabel: String
+    val cloudRepoHint: String
+    val cloudRefLabel: String
+    val cloudWorkflowLabel: String
+    val cloudTokenLabel: String
+    val cloudTokenHint: String
+    val cloudInstallTemplates: String
+    val cloudTestLabel: String
+
     // 关于
     val aboutTitle: String
     val version: String
@@ -609,9 +634,35 @@ object Zh : AppStrings {
         "Token 用量看板：按天 / 按模型统计，估算花费\n" +
         "手表适配：性能分档、大 R 角安全边距、流式节流"
 
+    // ---------------- 执行与云端编译 ----------------
+    override val execSectionTitle = "执行与编译"
+    override val execSectionDesc = "在设备上真的跑代码，或交给云端编译"
+    override val execScreenTitle = "执行与编译"
+    override val execEnable = "启用本地执行"
+    override val execEnableDesc = "允许 AI 在本机运行 shell / JS / Python 脚本"
+    override val execTimeoutLabel = "执行超时"
+    override val execMaxOutputLabel = "输出上限"
+    override val execSecondsSuffix = " 秒"
+    override val execForceRelease = "强制释放执行闸门"
+    override val execForceReleaseDesc = "上一次脚本卡住不动时用"
+    override val execPythonReady = "Python 引擎可用（full 版）"
+    override val execPythonMissing = "此安装不含 Python 引擎（lite 版）"
+    override val execConfirmNotice =
+        "本地执行权限很大：脚本能读写当前工作目录、能联网。" +
+            "开启后每次执行仍会单独确认一次，不会因为你点过「总是允许」就永久放行。"
+    override val cloudEnable = "启用云端编译"
+    override val cloudEnableDesc = "把手表做不了的事（编 apk、跑 gradle）交给 GitHub Actions"
+    override val cloudRepoLabel = "目标仓库"
+    override val cloudRepoHint = "owner/repo，例如 dsdzm/DSH-Watch"
+    override val cloudRefLabel = "分支"
+    override val cloudWorkflowLabel = "默认 workflow"
+    override val cloudTokenLabel = "GitHub 令牌"
+    override val cloudTokenHint = "需要 Actions 读写权限；只加密存在本机"
+    override val cloudInstallTemplates = "安装 workflow 模板到仓库"
+    override val cloudTestLabel = "测试连接"
+
     override fun toolTitle(tool: String): String = when (tool) {
-        "get_datetime" -> "查看时间"
-        "calculate" -> "计算"
+        "get_datetime" -> "查看时间"        "calculate" -> "计算"
         "get_device_info" -> "查看设备信息"
         "get_token_usage" -> "查询用量"
         "http_fetch" -> "联网获取"
@@ -638,6 +689,9 @@ object Zh : AppStrings {
         "get_clipboard" -> "读取剪贴板"
         "unit_convert" -> "单位换算"
         "web_search" -> "联网搜索"
+        "run_script" -> "运行脚本"
+        "cloud_build" -> "云端编译"
+        "cloud_job" -> "云端任务"
         else -> tool
     }
 }
@@ -933,6 +987,34 @@ object En : AppStrings {
         "Token dashboard: by day / by model, with estimated cost\n" +
         "Watch tuning: performance tiers, rounded-corner safe insets, stream throttling"
 
+    // ---------------- Execution & cloud build ----------------
+    override val execSectionTitle = "Run & build"
+    override val execSectionDesc = "Run code on the device, or compile it in the cloud"
+    override val execScreenTitle = "Run & build"
+    override val execEnable = "Enable on-device execution"
+    override val execEnableDesc = "Let the AI run shell / JS / Python scripts on this device"
+    override val execTimeoutLabel = "Timeout"
+    override val execMaxOutputLabel = "Output cap"
+    override val execSecondsSuffix = " s"
+    override val execForceRelease = "Force release the run gate"
+    override val execForceReleaseDesc = "Use when a previous script is stuck"
+    override val execPythonReady = "Python engine available (full build)"
+    override val execPythonMissing = "This build has no Python engine (lite)"
+    override val execConfirmNotice =
+        "On-device execution is powerful: scripts can read and write the current work " +
+            "directory and use the network. Even when enabled, every run asks for " +
+            "confirmation again — an \"always allow\" tap never unlocks it permanently."
+    override val cloudEnable = "Enable cloud build"
+    override val cloudEnableDesc = "Hand tasks a watch cannot do (APK, gradle) to GitHub Actions"
+    override val cloudRepoLabel = "Target repository"
+    override val cloudRepoHint = "owner/repo, e.g. dsdzm/DSH-Watch"
+    override val cloudRefLabel = "Branch"
+    override val cloudWorkflowLabel = "Default workflow"
+    override val cloudTokenLabel = "GitHub token"
+    override val cloudTokenHint = "Needs Actions read/write; stored encrypted on this device"
+    override val cloudInstallTemplates = "Install workflow templates into the repo"
+    override val cloudTestLabel = "Test connection"
+
     override fun toolTitle(tool: String): String = when (tool) {
         "get_datetime" -> "Check time"
         "calculate" -> "Calculate"
@@ -962,6 +1044,9 @@ object En : AppStrings {
         "get_clipboard" -> "Read clipboard"
         "unit_convert" -> "Convert units"
         "web_search" -> "Web search"
+        "run_script" -> "Run script"
+        "cloud_build" -> "Cloud build"
+        "cloud_job" -> "Cloud job"
         else -> tool
     }
 }

@@ -74,9 +74,17 @@ object ToolVisuals {
         "grep" -> Icons.Filled.LocationOn
 
         "build_project" -> Icons.Filled.PlayArrow
+
+        // 执行与云端
+        "run_script" -> Icons.Filled.PlayArrow
+        "cloud_build" -> Icons.Filled.Share
+        "cloud_job" -> Icons.Filled.Info
+
         else -> Icons.Filled.Build
     }
 
     /** 会产出文件、值得渲染「产物卡片」的工具 */
-    fun producesArtifact(tool: String): Boolean = tool == "build_project"
+    fun producesArtifact(tool: String): Boolean =
+        tool == "build_project" || tool == "cloud_build" || tool == "cloud_job" ||
+            tool == "run_script"
 }

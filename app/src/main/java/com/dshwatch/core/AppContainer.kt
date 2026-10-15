@@ -82,6 +82,18 @@ class AppContainer(private val app: Context) {
     /** 需要界面才能完成的动作（打开页面 / 弹预览），由聊天页在进入时注册 */
     val uiActions = com.dshwatch.domain.agent.UiActionChannel()
 
+    /** 云端编译的 run 记录（按会话分键） */
+    val cloudRunStore = com.dshwatch.domain.agent.cloud.CloudRunStore(
+        File(app.filesDir, "cloud"),
+        json,
+    )
+
+    /**
+     * GitHub 通道。
+     * token 用 lambda 现取：用户在设置里刚填完就要能用，不能在构造时快照成 null。
+     */
+    val githubApi = com.dshwatch.domain.agent.cloud.GitHubApi { keyStore.getGithubToken() }
+
     /** agent 工具集；ToolContext 通过 lambda 拿实时设备画像 */
     private val _toolRegistry = MutableStateFlow(
         ToolRegistry(
@@ -96,6 +108,9 @@ class AppContainer(private val app: Context) {
                 alarms = alarmStore,
                 todos = todoBoard,
                 uiActions = uiActions,
+                settings = { settings.value },
+                cloudRuns = cloudRunStore,
+                github = githubApi,
             )
         )
     )

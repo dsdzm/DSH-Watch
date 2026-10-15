@@ -18,6 +18,19 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.3",
+            date = "2026-10-15",
+            highlights = listOf(
+                "新增「运行脚本」：在手表上真的执行 shell / JavaScript / Python，" +
+                    "拿到真实的输出和报错（默认关闭，且每次执行都会单独确认）",
+                "新增「云端编译」：把手表做不到的事（编 apk、跑 gradle、用 gcc）交给 " +
+                    "GitHub Actions，产物自动下载回工作空间",
+                "两种安装包：lite（约 7MB）与 full（含 Python 引擎，约 30MB），按需选择",
+                "开箱自带两个云端模板，在设置页一键装进你自己的仓库",
+                "「校验通过」不再等于「跑得起来」：写完代码可以直接验证结果对不对",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.2",
             date = "2026-10-14",
             highlights = listOf(

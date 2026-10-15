@@ -14,6 +14,7 @@ import com.dshwatch.ui.screens.pair.PairScreen
 import com.dshwatch.ui.screens.provider.ProviderEditScreen
 import com.dshwatch.ui.screens.provider.ProvidersScreen
 import com.dshwatch.ui.screens.sessions.SessionsScreen
+import com.dshwatch.ui.screens.settings.ExecSettingsScreen
 import com.dshwatch.ui.screens.settings.SettingsScreen
 import com.dshwatch.ui.screens.usage.UsageScreen
 import com.dshwatch.ui.screens.workspace.WorkspacePreviewScreen
@@ -40,6 +41,11 @@ fun AppRoot(
         Screen.About -> AboutScreen(container = container, nav = nav)
         Screen.Diagnostics -> DiagnosticsScreen(container = container, settings = settings, nav = nav)
         Screen.Workspace -> WorkspaceScreen(container = container, nav = nav)
+        Screen.ExecSettings -> ExecSettingsScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
         is Screen.WorkspacePreview -> WorkspacePreviewScreen(
             container = container,
             path = screen.path,

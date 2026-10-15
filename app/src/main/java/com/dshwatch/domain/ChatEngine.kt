@@ -864,6 +864,11 @@ class ChatEngine(
     }
 
     private fun needsApproval(settings: AppSettings, tool: AgentTool): Boolean {
+        // 危险工具：**无视「总是允许」和「全自动」**，每次都要用户点确认。
+        // 这几个工具能执行任意代码、能把代码发到外部、能动别人的仓库 ——
+        // 用户点过一次"总是允许"就永久放行，风险不对等。
+        if (tool.name in ALWAYS_CONFIRM_TOOLS) return true
+
         if (tool.name in settings.autoApprovedTools) return false
         return when (settings.agentMode) {
             AgentMode.OFF, AgentMode.AUTO_ALL -> false
@@ -1003,11 +1008,29 @@ class ChatEngine(
             【写完代码必须校验】
             写完代码后调一次 build_project。它会按语言做静态检查（括号与字符串闭合、
             Python 缩进与冒号、HTML/XML 标签配对、JSON/YAML 语法等）并给出「文件:行号」。
-            手表上装不下 Python/Kotlin 的编译器，这是你**在本机验证代码的唯一手段** ——
-            不要写完就直接交付。有报错就改完再调一次，直到通过。
+            这是你**在本机验证代码最快的手段**，不要写完就直接交付。
+            有报错就改完再调一次，直到通过。
+
+            【校验通过 ≠ 真的能跑，要跑就用 run_script】
+            静态检查抓不出「变量名打错、索引越界、逻辑写反、路径不对」这类问题，
+            只有执行才暴露。要验证结果对不对，用 run_script 真的跑一遍：
+            - language=shell：设备上真实的 sh，可以 `python main.py`、`ls`、`grep` 等；
+            - language=js：JavaScript（ES6，**不支持 async/await**，无 DOM/fetch）；
+            - language=python：真 CPython（仅标准库；lite 版会明确告知不可用）。
+            跑之前先想清楚脚本会输出什么，一次跑对；不要靠反复试错烧用户的时间。
+            跑输出的内容会截断保留头尾，别指望它替你打印整个大文件。
+
+            【本机真做不了的，交给云端 cloud_build】
+            手表上没有 JDK/Kotlin 编译器/Android SDK，编 apk、跑 gradle、用 gcc 这类需求
+            本地永远做不到。这时用 cloud_build 走云端 GitHub Actions：
+            先用 write_file 把源码写进工作目录，再用 inputs.command 传命令
+            （模板 dsh-run.yml 接收 command；构建本项目 APK 用 dsh-build.yml）。
+            它会等待结束并把产物下载回 `artifacts/` 目录。
+            注意两点：① 代码会离开设备发到用户自己的仓库，所以每次都会请用户确认；
+            ② 云端跑一次要几分钟，**不要重复触发**，要看进度用 cloud_job。
 
             【需要用户操作时，直接送他过去】
-            要用户手动做某件事（配置 API Key、看产物、设日程）时，用 open_screen / open_file /
+            要用户手动做某件事（配置 API Key、开本地执行、看产物、设日程）时，用 open_screen / open_file /
             create_event 把界面打开，而不是只在回答里描述路径 —— 手表屏幕上找菜单很费劲。
             """ + workspaceHint(workDir)
         } else {
@@ -1106,6 +1129,15 @@ class ChatEngine(
     data class Banner(val text: String)
 
     companion object {
+
+        /**
+         * 每次都必须确认的工具。
+         *
+         * 这几个的后果不是"改错一个文件"级别的：
+         * 执行任意代码（run_script）、把源码发到外部并消耗额度（cloud_build / cloud_job）。
+         * 用户点过一次「总是允许」就永久放行，风险不对等 —— 所以这里刻意不给"记住"的机会。
+         */
+        val ALWAYS_CONFIRM_TOOLS = setOf("run_script", "cloud_build", "cloud_job")
         private const val TAG = "ChatEngine"
 
         /** 等用户回答 ask_user 的最长时间；超时后交给模型自行收尾 */

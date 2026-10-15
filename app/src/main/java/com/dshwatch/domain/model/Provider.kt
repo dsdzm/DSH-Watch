@@ -156,6 +156,34 @@ data class AppSettings(
      * 这是 agent「在手表上产出东西」之后最需要的一步。设备没有外部私有目录时自动回退内部。
      */
     val workspaceLocation: WorkspaceLocation = WorkspaceLocation.EXTERNAL,
+
+    // ---------------- 本地脚本执行 ----------------
+    /**
+     * 总开关，**出厂关闭**。
+     *
+     * 这个工具能执行任意代码，权限比其它所有工具加起来都大，
+     * 所以默认状态必须是"没打开"，由用户自己决定要不要给。
+     * 即使打开了，`run_script` 仍然每次都弹确认（见 ChatEngine.ALWAYS_CONFIRM_TOOLS）。
+     */
+    val localExecEnabled: Boolean = false,
+    val allowShell: Boolean = true,
+    val allowJs: Boolean = true,
+    val allowPython: Boolean = true,
+    /** 单次脚本执行的超时（秒）。手表 CPU 慢，超过这个时间基本就是写错了 */
+    val execTimeoutSec: Int = 20,
+    /** 单条输出流保留的字符数（头尾各一半） */
+    val execMaxOutputChars: Int = 20_000,
+
+    // ---------------- 云端编译（GitHub Actions）----------------
+    /** 同样出厂关闭：它会把代码发到外部 */
+    val cloudBuildEnabled: Boolean = false,
+    /** 目标仓库，形如 owner/repo */
+    val cloudRepo: String = "",
+    val cloudRef: String = "main",
+    /** 默认使用的 workflow 文件名 */
+    val cloudWorkflowFile: String = "dsh-run.yml",
+    /** 等待云端运行结束的上限（秒）。Actions 排队 + 构建经常要几分钟 */
+    val cloudPollTimeoutSec: Int = 900,
 ) {
     val activeProvider: Provider? get() = providers.firstOrNull { it.id == activeProviderId }
         ?: providers.firstOrNull()

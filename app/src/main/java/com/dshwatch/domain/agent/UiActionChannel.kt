@@ -28,10 +28,11 @@ class UiActionChannel {
         const val SCREEN_SESSIONS = "sessions"
         const val SCREEN_DIAGNOSTICS = "diagnostics"
         const val SCREEN_ABOUT = "about"
+        const val SCREEN_EXEC = "exec"
 
         val allScreens = listOf(
             SCREEN_SETTINGS, SCREEN_PROVIDERS, SCREEN_USAGE,
-            SCREEN_WORKSPACE, SCREEN_SESSIONS, SCREEN_DIAGNOSTICS, SCREEN_ABOUT,
+            SCREEN_WORKSPACE, SCREEN_SESSIONS, SCREEN_DIAGNOSTICS, SCREEN_ABOUT, SCREEN_EXEC,
         )
     }
 }

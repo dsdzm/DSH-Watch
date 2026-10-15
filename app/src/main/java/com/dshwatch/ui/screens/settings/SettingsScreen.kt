@@ -116,6 +116,21 @@ fun SettingsScreen(
                     trailing = "›",
                     onClick = { nav.push(Screen.Diagnostics) },
                 )
+                SettingRow(
+                    title = s.execSectionTitle,
+                    subtitle = if (settings.localExecEnabled || settings.cloudBuildEnabled) {
+                        "已开启：" +
+                            listOfNotNull(
+                                "本地执行".takeIf { settings.localExecEnabled },
+                                "云端编译".takeIf { settings.cloudBuildEnabled },
+                            ).joinToString("、")
+                    } else {
+                        s.execSectionDesc
+                    },
+                    trailing = "›",
+                    showDivider = false,
+                    onClick = { nav.push(Screen.ExecSettings) },
+                )
             }
 
             // ---------------- 外观 ----------------

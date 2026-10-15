@@ -83,6 +83,16 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
 
     fun putPairingCode(providerId: String, value: String?) = put(k(providerId, FIELD_PAIRING), value)
 
+    /**
+     * 云端编译用的 GitHub 令牌。
+     *
+     * 不挂在某个 provider 下面（它不属于任何模型供应商），用一个合成的 id 复用同一套加密存储。
+     * 与 API Key 一样：只加密存在本机，不进日志、不进仓库、不给脚本。
+     */
+    fun getGithubToken(): String? = get(k(CLOUD_SCOPE, FIELD_GITHUB_TOKEN))
+
+    fun putGithubToken(value: String?) = put(k(CLOUD_SCOPE, FIELD_GITHUB_TOKEN), value)
+
     fun clear(providerId: String) {
         runCatching {
             prefs.edit()
@@ -93,6 +103,16 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         }.onFailure { t ->
             lastError = "清除凭据失败：${t.javaClass.simpleName}"
             Logx.e(TAG, "清除凭据失败", t)
+        }
+    }
+
+    /** 清除云端编译的令牌（用户在设置里撤销时调用） */
+    fun clearGithubToken() {
+        runCatching {
+            prefs.edit().remove(k(CLOUD_SCOPE, FIELD_GITHUB_TOKEN)).apply()
+        }.onFailure { t ->
+            lastError = "清除 GitHub 令牌失败：${t.javaClass.simpleName}"
+            Logx.e(TAG, "清除 GitHub 令牌失败", t)
         }
     }
 
@@ -143,6 +163,10 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         private const val FIELD_API_KEY = "apiKey"
         private const val FIELD_TOKEN = "token"
         private const val FIELD_PAIRING = "pairing"
+
+        /** GitHub 令牌不属于任何 provider，用一个合成作用域复用同一套存储 */
+        private const val CLOUD_SCOPE = "cloud"
+        private const val FIELD_GITHUB_TOKEN = "githubToken"
         private const val PROBE_KEY = "__probe__"
     }
 }

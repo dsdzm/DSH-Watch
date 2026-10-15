@@ -34,11 +34,13 @@ import kotlin.math.roundToInt
 /**
  * 内置工具集。
  *
- * 选型原则：手表上没有 shell、没有外部存储、也没有编译器，
- * 所以拆成两半 ——
+ * 选型原则：手表上**没有外部存储、也没有本机编译器**，所以拆成三半 ——
  *  - 信息类：查时间、算数、看设备/用量、抓一个 API、定闹钟；
  *  - 产出类：见 [WorkspaceTools]，在**应用私有的工作空间目录**里建文件、
- *    再交给 ProjectBuilder 校验打包成可预览的单文件 HTML。
+ *    再交给 ProjectBuilder 校验打包成可预览的单文件 HTML；
+ *  - 执行类：见 [ScriptTools] 与 [CloudTools]。前者用设备上真实的 sh / JS / Python
+ *    把代码跑起来（可选、默认关闭、每次确认）；后者把编译交给云端 GitHub Actions，
+ *    这样 Kotlin、APK 这类本机根本做不了的事情也能做。
  *
  * 刻意**不做剪贴板工具**：把文本丢进剪贴板对用户来说是"东西又没了"，
  * 而工作空间里的文件是留在设备上、可读可改可预览的真产物。
@@ -52,7 +54,8 @@ object BuiltinTools {
         UsageTool,
         HttpFetchTool,
         SetAlarmTool,
-    ) + WorkspaceTools.all() + SystemTools.all() + TodoTools.all() + DeviceIntegrationTools.all()
+    ) + WorkspaceTools.all() + SystemTools.all() + TodoTools.all() + DeviceIntegrationTools.all() +
+        ScriptTools.all() + CloudTools.all()
 
     // ------------------------------------------------------------------
     // 1. 时间
