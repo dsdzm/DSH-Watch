@@ -1,6 +1,7 @@
 package com.dshwatch.domain.agent.exec
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 
 /**
@@ -92,5 +93,24 @@ class PythonBridgeTest {
         val out = PythonBridge.parseResult("""{"exit":0,"stdout":""")
         assertThat(out.ok).isFalse()
         assertThat(out.stderr).isNotEmpty()
+    }
+
+    @Test
+    fun `args are sent as json not as a java collection`() {
+        // 真机事故：把 ArrayList 直接传给 Chaquopy，Python 侧 `for a in args` 报
+        // TypeError: 'ArrayList' object is not iterable —— 空列表也一样炸，
+        // 于是 Python 执行 100% 失败。跨语言边界只传字符串。
+        assertThat(PythonBridge.argsJson(emptyList())).isEqualTo("[]")
+        assertThat(PythonBridge.argsJson(listOf("a", "b"))).isEqualTo("""["a","b"]""")
+    }
+
+    @Test
+    fun `args json escapes awkward characters`() {
+        val json = PythonBridge.argsJson(listOf("he said \"hi\"", "line1\nline2", "中文"))
+        // 必须仍是合法 JSON，且能被解析回原样（脚本参数里带引号/换行很常见）
+        val parsed = kotlinx.serialization.json.Json.parseToJsonElement(json)
+        val values = (parsed as kotlinx.serialization.json.JsonArray)
+            .map { it.jsonPrimitive.content }
+        assertThat(values).containsExactly("he said \"hi\"", "line1\nline2", "中文").inOrder()
     }
 }

@@ -38,6 +38,17 @@
 - 系统提示补充执行与云端的使用约定（含「本地 JS 不支持 async/await」「代码会离开设备」）
 - `open_screen` 新增 `exec` 页面，模型可直接把用户送到执行设置页
 
+### 修复（真机反馈）
+
+- **Python 执行完全不可用**：参数以 `ArrayList` 传给 Chaquopy，Python 侧不可迭代
+  （`TypeError: 'ArrayList' object is not iterable`，空参数也一样）→ 改为传 JSON 字符串
+- **Python 超时从未生效**：`sys.settrace` 抛出的异常会被 CPython 吞掉并关闭追踪，
+  `while True: pass` 会一直跑 → 改为独立线程 + `PyThreadState_SetAsyncExc` 中断，实测 2.3 秒稳定停下
+- **`sh: python: not found` 无处可去**：现在会自动识别缺失的命令并给出下一步
+  （python → `language=python`；node → `language=js`；gcc/gradle 等 → `cloud_build`）
+- 执行临时目录 `.dsh-run` 不再出现在 `list_files` 结果里
+- 新增 `tools/check_python_harness.py`：本机验收 Python 执行器（11 项）
+
 ---
 
 ## [1.2] — 2026-10-14（versionCode 10）

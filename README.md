@@ -1492,3 +1492,56 @@ lite 版里调 Python 不会假装成功，而是明确说「这个安装不含 
 - `PythonBridgeTest` 10 个 —— 解析跨语言返回的 JSON、lite 路径（类不存在）
 - `ExecGuardTest` 6 个 —— 并发闸门与强制释放
 - `ToolContextTest` 5 个 —— `withSession` 必须同步拷新字段（漏了不报错，只会静默看不到设置）
+
+### 19.6 真机反馈修掉的两个问题（v1.3 发布后当天）
+
+v1.3 的 APK 发出去当天，真机一跑就暴露了两个问题。两个都只有真机能抓到，
+也都值得写下来 —— 它们的共同点是**单元测试天然覆盖不到**。
+
+**① Python 执行 100% 失败：`TypeError: 'ArrayList' object is not iterable`**
+
+Kotlin 侧把参数用 `ArrayList<String>` 传给 Chaquopy，而 Chaquopy 把 Java 集合当
+**对象**交给 Python，它不是 Python 的 `list`，`for a in args` 直接报错。
+更阴的是：**空参数列表也一样炸** —— Python 里任意对象都判真，`args or []` 拿到的还是那个对象。
+所以不是"某些情况失败"，而是从来没成功过（真机日志里 `用时 3 ms` 就是这个原因）。
+
+改法：参数编成 **JSON 字符串**再传，Python 侧 `json.loads` 解回来。
+跨语言边界只传字符串 —— 这是这个项目里反复验证过的做法（返回值本来就是这个思路）。
+回归测试钉在 `PythonBridgeTest.argsJson()`。
+
+**② `sh: python: not found`（退出码 127）**
+
+模型很容易假设 shell 里能调 `python main.py` / `node app.js`，
+但**手表上没有系统级运行时** —— Python 与 JS 是另外两条执行路径（跑在 App 进程内），
+三者不能互相调用。这不是 bug，但如果不提示，模型会反复重试同一个死路，
+甚至开始怀疑自己的代码写错了。
+
+改法分两处：
+- **系统提示 + 工具描述**里明写「shell 里没有 python / node / java / gcc」
+- **失败结果里自动追加可执行的下一步**：认出 stderr 里"哪个命令不存在"，
+  按名字给建议（python → 用 language=python；node → 用 language=js；
+  gcc/kotlinc/gradle → 用 cloud_build）。测试样本直接抄自真机日志。
+
+**③ 顺带修掉的两个隐患**
+
+- **Python 超时其实从来没生效过**：原实现用 `sys.settrace` 装死线守卫、从 trace 函数里
+  抛异常，而 **CPython 会吞掉 trace 函数里的异常并关闭追踪** ——
+  `while True: pass` 会一直跑下去（本机复现过）。现在改成用户代码跑在独立线程、
+  超时用 `PyThreadState_SetAsyncExc` 扔一个 `BaseException` 派生类进去，
+  实测 2.3 秒稳定中断，且 `try/except Exception` 吞不掉它。
+  仍然拦不住阻塞在 C 扩展里的代码 —— 那种情况如实标注 `still_running`。
+- **执行临时目录 `.dsh-run` 会出现在 `list_files` 里**：它是实现细节，
+  摆给模型看只浪费上下文。已在 `WorkspaceStore.list()` 里过滤隐藏项
+  （与 `listFilesRecursive` 原有行为对齐）。
+
+### 19.7 执行器怎么在本机验收
+
+`app/src/main/python/dsh_runner.py` 的关键行为（跨语言传参、超时打断、输出截断）
+**单元测试覆盖不到** —— 它得在真 Python 里跑。为此有一个不依赖 Android 的验收脚本：
+
+```bash
+python3 tools/check_python_harness.py
+```
+
+11 项检查，覆盖上面两个真机故障点 + 输出截断 + cwd + 文件写入 + 超时后状态复原。
+改完 `dsh_runner.py` 先跑它，比等真机反馈快得多。

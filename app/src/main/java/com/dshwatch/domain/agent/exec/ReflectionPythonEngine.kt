@@ -121,7 +121,8 @@ class ReflectionPythonEngine(private val appContext: Context?) : PythonEngine {
                     workDir.absolutePath,
                     limits.timeoutMs / 1000.0,
                     limits.maxChars,
-                    ArrayList(args),
+                    // 传 JSON 字符串而不是 ArrayList：见 PythonBridge.argsJson 的说明
+                    PythonBridge.argsJson(args),
                 ),
             )?.toString().orEmpty()
 

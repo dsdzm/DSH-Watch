@@ -1,7 +1,9 @@
 package com.dshwatch.domain.agent.exec
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -64,6 +66,17 @@ object PythonBridge {
      * 纯探测，不依赖 Android —— 单测里天然返回 false，正好覆盖 lite 路径。
      */
     fun classPresent(): Boolean = runCatching { Class.forName(PYTHON_CLASS) }.isSuccess
+
+    /**
+     * 把参数列表编成 JSON 字符串。
+     *
+     * 为什么不用 Java List 直接传：Chaquopy 把 Java 集合当**对象**交给 Python，
+     * 它不是 Python 的 list，`for a in args` 会报 `TypeError: 'ArrayList' object is not iterable`
+     * —— 而且空列表同样会炸（Python 里任意对象都判真，`args or []` 拿到的还是那个对象）。
+     * 跨语言边界只传字符串，是这个项目里反复验证过的做法。
+     */
+    fun argsJson(args: List<String>): String =
+        buildJsonArray { args.forEach { add(it) } }.toString()
 
     /**
      * 解析 Python 执行器返回的 JSON。

@@ -181,6 +181,79 @@ class ScriptToolsTest {
         assertThat(summary).contains("js")
         assertThat(summary).contains("3")
     }
+
+    // ------------------------------------------------------------------
+    // 「命令找不到」的引导
+    // 下面三条 stderr 都是从真机日志里抄来的原样文本。
+    // ------------------------------------------------------------------
+
+    private fun shellFailure(stderr: String, exitCode: Int = 127) =
+        com.dshwatch.domain.agent.exec.ExecOutput(exitCode = exitCode, stdout = "", stderr = stderr)
+
+    @Test
+    fun `python not found in shell points at language=python`() {
+        // 真机原样：/storage/.../run-12105891902032.sh[4]: python: not found
+        val out = shellFailure("/x/.dsh-run/run-12105891902032.sh[4]: python: not found")
+        val hint = ScriptTools.interpreterHint("shell", out)
+        assertThat(hint).contains("language 改成 python")
+    }
+
+    @Test
+    fun `python3 not found also points at language=python`() {
+        val hint = ScriptTools.interpreterHint(
+            "shell",
+            shellFailure("/x/run-12099304217229.sh[4]: python3: not found"),
+        )
+        assertThat(hint).contains("language 改成 python")
+    }
+
+    @Test
+    fun `node not found points at language=js`() {
+        val hint = ScriptTools.interpreterHint("shell", shellFailure("/x/run.sh[2]: node: not found"))
+        assertThat(hint).contains("language 改成 js")
+    }
+
+    @Test
+    fun `compiler not found points at cloud build`() {
+        val hint = ScriptTools.interpreterHint("shell", shellFailure("/x/run.sh[1]: gcc: not found"))
+        assertThat(hint).contains("cloud_build")
+    }
+
+    @Test
+    fun `unknown missing command still gets a useful answer`() {
+        val hint = ScriptTools.interpreterHint("shell", shellFailure("/x/run.sh[1]: figlet: not found"))
+        assertThat(hint).contains("figlet")
+        assertThat(hint).contains("cloud_build")
+    }
+
+    @Test
+    fun `no hint when the command actually worked`() {
+        val ok = com.dshwatch.domain.agent.exec.ExecOutput(exitCode = 0, stdout = "hi", stderr = "")
+        assertThat(ScriptTools.interpreterHint("shell", ok)).isEmpty()
+    }
+
+    @Test
+    fun `no hint for a normal script failure`() {
+        // 脚本自己逻辑错了（比如 test 失败）不该被误判成"命令不存在"
+        val out = shellFailure("assertion failed: expected 3 got 4", exitCode = 1)
+        assertThat(ScriptTools.interpreterHint("shell", out)).isEmpty()
+    }
+
+    @Test
+    fun `hint is only added for shell`() {
+        val out = shellFailure("python: not found")
+        assertThat(ScriptTools.interpreterHint("python", out)).isEmpty()
+    }
+
+    @Test
+    fun `failure text from the real device log gets the hint appended`() {
+        val text = ScriptTools.formatExecOutput(
+            "shell",
+            shellFailure("/x/.dsh-run/run.sh[4]: python: not found"),
+        )
+        assertThat(text).contains("python: not found")
+        assertThat(text).contains("language 改成 python")
+    }
 }
 
 /**

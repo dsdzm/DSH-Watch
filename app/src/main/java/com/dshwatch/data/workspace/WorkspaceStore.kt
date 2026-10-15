@@ -67,6 +67,10 @@ class WorkspaceStore(
             val target = resolve(dir) ?: return@withLock emptyList()
             if (!target.isDirectory) return@withLock emptyList()
             target.listFiles()
+                // 隐藏项不进列表：`.dsh-run`（脚本执行的临时目录）是我们的实现细节，
+                // 摆给模型看只会浪费上下文，还容易被当项目文件。
+                // 与 listFilesRecursive 的 onEnter 保持一致的行为。
+                ?.filter { !it.name.startsWith(".") }
                 ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
                 ?.map { it.toEntry() }
                 ?: emptyList()

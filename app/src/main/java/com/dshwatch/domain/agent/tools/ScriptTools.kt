@@ -73,11 +73,15 @@ object ScriptTools {
         override val name = "run_script"
         override val description =
             "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。三种语言：" +
-                "- language=shell：设备上真实的 sh，管道、重定向、grep/sed 都能用；" +
+                "- language=shell：设备上真实的 sh，管道、重定向、grep/sed/awk 都能用；" +
                 "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）；" +
                 "- language=python：真 CPython，仅标准库（full 版才有；lite 版会明确告诉你不可用）。" +
+                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
+                "三种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
+                "要跑 Python 就用 language=python，要跑 JS 就用 language=js。" +
                 "什么时候用：写完代码想验证**真的能跑通、结果对不对**时用。" +
                 "只想快速查语法错误用 build_project（更快、零风险）。" +
+                "需要「编译出东西」（apk、gcc、gradle）用 cloud_build —— 那些本机做不到。" +
                 "执行结果包含退出码、stdout、stderr；写文件请写到当前工作目录（相对路径即可）。" +
                 "注意：每次执行都会请用户确认（这是不可关闭的一道确认）。" +
                 "脚本能读写工作目录、能发起网络请求；但没有 root、访问不到其它应用的数据。"
@@ -275,7 +279,52 @@ object ScriptTools {
             append("\n").append(out.note).append('\n')
         }
         if (language == "js" && !out.ok && out.stderr.contains("async")) {
-            append("\n提示：本地 JS 引擎不支持 async/await，请改写为同步写法或改用 shell + node。\n")
+            append("\n提示：本地 JS 引擎不支持 async/await，请改写为同步写法" +
+                "（这台设备上没有 node，shell 里也没有，所以只能改写）。\n")
         }
+        val hint = interpreterHint(language, out)
+        if (hint.isNotBlank()) append('\n').append(hint).append('\n')
+    }
+
+    /**
+     * `sh: python: not found` 这类失败要翻译成"下一步该怎么做"。
+     *
+     * 这不是锦上添花：模型非常容易假设 shell 里能调 `python main.py` / `node app.js`，
+     * 而**这台设备上根本没有这些系统级运行时** —— Python 和 JS 是另一种执行路径
+     * （跑在 App 进程内），两者不能互相调用。
+     * 不提示的话，模型往往会反复重试同一个死路，或者改去怀疑自己的代码写错了。
+     */
+    internal fun interpreterHint(language: String, out: ExecOutput): String {
+        if (language != "shell" || out.ok) return ""
+        val missing = missingCommand(out.stderr) ?: return ""
+        return when (missing) {
+            "python", "python3", "py", "pip", "pip3" ->
+                "提示：shell 里没有 python —— 手表上没有系统级 Python。" +
+                    "要跑 Python 请把 language 改成 python（需要 full 版 APK；" +
+                    "那条路径能拿到完整的 stdout/stderr，也不受 shell 限制）。"
+            "node", "nodejs", "npm", "npx", "deno", "bun" ->
+                "提示：shell 里没有 node —— 要跑 JavaScript 请把 language 改成 js。"
+            "java", "javac", "kotlinc", "gradle", "gcc", "g++", "clang", "go", "cargo", "rustc", "dotnet", "mvn" ->
+                "提示：shell 里没有 $missing —— 手表上没有这些编译器/工具链。" +
+                    "这类「真的编译出东西」的需求请用 cloud_build 交给云端（GitHub Actions）。"
+            else ->
+                "提示：shell 里没有 $missing。可用的是设备自带的 sh 与常见的 toybox 命令" +
+                    "（ls/cat/grep/sed/awk/echo 等）；其它运行时请换 language，或改用 cloud_build。"
+        }
+    }
+
+    /** 从 shell 的报错里认出「哪个命令不存在」。认不出就返回 null，不硬猜 */
+    private fun missingCommand(stderr: String): String? {
+        val patterns = listOf(
+            Regex("""(?:^|\s)([\w.+-]+):\s*(?:command )?not found""", RegexOption.IGNORE_CASE),
+            Regex("""(?:^|\s)([\w.+-]+):\s*No such file or directory""", RegexOption.IGNORE_CASE),
+            Regex("""(?:^|\s)([\w.+-]+):\s*not found in""", RegexOption.IGNORE_CASE),
+        )
+        stderr.lines().forEach { line ->
+            patterns.forEach { p ->
+                p.find(line)?.let { return it.groupValues[1].trim() }
+            }
+        }
+        return null
     }
 }
