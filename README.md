@@ -1545,3 +1545,52 @@ python3 tools/check_python_harness.py
 
 11 项检查，覆盖上面两个真机故障点 + 输出截断 + cwd + 文件写入 + 超时后状态复原。
 改完 `dsh_runner.py` 先跑它，比等真机反馈快得多。
+
+### 19.8 真机反馈之二：仓库字段的写法（v1.3 发布次日）
+
+用户在「执行与编译」页点「安装 workflow 模板」，两个文件都报 404，提示写着
+「workflow 文件名或 run id 不对；也可能是模板还没提交到默认分支」。
+
+**这条提示把人带偏了** —— 模板明明都在仓库里。实测根因是**仓库字段填了 URL**：
+
+```
+https://github.com/dsdzm/DSH-Watch
+```
+
+而当时的校验只有一句 `repo.contains('/')`。URL 里当然有斜杠，于是它被原样拼进 API 路径：
+
+```
+GET https://api.github.com/repos/https://github.com/dsdzm/DSH-Watch/...
+```
+
+GitHub 对这种请求返回**通用 404**（`{"message":"Not Found"}`）。实测四种输入：
+
+| 输入 | HTTP | 响应体 |
+| --- | --- | --- |
+| `dsdzm/DSH-Watch` | 200 | — |
+| `DSH-Watch` / `dsdzm/DSH-Watch.git` / `github.com/…` / `https://…` | 404 | `{"message":"Not Found"}` |
+| `actions/workflows/.github/workflows/dsh-run.yml`（完整路径） | 404 | `{"message":"Not Found"}` |
+| 分支不存在（`branch=master`） | 404 | `{"message":"Branch master not found"}` |
+
+关键发现：**前两类的响应体一模一样**。也就是说，旧的 404 文案
+「workflow 文件名不对或模板还没提交」在两种成因里赌了一种，而用户遇到的是另一种。
+
+更要紧的是这一点：**靠响应体无法区分**。所以只能靠请求顺序消歧 ——
+**先探仓库、再探 workflow**。仓库能访问，后面那个 404 就唯一地是 workflow 的问题。
+
+| 改动 | 位置 |
+| --- | --- |
+| 仓库字段归一化（URL、`github.com/` 前缀、`.git` 后缀、SSH 形式、尾斜杠、子页面地址） | `cloud/CloudTargets.kt` |
+| workflow 字段归一化（完整路径、blob URL → 文件名） | 同上 |
+| 按端点解释错误，404 不再一刀切 | `CloudErrors` |
+| 设置页"测试连接"改两步诊断，保存时回显规范化结果 | `ExecSettingsScreen.kt` |
+| 工具层各自兜一次归一化（设置里可能还留着旧格式） | `CloudTools.kt` |
+
+**为什么选择"尽量救"而不是"严格拒绝"**：从浏览器地址栏复制是最自然的动作。
+一个只会拒绝的输入框，用户要试两次才知道该怎么写；而 URL 里本来就带着
+`owner/repo` 这两个信息，没理由不认。
+
+唯一的取舍：多余路径段一律忽略（`owner/repo/tree/main` 与 `owner/repo/残留` 无法区分，
+而 `owner/repo` 是唯一有意义的解释），但**前两段自己必须合法**，不合法才算写错。
+这条取舍是被测试逼出来的 —— 最初的断言写的是"多余段应报错"，跑起来才发现
+那是在要求用户去删掉自己看不出来的一截。

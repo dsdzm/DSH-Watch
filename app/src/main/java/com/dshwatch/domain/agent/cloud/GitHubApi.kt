@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
@@ -35,6 +36,19 @@ data class ArtifactInfo(
 )
 
 data class StepInfo(val name: String, val conclusion: String)
+
+/**
+ * 一次探测的结论。
+ *
+ * [message] 是**给用户看的**，失败时一定包含"下一步该改哪里"——
+ * 而不是把 HTTP 状态码丢给用户自己猜。
+ */
+data class ProbeResult(
+    val ok: Boolean,
+    val message: String,
+    /** 归一化之后的实际取值（探测成功时可用，便于回显） */
+    val normalized: String = "",
+)
 
 data class JobInfo(
     val id: Long,
@@ -67,39 +81,112 @@ class GitHubApi(private val tokenProvider: () -> String?) {
     // 读取
     // ------------------------------------------------------------------
 
-    /** workflow 是否可用（必须已经在默认分支上、且被 GitHub 索引过） */
-    suspend fun workflowExists(repo: String, file: String): Boolean = withContext(Dispatchers.IO) {
-        val resp = call(request("GET", "/repos/$repo/actions/workflows/$file"), allowFailure = true)
-        resp.code == 200
+    /**
+     * 仓库能不能访问。
+     *
+     * 单独一步的意义在于**消除 404 的二义性**：workflow 不存在、仓库名不对、
+     * 令牌看不到这个仓库，这三种情况 GitHub 给的响应体**一模一样**（都是通用 `{"message":"Not Found"}`）。
+     * 先确认仓库能访问，后面那个 404 就能唯一地解释成"workflow 文件名不对或还没索引"。
+     */
+    suspend fun probeRepo(repo: String): ProbeResult = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo)
+            ?: return@withContext ProbeResult(
+                false,
+                "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch —— " +
+                    "不要带 https:// 、github.com 前缀或 .git 后缀。",
+            )
+
+        val resp = call(request("GET", "/repos/$slug"), allowFailure = true, scope = CloudErrors.Scope.REPO)
+        if (resp.code != 200) {
+            return@withContext ProbeResult(
+                false,
+                CloudErrors.explain(resp.code, resp.body, CloudErrors.Scope.REPO),
+                slug,
+            )
+        }
+
+        val obj = runCatching { json.parseToJsonElement(resp.body).jsonObject }.getOrNull()
+        val fullName = obj?.get("full_name")?.jsonPrimitive?.contentOrNull ?: slug
+        val branch = obj?.get("default_branch")?.jsonPrimitive?.contentOrNull.orEmpty()
+        val canPush = obj?.get("permissions")?.jsonObject
+            ?.get("push")?.jsonPrimitive?.booleanOrNull
+        val permText = when (canPush) {
+            true -> "可写"
+            false -> "只读（安装 workflow 模板需要写权限）"
+            null -> "未知"
+        }
+        ProbeResult(
+            ok = true,
+            message = "仓库 $fullName 可访问 · 默认分支 ${branch.ifBlank { "?" }} · 令牌权限 $permText",
+            normalized = fullName,
+        )
     }
+
+    /** workflow 是否可用（必须已经在默认分支上、且被 GitHub 索引过） */
+    suspend fun probeWorkflow(repo: String, file: String): ProbeResult = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo)
+            ?: return@withContext ProbeResult(
+                false,
+                "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch。",
+            )
+        val name = CloudTargets.normalizeWorkflow(file)
+            ?: return@withContext ProbeResult(
+                false,
+                "「默认 workflow」要写文件名，例如 dsh-run.yml（不要写 .github/workflows/ 完整路径）。",
+            )
+
+        val resp = call(
+            request("GET", "/repos/$slug/actions/workflows/$name"),
+            allowFailure = true,
+            scope = CloudErrors.Scope.WORKFLOW,
+        )
+        if (resp.code == 200) {
+            ProbeResult(true, "$name 已就绪", name)
+        } else {
+            ProbeResult(false, CloudErrors.explain(resp.code, resp.body, CloudErrors.Scope.WORKFLOW), name)
+        }
+    }
+
+    /** 只要一个布尔值时的便捷包装（内部同样会归一化字段） */
+    suspend fun workflowExists(repo: String, file: String): Boolean = probeWorkflow(repo, file).ok
 
     /** 找刚触发的那次运行：event=workflow_dispatch + 分支 + 时间窗 */
     suspend fun findRun(repo: String, ref: String, sinceMs: Long): CloudRunRecord? =
         withContext(Dispatchers.IO) {
             val body = call(
-                request("GET", "/repos/$repo/actions/runs?event=workflow_dispatch&branch=$ref&per_page=20")
+                request("GET", "/repos/$repo/actions/runs?event=workflow_dispatch&branch=$ref&per_page=20"),
+                scope = CloudErrors.Scope.RUN,
             ).body
             pickRun(body, ref, sinceMs)
         }
 
     suspend fun getRun(repo: String, runId: Long): CloudRunRecord = withContext(Dispatchers.IO) {
-        val body = call(request("GET", "/repos/$repo/actions/runs/$runId")).body
+        val body = call(request("GET", "/repos/$repo/actions/runs/$runId"), scope = CloudErrors.Scope.RUN).body
         parseRun(body)
     }
 
     suspend fun listArtifacts(repo: String, runId: Long): List<ArtifactInfo> = withContext(Dispatchers.IO) {
-        val body = call(request("GET", "/repos/$repo/actions/runs/$runId/artifacts")).body
+        val body = call(
+            request("GET", "/repos/$repo/actions/runs/$runId/artifacts"),
+            scope = CloudErrors.Scope.RUN,
+        ).body
         parseArtifacts(body)
     }
 
     suspend fun listJobs(repo: String, runId: Long): List<JobInfo> = withContext(Dispatchers.IO) {
-        val body = call(request("GET", "/repos/$repo/actions/runs/$runId/jobs?filter=latest")).body
+        val body = call(
+            request("GET", "/repos/$repo/actions/runs/$runId/jobs?filter=latest"),
+            scope = CloudErrors.Scope.RUN,
+        ).body
         parseJobs(body)
     }
 
     /** 拉某个 job 的日志。日志可能几十 MB，只取尾部 */
     suspend fun jobLog(repo: String, jobId: Long, maxLines: Int): String = withContext(Dispatchers.IO) {
-        val text = call(request("GET", "/repos/$repo/actions/jobs/$jobId/logs")).body
+        val text = call(
+            request("GET", "/repos/$repo/actions/jobs/$jobId/logs"),
+            scope = CloudErrors.Scope.RUN,
+        ).body
         tailLines(text, maxLines)
     }
 
@@ -118,7 +205,7 @@ class GitHubApi(private val tokenProvider: () -> String?) {
                 .build()
             client.newCall(request("GET", "/repos/$repo/actions/artifacts/$artifactId/zip").build())
                 .execute().use { resp ->
-                    if (!resp.isSuccessful) throw httpError(resp.code, "下载产物失败")
+                    if (!resp.isSuccessful) throw httpError(resp.code, "下载产物失败", CloudErrors.Scope.RUN)
                     dest.parentFile?.mkdirs()
                     dest.outputStream().use { out -> resp.body?.byteStream()?.copyTo(out) }
                     dest.length()
@@ -136,6 +223,11 @@ class GitHubApi(private val tokenProvider: () -> String?) {
         ref: String,
         inputs: Map<String, String>,
     ): Long? = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo)
+            ?: throw GitHubException(400, "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch。")
+        val name = CloudTargets.normalizeWorkflow(file)
+            ?: throw GitHubException(400, "「默认 workflow」要写文件名，例如 dsh-run.yml。")
+
         val payload = buildJsonObject {
             put("ref", ref)
             if (inputs.isNotEmpty()) {
@@ -143,9 +235,10 @@ class GitHubApi(private val tokenProvider: () -> String?) {
             }
         }
         val resp = call(
-            request("POST", "/repos/$repo/actions/workflows/$file/dispatches")
+            request("POST", "/repos/$slug/actions/workflows/$name/dispatches")
                 .header("Content-Type", "application/json")
-                .post(payload.toString().toRequestBody(JSON_MEDIA))
+                .post(payload.toString().toRequestBody(JSON_MEDIA)),
+            scope = CloudErrors.Scope.WORKFLOW,
         )
         // 204 无 body 是正常返回；有 body 时里面带 workflow_run_id
         resp.body.takeIf { it.isNotBlank() }
@@ -168,9 +261,13 @@ class GitHubApi(private val tokenProvider: () -> String?) {
         message: String,
         branch: String? = null,
     ): Boolean = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo)
+            ?: throw GitHubException(400, "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch。")
+
+        // 取现有 sha：文件不存在时这里就是 404，属于正常分支，所以要用 runCatching 吞掉
         val existingSha = runCatching {
-            val body = call(request("GET", "/repos/$repo/contents/$path" + (branch?.let { "?ref=$it" } ?: "")))
-                .body
+            val refQuery = branch?.let { "?ref=${URLEncoder.encode(it, "UTF-8")}" } ?: ""
+            val body = call(request("GET", "/repos/$slug/contents/$path$refQuery")).body
             json.parseToJsonElement(body).jsonObject["sha"]?.jsonPrimitive?.contentOrNull
         }.getOrNull()
 
@@ -181,9 +278,10 @@ class GitHubApi(private val tokenProvider: () -> String?) {
             existingSha?.let { put("sha", it) }
         }
         val resp = call(
-            request("PUT", "/repos/$repo/contents/$path")
+            request("PUT", "/repos/$slug/contents/$path")
                 .header("Content-Type", "application/json")
-                .put(payload.toString().toRequestBody(JSON_MEDIA))
+                .put(payload.toString().toRequestBody(JSON_MEDIA)),
+            scope = CloudErrors.Scope.CONTENTS,
         )
         resp.code in 200..299
     }
@@ -208,25 +306,23 @@ class GitHubApi(private val tokenProvider: () -> String?) {
     private fun call(
         builder: Request.Builder,
         allowFailure: Boolean = false,
+        scope: CloudErrors.Scope = CloudErrors.Scope.REPO,
     ): Resp {
         Http.client.newCall(builder.build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful && !allowFailure) throw httpError(resp.code, body)
+            if (!resp.isSuccessful && !allowFailure) throw httpError(resp.code, body, scope)
             return Resp(resp.code, body)
         }
     }
 
-    private fun httpError(code: Int, raw: String): GitHubException {
+    /**
+     * 把 HTTP 错误包成异常。文案全部来自 [CloudErrors] ——
+     * 上一版在这里把**所有** 404 都解释成"workflow 文件名不对或模板没提交"，
+     * 用户的实际故障（仓库字段填成了 URL）被这条提示带偏，重装了几次模板都没用。
+     */
+    private fun httpError(code: Int, raw: String, scope: CloudErrors.Scope): GitHubException {
         val detail = raw.take(300)
-        val hint = when (code) {
-            401 -> "Token 无效或已过期，请到设置里重新填写 GitHub Token。"
-            403 -> "Token 权限不足或触发了速率限制。触发/取消运行需要 Actions 读写权限，写文件需要 Contents 写权限。"
-            404 -> "找不到目标（仓库名、workflow 文件名或 run id 不对；也可能是模板还没提交到默认分支）。"
-            409 -> "状态冲突（该运行可能已经结束）。"
-            422 -> "请求被拒绝（通常是分支名不存在，或 workflow 的 inputs 与模板不匹配）。"
-            else -> "GitHub 返回 HTTP $code。"
-        }
-        return GitHubException(code, "$hint\n原始响应：$detail")
+        return GitHubException(code, "${CloudErrors.explain(code, raw, scope)}\n原始响应：$detail")
     }
 
     companion object {

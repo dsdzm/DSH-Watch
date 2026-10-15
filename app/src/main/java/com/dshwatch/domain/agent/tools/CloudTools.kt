@@ -7,6 +7,7 @@ import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.cloud.ArtifactInfo
 import com.dshwatch.domain.agent.cloud.CloudRunRecord
+import com.dshwatch.domain.agent.cloud.CloudTargets
 import com.dshwatch.domain.agent.cloud.GitHubApi
 import com.dshwatch.domain.agent.cloud.GitHubException
 import com.dshwatch.domain.agent.boolOf
@@ -88,12 +89,13 @@ object CloudTools {
                         "（你也可以调用 open_screen 打开该设置页）。"
                 )
             }
-            val repo = settings.cloudRepo.trim()
-            if (repo.isBlank() || !repo.contains('/')) {
-                return ToolResult.fail(
-                    "还没有配置目标仓库。请让用户在「设置 → 云端编译」里填写 `owner/repo`（例如 dsdzm/DSH-Watch）。"
+            // 这里再兜一次归一化：设置里可能还留着旧格式（用户升级了但没重新点保存）
+            val repo = CloudTargets.normalizeRepo(settings.cloudRepo)
+                ?: return ToolResult.fail(
+                    "「目标仓库」填写有误：`${settings.cloudRepo.ifBlank { "（空）" }}`。" +
+                        "要写成 owner/repo，例如 dsdzm/DSH-Watch —— 不要带 https:// 、github.com 前缀或 .git 后缀。" +
+                        "请让用户在「设置 → 执行与编译」里改好（也可以调用 open_screen 直接把他送过去）。"
                 )
-            }
             val api = ctx.github
                 ?: return ToolResult.fail("云端编译不可用（当前环境没有 GitHub 通道）。")
             if (!api.hasToken()) {
@@ -102,7 +104,11 @@ object CloudTools {
                 )
             }
 
-            val workflow = args.strOf("workflow") ?: settings.cloudWorkflowFile
+            val workflow = CloudTargets
+                .normalizeWorkflow(args.strOf("workflow") ?: settings.cloudWorkflowFile)
+                ?: return ToolResult.fail(
+                    "workflow 要写文件名，例如 dsh-run.yml（不要写 .github/workflows/ 完整路径）。"
+                )
             val ref = args.strOf("ref") ?: settings.cloudRef
             val wait = args.boolOf("wait", default = true)
             val collect = args.boolOf("collect_artifacts", default = true)
@@ -111,12 +117,18 @@ object CloudTools {
             val inputs = readInputs(args)
 
             return try {
-                if (!api.workflowExists(repo, workflow)) {
+                // 分两步探：仓库 → workflow。
+                // 合成一步的话这两种失败在 GitHub 那边给的响应体一模一样，
+                // 只能挤出一句含糊的"找不到"，把排查带到错的方向（真机就是这么踩的）
+                val repoProbe = api.probeRepo(repo)
+                if (!repoProbe.ok) {
+                    return ToolResult.fail(repoProbe.message)
+                }
+                val workflowProbe = api.probeWorkflow(repo, workflow)
+                if (!workflowProbe.ok) {
                     return ToolResult.fail(
-                        "仓库 $repo 里找不到 workflow `$workflow`。" +
-                            "两个常见原因：① 模板还没安装/提交；" +
-                            "② 刚提交上去，GitHub 还没索引完（等十几秒再试）。" +
-                            "可在「设置 → 云端编译 → 安装 workflow 模板」里一键安装。"
+                        "仓库 $repo 的 workflow 不可用：${workflowProbe.message}" +
+                            "若模板还没安装，可在「设置 → 执行与编译 → 安装 workflow 模板」里一键安装。"
                     )
                 }
 
@@ -229,10 +241,11 @@ object CloudTools {
 
             val api = ctx.github ?: return ToolResult.fail("云端编译不可用（当前环境没有 GitHub 通道）。")
             val settings = ctx.settings()
-            val repo = settings.cloudRepo.trim()
-            if (repo.isBlank() || !repo.contains('/')) {
-                return ToolResult.fail("还没有配置目标仓库，请到「设置 → 云端编译」填写 `owner/repo`。")
-            }
+            val repo = CloudTargets.normalizeRepo(settings.cloudRepo)
+                ?: return ToolResult.fail(
+                    "「目标仓库」填写有误：`${settings.cloudRepo.ifBlank { "（空）" }}`。" +
+                        "要写成 owner/repo，例如 dsdzm/DSH-Watch。"
+                )
 
             val runId = args.strOf("run_id")?.trim()?.toLongOrNull()
                 ?: ctx.cloudRuns?.latest(ctx.sessionDir)?.runId

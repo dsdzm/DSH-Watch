@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.agent.cloud.CloudTargets
 import com.dshwatch.domain.agent.exec.ExecGuard
 import com.dshwatch.domain.agent.exec.PythonBridge
 import com.dshwatch.domain.agent.exec.ShellRunner
@@ -66,9 +67,15 @@ fun ExecSettingsScreen(
     val shellReady = remember { mutableStateOf<Boolean?>(null) }
     var cloudMessage by remember { mutableStateOf("") }
     var tokenDraft by remember { mutableStateOf(container.keyStore.getGithubToken().orEmpty()) }
-    var repoDraft by remember { mutableStateOf(settings.cloudRepo) }
+    // 打开页面就显示**规范化之后**的值：填过 URL 的话这里会直接看到被纠正成 owner/repo，
+    // 而不是等到点「测试连接」才发现拼进 API 的东西是错的
+    var repoDraft by remember {
+        mutableStateOf(CloudTargets.normalizeRepo(settings.cloudRepo) ?: settings.cloudRepo)
+    }
     var refDraft by remember { mutableStateOf(settings.cloudRef) }
-    var workflowDraft by remember { mutableStateOf(settings.cloudWorkflowFile) }
+    var workflowDraft by remember {
+        mutableStateOf(CloudTargets.normalizeWorkflow(settings.cloudWorkflowFile) ?: settings.cloudWorkflowFile)
+    }
 
     // shell 探测要起进程，别在组合里做
     remember(Unit) {
@@ -229,16 +236,33 @@ fun ExecSettingsScreen(
                 PrimaryButton(
                     text = s.save,
                     onClick = {
+                        val repo = CloudTargets.normalizeRepo(repoDraft)
+                        val workflow = CloudTargets.normalizeWorkflow(workflowDraft)
                         // 仓库类设置进 DataStore，令牌单独进加密存储
                         persist {
                             it.copy(
-                                cloudRepo = repoDraft.trim(),
+                                cloudRepo = repo ?: repoDraft.trim(),
                                 cloudRef = refDraft.trim().ifBlank { "main" },
-                                cloudWorkflowFile = workflowDraft.trim().ifBlank { "dsh-run.yml" },
+                                cloudWorkflowFile = workflow ?: workflowDraft.trim().ifBlank { "dsh-run.yml" },
                             )
                         }
                         container.keyStore.putGithubToken(tokenDraft.trim().ifBlank { null })
-                        cloudMessage = "已保存。"
+                        // 归一化结果要**回显**：用户从地址栏粘了个 URL 进来，
+                        // 必须让他看见被改成了什么，否则下次还会粘同样的东西
+                        cloudMessage = buildString {
+                            append("已保存。")
+                            if (repo != null && repo != repoDraft.trim()) {
+                                repoDraft = repo
+                                append("\n仓库已规范化为 $repo。")
+                            }
+                            if (workflow != null && workflow != workflowDraft.trim()) {
+                                workflowDraft = workflow
+                                append("\nworkflow 已规范化为 $workflow。")
+                            }
+                            if (repo == null && repoDraft.isNotBlank()) {
+                                append("\n仓库名没识别出来：要写成 owner/repo，不要带 https:// 、github.com 前缀或 .git。")
+                            }
+                        }
                     },
                 )
 
@@ -248,21 +272,26 @@ fun ExecSettingsScreen(
                     onClick = {
                         scope.launch {
                             cloudMessage = "检查中…"
-                            val repo = repoDraft.trim().ifBlank { settings.cloudRepo }.trim()
-                            val file = workflowDraft.trim().ifBlank { settings.cloudWorkflowFile }
+                            val repo = CloudTargets
+                                .normalizeRepo(repoDraft.trim().ifBlank { settings.cloudRepo })
+                            val file = CloudTargets
+                                .normalizeWorkflow(workflowDraft.trim().ifBlank { settings.cloudWorkflowFile })
                             cloudMessage = when {
-                                !repo.contains('/') -> "仓库要写成 owner/repo。"
+                                repo == null ->
+                                    "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch —— " +
+                                        "不要带 https:// 、github.com 前缀或 .git 后缀。"
                                 tokenDraft.isBlank() -> "先填 GitHub 令牌。"
+                                file == null ->
+                                    "「默认 workflow」要写文件名，例如 dsh-run.yml，不要写 .github/workflows/ 完整路径。"
                                 else -> {
                                     container.keyStore.putGithubToken(tokenDraft.trim())
                                     runCatching {
-                                        val exists = container.githubApi.workflowExists(repo, file)
-                                        if (exists) {
-                                            "连接正常：仓库 $repo 里找到了 $file。"
-                                        } else {
-                                            "令牌可用，但仓库 $repo 里没有 $file —— " +
-                                                "点下面的「${s.cloudInstallTemplates}」把模板装上去。"
-                                        }
+                                        // 分两步：先确认仓库能访问，再看 workflow。
+                                        // 合成一步的话，两种情况 GitHub 给的 404 一模一样，没法给出有用的提示。
+                                        val repoProbe = container.githubApi.probeRepo(repo)
+                                        if (!repoProbe.ok) return@runCatching repoProbe.message
+                                        val workflowProbe = container.githubApi.probeWorkflow(repo, file)
+                                        repoProbe.message + "\n" + workflowProbe.message
                                     }.getOrElse { e -> "检查失败：${e.message ?: "未知原因"}" }
                                 }
                             }
@@ -276,10 +305,12 @@ fun ExecSettingsScreen(
                     onClick = {
                         scope.launch {
                             cloudMessage = "安装中…"
-                            val repo = repoDraft.trim().ifBlank { settings.cloudRepo }.trim()
+                            val repo = CloudTargets
+                                .normalizeRepo(repoDraft.trim().ifBlank { settings.cloudRepo })
                             val branch = refDraft.trim().ifBlank { "main" }
-                            if (!repo.contains('/')) {
-                                cloudMessage = "仓库要写成 owner/repo。"
+                            if (repo == null) {
+                                cloudMessage = "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch —— " +
+                                    "不要带 https:// 、github.com 前缀或 .git 后缀。"
                                 return@launch
                             }
                             if (tokenDraft.isBlank() && container.keyStore.getGithubToken().isNullOrBlank()) {
@@ -329,6 +360,15 @@ private suspend fun installTemplates(
     repo: String,
     branch: String,
 ): String = withContext(Dispatchers.IO) {
+    val slug = CloudTargets.normalizeRepo(repo)
+        ?: return@withContext "「目标仓库」要写成 owner/repo，例如 dsdzm/DSH-Watch。"
+
+    // 先确认仓库能访问：否则下面两个文件各自失败一次，
+    // 用户看到两行一模一样的报错，却不知道"其实是一个原因"
+    val probe = runCatching { container.githubApi.probeRepo(slug) }
+        .getOrElse { e -> return@withContext "检查仓库失败：${e.message ?: "未知原因"}" }
+    if (!probe.ok) return@withContext probe.message
+
     val templates = listOf(
         "cloud/dsh-run.yml" to ".github/workflows/dsh-run.yml",
         "cloud/dsh-build.yml" to ".github/workflows/dsh-build.yml",
@@ -339,7 +379,7 @@ private suspend fun installTemplates(
             .getOrElse { e -> return@withContext "读取内置模板失败：${e.message}" }
         runCatching {
             container.githubApi.putFile(
-                repo = repo,
+                repo = slug,
                 path = target,
                 content = content,
                 message = "chore: 添加 DSH 云端执行模板",
