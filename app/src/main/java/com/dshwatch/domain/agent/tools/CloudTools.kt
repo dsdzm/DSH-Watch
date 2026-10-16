@@ -22,6 +22,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.zip.ZipInputStream
 
 /**
@@ -132,21 +135,23 @@ object CloudTools {
                     )
                 }
 
+                // 触发前先记下基线 run id。
+                // 实测：GitHub 的 dispatch 返回 204 且没有 body（不给 run id），
+                // 所以"把刚触发的那次找回来"是主路径而不是兜底，必须可靠。
+                // 用 id 比较而不是时间窗 —— 手表的时钟未必准。
+                val baselineId = runCatching { api.latestRunId(repo, workflow) }.getOrNull()
+
                 val triggeredAt = System.currentTimeMillis()
                 val runId = api.dispatch(repo, workflow, ref, inputs)
 
-                // 老版本接口不返回 run id，只能按「时间窗 + 分支 + workflow_dispatch」去找
                 val located = if (runId != null) {
                     runCatching { api.getRun(repo, runId) }.getOrNull()
                 } else {
-                    locateRun(api, repo, ref, workflow, triggeredAt)
+                    locateRun(api, repo, ref, workflow, baselineId, triggeredAt)
                 }
 
                 if (located == null) {
-                    return ToolResult.fail(
-                        "已触发 $workflow，但没能定位到对应的运行记录。" +
-                            "稍后用 cloud_job（action=status）能看到最近一次的状态。"
-                    )
+                    return ToolResult.fail(locateFailedMessage(api, repo, workflow, baselineId))
                 }
 
                 ctx.cloudRuns?.put(ctx.sessionDir, located)
@@ -247,11 +252,15 @@ object CloudTools {
                         "要写成 owner/repo，例如 dsdzm/DSH-Watch。"
                 )
 
+            // 本会话没有记录时，退回到"该 workflow 最近的一次运行"——
+            // 这样即使 cloud_build 那一步定位失败了，用户仍然能接着看状态和日志，
+            // 而不是只能干等（旧版本就是在这里又报一次"找不到记录"）
             val runId = args.strOf("run_id")?.trim()?.toLongOrNull()
                 ?: ctx.cloudRuns?.latest(ctx.sessionDir)?.runId
+                ?: runCatching { api.latestRunId(repo, settings.cloudWorkflowFile) }.getOrNull()
                 ?: return ToolResult.fail(
-                    "找不到可用的运行记录。先调用 cloud_build 触发一次，" +
-                        "或者用 run_id 明确指定（也可在本会话里先触发一次）。"
+                    "找不到可用的运行记录：本会话没有触发过，该 workflow 也没有任何历史运行。" +
+                        "先用 cloud_build 触发一次，或用 run_id 明确指定。"
                 )
 
             return try {
@@ -314,25 +323,72 @@ object CloudTools {
     // 内部流程
     // ------------------------------------------------------------------
 
-    /** dispatch 之后可能拿不到 run id，靠「分支 + 时间窗」找回来 */
+    /**
+     * dispatch 之后把刚触发的那次运行找回来。
+     *
+     * 这里曾经有一个**必然失败**的判断：用 workflow 文件名（`dsh-run`）去
+     * `contains` 运行的显示名（`DSH Run`）—— 文件名叫 `dsh-run.yml`，显示名却写作 `DSH Run`，
+     * 于是永远匹配不上，用户看到的就是"触发成功但查不到记录"。
+     * 现在改成查 **workflow 专属的 runs 端点**（GitHub 那边就过滤好了），
+     * 客户端不再做任何名字判断。
+     *
+     * 重试 8 次 × 2.5 秒：实测运行在触发后约 1 秒出现，但网络抖动时留足余量。
+     */
     private suspend fun locateRun(
         api: GitHubApi,
         repo: String,
         ref: String,
         workflow: String,
+        baselineId: Long?,
         sinceMs: Long,
     ): CloudRunRecord? {
-        repeat(6) { attempt ->
-            val found = runCatching { api.findRun(repo, ref, sinceMs) }.getOrNull()
-            if (found != null && (workflow.isBlank() || found.workflow.isBlank() ||
-                    found.workflow.contains(workflow.substringBefore('.'), ignoreCase = true))
-            ) {
-                return found
-            }
-            if (attempt < 5) delay(2_000)
+        repeat(8) { attempt ->
+            runCatching { api.findRun(repo, ref, workflow, baselineId, sinceMs) }
+                .getOrNull()
+                ?.let { return it }
+            if (attempt < 7) delay(2_500)
         }
         return null
     }
+
+    /**
+     * 定位失败的诊断信息。
+     *
+     * 旧版本这里只回一句"没能定位到对应的运行记录"，用户和模型都只能猜 ——
+     * 真机上模型当场开始猜"是不是仓库/令牌/分支配错了"，而配置其实完全正常，
+     * 猜的方向全错。所以这里把该 workflow 最近的运行直接列出来：
+     * **「一条运行都没有」和「有几条但对不上」是两种完全不同的故障**，
+     * 前者说明触发请求没被真正执行，后者说明匹配逻辑出了问题。
+     */
+    private suspend fun locateFailedMessage(
+        api: GitHubApi,
+        repo: String,
+        workflow: String,
+        baselineId: Long?,
+    ): String {
+        val recent = runCatching { api.recentRuns(repo, workflow, 5) }.getOrDefault(emptyList())
+        val detail = if (recent.isEmpty()) {
+            "该 workflow 下**没有任何运行记录**，说明触发请求虽然被接受，但运行没有建立。" +
+                "常见原因：workflow 的 `on: workflow_dispatch` 与请求的 inputs 不匹配，" +
+                "或该 workflow 被停用。"
+        } else {
+            buildString {
+                append("该 workflow 最近的运行（触发前基线 run id = ${baselineId ?: "未知"}）：\n")
+                recent.forEach { r ->
+                    append("  · #${r.runId} 分支=${r.ref} 状态=${r.status}")
+                    if (r.conclusion.isNotBlank()) append("/${r.conclusion}")
+                    append(" ${formatTime(r.startedAt)}\n")
+                }
+            }
+        }
+        return "已触发 $workflow，但没能定位到对应的运行记录。\n$detail" +
+            "可以用 cloud_job(action=status) 查看该 workflow 最近一次的状态。"
+    }
+
+    /** 手表上显示不了长日期，够用即可 */
+    private fun formatTime(ms: Long): String =
+        if (ms <= 0) "时间未知"
+        else SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(ms))
 
     private suspend fun pollUntilSettled(
         api: GitHubApi,

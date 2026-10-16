@@ -18,6 +18,8 @@ data class CloudRunRecord(
     val runId: Long,
     val repo: String = "",
     val workflow: String = "",
+    /** workflow 的真实文件名（`.github/workflows/xxx.yml`）；与显示名 [workflow] 常常不同 */
+    val path: String = "",
     val ref: String = "main",
     val htmlUrl: String = "",
     val startedAt: Long = 0L,

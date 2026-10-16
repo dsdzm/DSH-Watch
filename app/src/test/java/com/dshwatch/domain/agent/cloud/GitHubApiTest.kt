@@ -30,14 +30,14 @@ class GitHubApiTest {
     @Test
     fun `picks the newest run inside the time window`() {
         val since = epoch("2026-10-15T10:59:00Z")
-        val picked = GitHubApi.pickRun(runsBody, "main", since)
+        val picked = GitHubApi.pickRun(runsBody, "main", since, baselineId = null)
         assertThat(picked?.runId).isEqualTo(222)
     }
 
     @Test
     fun `ignores runs that started before the trigger`() {
         val since = epoch("2026-10-15T10:30:00Z")
-        val picked = GitHubApi.pickRun(runsBody, "main", since)
+        val picked = GitHubApi.pickRun(runsBody, "main", since, baselineId = null)
         // 11:00 那个仍在窗口内，10:00 那个被排除
         assertThat(picked?.runId).isEqualTo(222)
     }
@@ -45,21 +45,66 @@ class GitHubApiTest {
     @Test
     fun `skips runs from another branch`() {
         val since = epoch("2026-10-15T09:00:00Z")
-        val picked = GitHubApi.pickRun(runsBody, "dev", since)
+        val picked = GitHubApi.pickRun(runsBody, "dev", since, baselineId = null)
         assertThat(picked).isNull()
     }
 
     @Test
-    fun `tolerates small clock skew`() {
-        // 服务端时间可能比本地快几秒，窗口必须留出余量，否则刚触发的运行会被判为"太旧"
+    fun `fallback window tolerates clock skew`() {
+        // 拿不到基线时的兜底窗口留了 90 秒：设备时钟偏快是常态，
+        // 窗口太窄会把刚触发的运行判成"太旧"，表现同样是"找不到记录"
         val since = epoch("2026-10-15T11:00:05Z")
-        assertThat(GitHubApi.pickRun(runsBody, "main", since)?.runId).isEqualTo(222)
+        assertThat(GitHubApi.pickRun(runsBody, "main", since, baselineId = null)?.runId).isEqualTo(222)
     }
 
     @Test
     fun `returns null instead of throwing on malformed input`() {
-        assertThat(GitHubApi.pickRun("not json", "main", 0)).isNull()
-        assertThat(GitHubApi.pickRun("{}", "main", 0)).isNull()
+        assertThat(GitHubApi.pickRun("not json", "main", 0, null)).isNull()
+        assertThat(GitHubApi.pickRun("{}", "main", 0, null)).isNull()
+    }
+
+    @Test
+    fun `baseline id picks the newer run without relying on the clock`() {
+        // 手表时钟不准是常态。设备时间若比服务器慢一小时，时间窗会把刚触发的运行滤掉，
+        // 而"比基线 id 大"这个判断完全不看时钟。
+        val picked = GitHubApi.pickRun(runsBody, "main", sinceMs = 0L, baselineId = 111L)
+        assertThat(picked?.runId).isEqualTo(222)
+    }
+
+    @Test
+    fun `baseline that already covers the newest run yields nothing`() {
+        // 基线就是最新那条 —— 说明我们触发的那次还没出现，调用方应当继续重试
+        assertThat(GitHubApi.pickRun(runsBody, "main", 0L, baselineId = 222L)).isNull()
+    }
+
+    @Test
+    fun `workflow display name and file name may differ completely`() {
+        // 真机样本：workflow 文件是 dsh-run.yml，但它的显示名写作 "DSH Run"。
+        // 旧实现拿文件名去 contains 显示名 —— 永远匹配不上，
+        // 用户看到的就是"已触发 dsh-run.yml，但没能定位到对应的运行记录"。
+        // 修法是不再做名字匹配（改查 workflow 专属端点），这条把真实字段钉住。
+        val body = """
+            {"workflow_runs":[{"id":38850367568,"name":"DSH Run",
+             "path":".github/workflows/dsh-run.yml","head_branch":"main","status":"queued",
+             "conclusion":null,"created_at":"2026-10-16T04:23:26Z",
+             "run_started_at":"2026-10-16T04:23:26Z","updated_at":"2026-10-16T04:23:26Z"}]}
+        """.trimIndent()
+
+        val picked = GitHubApi.pickRun(body, "main", 0L, baselineId = 38754402826L)
+
+        assertThat(picked).isNotNull()
+        assertThat(picked!!.runId).isEqualTo(38850367568L)
+        assertThat(picked.workflow).isEqualTo("DSH Run")
+        // path 才是真实文件名，需要"文件"语义时用它
+        assertThat(picked.path).isEqualTo(".github/workflows/dsh-run.yml")
+    }
+
+    @Test
+    fun `parseRuns tolerates a missing path field`() {
+        val runs = GitHubApi.parseRuns(runsBody)
+        assertThat(runs).hasSize(2)
+        // 样本里没有 path → 空串，而不是抛异常
+        assertThat(runs.first().path).isEmpty()
     }
 
     @Test

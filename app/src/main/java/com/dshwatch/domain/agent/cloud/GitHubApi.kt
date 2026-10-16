@@ -150,15 +150,57 @@ class GitHubApi(private val tokenProvider: () -> String?) {
     /** 只要一个布尔值时的便捷包装（内部同样会归一化字段） */
     suspend fun workflowExists(repo: String, file: String): Boolean = probeWorkflow(repo, file).ok
 
-    /** 找刚触发的那次运行：event=workflow_dispatch + 分支 + 时间窗 */
-    suspend fun findRun(repo: String, ref: String, sinceMs: Long): CloudRunRecord? =
-        withContext(Dispatchers.IO) {
-            val body = call(
-                request("GET", "/repos/$repo/actions/runs?event=workflow_dispatch&branch=$ref&per_page=20"),
-                scope = CloudErrors.Scope.RUN,
-            ).body
-            pickRun(body, ref, sinceMs)
+    /**
+     * 找刚触发的那次运行。
+     *
+     * 用 **workflow 专属的 runs 端点**（`/actions/workflows/{file}/runs`），
+     * 而不是仓库级的 `/actions/runs`。后者返回所有 workflow 的运行，
+     * 得在客户端再按名字筛一遍 —— 而"文件名"与"显示名"经常不一样
+     * （本项目就是：文件叫 `dsh-run.yml`，显示名叫 `DSH Run`），
+     * 用文件名去 contains 显示名，一次也匹配不上。
+     * 专属端点自带过滤，从根上不需要这个判断。
+     *
+     * 定位优先用 [baselineId]（触发前的最大 run id）比较：GitHub 的 run id 全局递增，
+     * 这样完全不依赖设备时钟 —— 手表的时钟未必准。
+     */
+    suspend fun findRun(
+        repo: String,
+        ref: String,
+        workflowFile: String,
+        baselineId: Long?,
+        sinceMs: Long,
+    ): CloudRunRecord? = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo) ?: return@withContext null
+        val name = CloudTargets.normalizeWorkflow(workflowFile) ?: return@withContext null
+        val query = buildString {
+            append("/repos/$slug/actions/workflows/$name/runs?event=workflow_dispatch&per_page=20")
+            if (ref.isNotBlank()) append("&branch=${URLEncoder.encode(ref, "UTF-8")}")
         }
+        val body = call(request("GET", query), scope = CloudErrors.Scope.RUN).body
+        pickRun(body, ref, sinceMs, baselineId)
+    }
+
+    /** 触发前的基线：该 workflow 当前最新一次运行的 id */
+    suspend fun latestRunId(repo: String, workflowFile: String): Long? =
+        recentRuns(repo, workflowFile, 1).firstOrNull()?.runId
+
+    /** 该 workflow 的最近几次运行。定位失败时用来告诉用户"到底有没有新运行" */
+    suspend fun recentRuns(
+        repo: String,
+        workflowFile: String,
+        limit: Int,
+    ): List<CloudRunRecord> = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo) ?: return@withContext emptyList()
+        val name = CloudTargets.normalizeWorkflow(workflowFile) ?: return@withContext emptyList()
+        val body = call(
+            request(
+                "GET",
+                "/repos/$slug/actions/workflows/$name/runs?per_page=${limit.coerceIn(1, 30)}",
+            ),
+            scope = CloudErrors.Scope.RUN,
+        ).body
+        parseRuns(body)
+    }
 
     suspend fun getRun(repo: String, runId: Long): CloudRunRecord = withContext(Dispatchers.IO) {
         val body = call(request("GET", "/repos/$repo/actions/runs/$runId"), scope = CloudErrors.Scope.RUN).body
@@ -345,6 +387,9 @@ class GitHubApi(private val tokenProvider: () -> String?) {
                 runId = obj["id"]?.jsonPrimitive?.longOrNull ?: 0L,
                 repo = obj["repository"]?.jsonObject?.get("full_name")?.jsonPrimitive?.contentOrNull.orEmpty(),
                 workflow = obj["name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                // path 才是 workflow 的真实文件名（如 .github/workflows/dsh-run.yml）；
+                // name 是显示名，两者可以完全不同，所以不能拿一个去匹配另一个
+                path = obj["path"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 ref = obj["head_branch"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 htmlUrl = obj["html_url"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 startedAt = parseEpoch(obj["run_started_at"]) ?: parseEpoch(obj["created_at"]) ?: 0L,
@@ -354,27 +399,37 @@ class GitHubApi(private val tokenProvider: () -> String?) {
             )
         }
 
+        fun parseRuns(body: String): List<CloudRunRecord> {
+            val array = runCatching {
+                json.parseToJsonElement(body).jsonObject["workflow_runs"]?.jsonArray
+            }.getOrNull() ?: return emptyList()
+            return array.mapNotNull { element ->
+                val obj = element as? JsonObject ?: return@mapNotNull null
+                parseRun(obj.toString())
+            }
+        }
+
         /**
          * 从一页运行里挑出"刚刚触发的那一个"。
          *
-         * 三个条件缺一不可：event 已经由查询参数限定、分支要一致、时间要落在窗口内。
-         * 不能用 run_number 之类的序号去猜 —— 别的会话/别人同时触发时会串到别人的运行上，
-         * 那会导致模型读着别人的日志下结论。
+         * 优先用 [baselineId] 比较：GitHub 的 run id 是全局递增的，取"比基线大的最新一个"
+         * 就够 —— 完全不依赖设备时钟（手表的时钟未必准，靠时间窗匹配是脆弱的）。
+         * [sinceMs] 只在拿不到基线时兜底。
+         *
+         * 分支一致这一条始终保留：多会话或多人同时触发时，避免读到别人的运行。
          */
-        fun pickRun(body: String, ref: String, sinceMs: Long): CloudRunRecord? {
-            val runs = runCatching {
-                json.parseToJsonElement(body).jsonObject["workflow_runs"]?.jsonArray
-            }.getOrNull() ?: return null
+        fun pickRun(body: String, ref: String, sinceMs: Long, baselineId: Long?): CloudRunRecord? {
+            val candidates = parseRuns(body).filter { record ->
+                ref.isBlank() || record.ref.isBlank() || record.ref == ref
+            }
+            if (candidates.isEmpty()) return null
 
-            // 允许一点时钟偏差（服务端时间可能比本地快/慢几秒）
-            val threshold = sinceMs - CLOCK_SKEW_MS
-            return runs.mapNotNull { element ->
-                val obj = element as? JsonObject ?: return@mapNotNull null
-                val record = parseRun(obj.toString())
-                if (ref.isNotBlank() && record.ref.isNotBlank() && record.ref != ref) return@mapNotNull null
-                if (record.startedAt < threshold) return@mapNotNull null
-                record
-            }.maxByOrNull { it.startedAt }
+            if (baselineId != null) {
+                return candidates.filter { it.runId > baselineId }.maxByOrNull { it.runId }
+            }
+
+            val threshold = sinceMs - FALLBACK_WINDOW_MS
+            return candidates.filter { it.startedAt >= threshold }.maxByOrNull { it.startedAt }
         }
 
         fun parseArtifacts(body: String): List<ArtifactInfo> {
@@ -425,7 +480,14 @@ class GitHubApi(private val tokenProvider: () -> String?) {
                 lines.takeLast(maxLines).joinToString("\n")
         }
 
-        private const val CLOCK_SKEW_MS = 10_000L
+        /**
+         * 拿不到基线时的兜底时间窗。
+         *
+         * 给到 90 秒而不是几秒：设备时钟可能明显偏快，窗口太窄会把刚触发的运行滤掉
+         * （表现为"明明触发了却找不到记录"）。因为还要满足分支一致 + event 已由端点限定，
+         * 放宽窗口带来的误匹配风险很小。
+         */
+        private const val FALLBACK_WINDOW_MS = 90_000L
 
         private fun parseEpoch(element: JsonElement?): Long? {
             val raw = element?.jsonPrimitive?.contentOrNull ?: return null
