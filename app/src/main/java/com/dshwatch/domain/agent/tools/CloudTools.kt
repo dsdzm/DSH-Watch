@@ -6,6 +6,7 @@ import com.dshwatch.domain.agent.ToolContext
 import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.cloud.ArtifactInfo
+import com.dshwatch.domain.agent.cloud.CloudPayload
 import com.dshwatch.domain.agent.cloud.CloudRunRecord
 import com.dshwatch.domain.agent.cloud.CloudTargets
 import com.dshwatch.domain.agent.cloud.GitHubApi
@@ -13,6 +14,7 @@ import com.dshwatch.domain.agent.cloud.GitHubException
 import com.dshwatch.domain.agent.boolOf
 import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.strOf
+import com.dshwatch.domain.agent.stringListOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -58,8 +60,10 @@ object CloudTools {
             "在**云端 GitHub Actions** 上运行一个 workflow，用来编译本地做不了的东西" +
                 "（Android APK、Gradle/Maven 构建、gcc/g++、Kotlin/Java/Go/Rust 编译等）。" +
                 "默认会等待运行结束并把产物下载回当前工作目录（`artifacts/`），返回结论、链接和产物路径。" +
-                "用法：先用 write_file 把源码写进工作目录，再用 inputs 把命令传给模板" +
-                "（模板 dsh-run.yml 接收 inputs.command；构建本项目 APK 用 dsh-build.yml）。" +
+                "用法：先用 write_file 把源码写进工作目录，再用 inputs.command 传命令 —— " +
+                "**工作目录里的文件会被自动打包上传**，命令行直接引用文件名即可" +
+                "（例如 `python main.py`、`gcc main.c -o main && ./main`）；" +
+                "文件太多太大时用 files 参数只挑必要的（构建本项目 APK 用 dsh-build.yml）。" +
                 "注意：**代码会离开设备**发到用户自己的 GitHub 仓库，所以每次调用都会请用户确认。" +
                 "运行可能几分钟，期间不要重复触发；要查进度用 cloud_job。"
         override val safety = ToolSafety.NETWORK
@@ -74,6 +78,11 @@ object CloudTools {
                                 "`gcc main.c -o main && ./main`、`npm test`"
                         ),
                     )
+                ),
+                "files" to Schema.arr(
+                    "要一起上传的工作目录文件（相对路径，如 main.py、src/app.py）。" +
+                        "留空则自动打包整个工作目录（已排除工具自建的临时目录）。" +
+                        "打包后超出云端长度上限时，用这个参数只挑必要的文件。"
                 ),
                 "wait" to Schema.bool("是否等待运行结束（默认 true；只想触发不等就用 false）"),
                 "timeout_sec" to Schema.int("等待上限秒数，留空用设置里的值", min = 30, max = 3600),
@@ -117,7 +126,35 @@ object CloudTools {
             val collect = args.boolOf("collect_artifacts", default = true)
             val timeoutSec = (args.intOf("timeout_sec") ?: settings.cloudPollTimeoutSec)
                 .coerceIn(30, 3_600)
-            val inputs = readInputs(args)
+            val inputs = readInputs(args).toMutableMap()
+            val command = inputs["command"].orEmpty()
+            if (command.isBlank()) {
+                return ToolResult.fail(
+                    "缺少命令。请在 inputs.command 里给出要执行的 shell 命令" +
+                        "（例如 `python main.py`、`gcc main.c -o main && ./main`）。"
+                )
+            }
+
+            // 工作目录里的文件要一起带上：云端是在一个空仓库里执行命令的，
+            // 手表上 write_file 写出来的文件不会自己过去 —— 真机上就踩了这一条，
+            // 云端报 `python: can't open file '.../main.py'`，模型只好自己
+            // 把源码 heredoc 内联进命令，还在回答里提醒用户"记住这个坑"
+            val workDir = File(ctx.workspace.rootDir(), ctx.sessionDir)
+            when (val payload = CloudPayload.pack(workDir, args.stringListOf("files"))) {
+                is CloudPayload.Outcome.Ok -> {
+                    inputs["command"] = CloudPayload.wrap(command, payload.packed)
+                }
+                // 目录里没文件：命令照原样执行，不引入任何额外脚本
+                CloudPayload.Outcome.Nothing -> Unit
+                is CloudPayload.Outcome.TooLarge -> return ToolResult.fail(
+                    "工作目录打包后超出云端能接收的长度上限" +
+                        "（${payload.fileCount} 个文件、压缩前 ${payload.rawBytes / 1024} KB，" +
+                        "内联后需要 ${payload.needChars} 字符，上限 ${CloudPayload.MAX_BASE64_CHARS}）。\n" +
+                        "两种办法：① 用 files 参数只挑必要的文件（例如 files=[\"main.py\"]）；" +
+                        "② 把关键源码内联进 command（用 heredoc 写文件再执行）。"
+                )
+                is CloudPayload.Outcome.Failed -> return ToolResult.fail(payload.message)
+            }
 
             return try {
                 // 分两步探：仓库 → workflow。

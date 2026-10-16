@@ -1026,11 +1026,13 @@ class ChatEngine(
             【本机真做不了的，交给云端 cloud_build】
             手表上没有 JDK/Kotlin 编译器/Android SDK，编 apk、跑 gradle、用 gcc 这类需求
             本地永远做不到。这时用 cloud_build 走云端 GitHub Actions：
-            先用 write_file 把源码写进工作目录，再用 inputs.command 传命令
-            （模板 dsh-run.yml 接收 command，产物请写到 dsh-out/；构建本项目 APK 用 dsh-build.yml）。
-            它会等待结束并把产物下载回 `artifacts/` 目录。
-            注意两点：① 代码会离开设备发到用户自己的仓库，所以每次都会请用户确认；
-            ② 云端跑一次要几分钟，**不要重复触发**，要看进度用 cloud_job。
+            用 write_file 把源码写进工作目录，再用 inputs.command 传命令 ——
+            **工作目录里的文件会被自动打包上传**，所以命令行直接引用文件名就行
+            （例如 `python main.py`、`gcc main.c -o main && ./main`）。
+            产物请写到 dsh-out/，它会下载回 `artifacts/` 目录；构建本项目 APK 用 dsh-build.yml。
+            注意三点：① 代码会离开设备发到用户自己的仓库，所以每次都会请用户确认；
+            ② 云端跑一次要几分钟，**不要重复触发**，要看进度用 cloud_job；
+            ③ 工作目录文件太多太大时会超出云端能接收的长度上限，这时用 files 参数只挑必要的文件。
 
             【需要用户操作时，直接送他过去】
             要用户手动做某件事（配置 API Key、开本地执行、看产物、设日程）时，用 open_screen / open_file /
