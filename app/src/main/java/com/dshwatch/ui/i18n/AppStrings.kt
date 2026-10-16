@@ -115,6 +115,24 @@ interface AppStrings {
     val showReasoning: String
     val showTokenBadge: String
     val groupData: String
+
+    // 设置分组（按「用户想干什么」分，而不是按实现模块分）
+    val groupModel: String
+    val groupAbility: String
+    val groupChat: String
+    val groupFiles: String
+    val groupRuntime: String
+    val groupConnection: String
+
+    // 设置页条目说明
+    val entryProviderUnset: String
+    val entryUsageDesc: String
+    val entryPairDesc: String
+    val entryWorkspaceDesc: String
+    val entryDiagnosticsDesc: String
+    val entryAboutDesc: String
+    val entryAgentStepsDesc: String
+    val entryStorageDesc: String
     val storageUsed: String
 
     // 供应商
@@ -441,6 +459,22 @@ object Zh : AppStrings {
     override val showReasoning = "显示思维链"
     override val showTokenBadge = "显示 token 角标"
     override val groupData = "数据"
+
+    override val groupModel = "模型"
+    override val groupAbility = "AI 能力"
+    override val groupChat = "对话"
+    override val groupFiles = "文件与存储"
+    override val groupRuntime = "性能与运行"
+    override val groupConnection = "连接与关于"
+
+    override val entryProviderUnset = "未配置"
+    override val entryUsageDesc = "token 消耗与估算花费"
+    override val entryPairDesc = "连接电脑上的 DSH"
+    override val entryWorkspaceDesc = "AI 生成的文件与构建产物"
+    override val entryDiagnosticsDesc = "连不上时先跑这个，能看到每一步的原始报错"
+    override val entryAboutDesc = "版本、更新日志与作者"
+    override val entryAgentStepsDesc = "单次任务最多跑几轮工具"
+    override val entryStorageDesc = "会话、工作空间与缓存合计"
     override val storageUsed = "本地占用"
 
     override val providersTitle = "供应商"
@@ -794,6 +828,22 @@ object En : AppStrings {
     override val showReasoning = "Show reasoning"
     override val showTokenBadge = "Show token badge"
     override val groupData = "Data"
+
+    override val groupModel = "Model"
+    override val groupAbility = "AI capability"
+    override val groupChat = "Chat"
+    override val groupFiles = "Files & storage"
+    override val groupRuntime = "Performance & runtime"
+    override val groupConnection = "Connection & about"
+
+    override val entryProviderUnset = "Not configured"
+    override val entryUsageDesc = "Token usage and estimated cost"
+    override val entryPairDesc = "Connect to DSH on your computer"
+    override val entryWorkspaceDesc = "Files and build outputs from AI"
+    override val entryDiagnosticsDesc = "Run this first when it fails; shows the raw error at each step"
+    override val entryAboutDesc = "Version, changelog and author"
+    override val entryAgentStepsDesc = "Max tool rounds per task"
+    override val entryStorageDesc = "Sessions, workspace and cache combined"
     override val storageUsed = "Local storage"
 
     override val providersTitle = "Providers"

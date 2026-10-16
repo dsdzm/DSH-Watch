@@ -323,7 +323,7 @@ fun SegmentedRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -334,7 +334,7 @@ fun SegmentedRow(
                 modifier = Modifier
                     .weight(1f)
                     .height(30.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(11.dp))
                     .background(
                         if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
                     )
@@ -408,7 +408,7 @@ private fun StepButton(
     Box(
         modifier = Modifier
             .size(26.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(11.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .tap(enabled = enabled, onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
@@ -435,7 +435,7 @@ fun Chip(
     Box(
         modifier = Modifier
             .height(WatchDimens.chipHeight)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(
                 if (selected) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surfaceContainerHigh
@@ -469,7 +469,7 @@ fun PrimaryButton(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .background(
                 if (enabled) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -515,8 +515,8 @@ fun GhostButton(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, tint.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .border(1.dp, tint.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
             .tap(onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
     ) {

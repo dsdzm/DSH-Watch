@@ -43,6 +43,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/**
+ * 设置主页。
+ *
+ * ## 分组原则
+ *
+ * 按「用户想干什么」分，**不按实现模块分**。这一页有三十多个开关，分组是它唯一的秩序来源：
+ *
+ * | 分组 | 回答的问题 |
+ * | --- | --- |
+ * | 模型 | 用哪个 API、花了多少 |
+ * | AI 能力 | Agent 怎么干活的、能干什么 |
+ * | 对话 | 聊天时看得到什么 |
+ * | 外观 | 长什么样 |
+ * | 文件与存储 | AI 的文件在哪、占多少 |
+ * | 性能与运行 | 卡不卡、费不费电、退到后台还跑不跑 |
+ * | 连接与关于 | 连不上怎么办、这是哪个版本 |
+ *
+ * 上一版把所有「入口」塞进一个叫「快捷入口」的组 —— 供应商、用量、配对、工作空间、
+ * 诊断、执行编译混在一起，而「工作空间」在入口区和自己那一组里**各出现一次**。
+ * 结果是找一个设置只能靠滚。现在各项各归其位，同类才相邻。
+ */
 @Composable
 fun SettingsScreen(
     container: AppContainer,
@@ -71,6 +92,14 @@ fun SettingsScreen(
     }
 
     val perf = PerfProfiles.of(settings.perfMode, profile.tier)
+    val execSummary = if (settings.localExecEnabled || settings.cloudBuildEnabled) {
+        "已开启：" + listOfNotNull(
+            "本地执行".takeIf { settings.localExecEnabled },
+            "云端编译".takeIf { settings.cloudBuildEnabled },
+        ).joinToString("、")
+    } else {
+        s.execSectionDesc
+    }
 
     WatchScaffold(title = s.settingsTitle, onBack = { nav.pop() }) {
         Column(
@@ -79,61 +108,106 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 8.dp),
         ) {
-            // ---------------- 入口 ----------------
-            SectionHeader("快捷入口")
+            // ---------------- 1. 模型 ----------------
+            SectionHeader(s.groupModel)
             SettingCard {
                 SettingRow(
                     title = s.providersTitle,
-                    subtitle = settings.activeProvider?.name ?: "未配置",
+                    subtitle = settings.activeProvider?.name ?: s.entryProviderUnset,
                     trailing = "›",
                     showDivider = true,
                     onClick = { nav.push(Screen.Providers) },
                 )
                 SettingRow(
                     title = s.usageTitle,
-                    subtitle = "查看 token 消耗与估算花费",
+                    subtitle = s.entryUsageDesc,
                     trailing = "›",
-                    showDivider = true,
                     onClick = { nav.push(Screen.Usage) },
                 )
+            }
+
+            // ---------------- 2. AI 能力 ----------------
+            SectionHeader(s.groupAbility)
+            SettingCard {
                 SettingRow(
-                    title = s.pairTitle,
-                    subtitle = "连接电脑上的 DSH",
-                    trailing = "›",
+                    title = s.agentMode,
+                    subtitle = settings.agentMode.desc,
+                    trailing = settings.agentMode.label,
                     showDivider = true,
-                    onClick = { nav.push(Screen.Pair) },
+                    onClick = { showAgentDialog = true },
+                )
+                StepperRow(
+                    title = s.agentMaxSteps,
+                    subtitle = s.entryAgentStepsDesc,
+                    value = settings.maxAgentSteps.toString(),
+                    onDecrease = {
+                        update { it.copy(maxAgentSteps = (settings.maxAgentSteps - 2).coerceAtLeast(1)) }
+                    },
+                    onIncrease = {
+                        update { it.copy(maxAgentSteps = (settings.maxAgentSteps + 2).coerceAtMost(20)) }
+                    },
                 )
                 SettingRow(
-                    title = s.navWorkspace,
-                    subtitle = "AI 生成的文件与构建产物",
-                    trailing = "›",
-                    showDivider = true,
-                    onClick = { nav.push(Screen.Workspace) },
+                    title = s.agentTools,
+                    subtitle = s.agentToolsHint,
+                    trailing = "${tools.size} ›",
+                    showDivider = showTools,
+                    onClick = { showTools = !showTools },
                 )
-                SettingRow(
-                    title = s.navDiagnostics,
-                    subtitle = "连不上时先跑这个，能看到每一步的原始报错",
-                    trailing = "›",
-                    onClick = { nav.push(Screen.Diagnostics) },
-                )
+                if (showTools) {
+                    tools.forEach { tool ->
+                        Text(
+                            text = "· ${tool.name}（${tool.safety.label}）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                if (settings.autoApprovedTools.isNotEmpty()) {
+                    SettingRow(
+                        title = s.agentClearApprovals,
+                        subtitle = settings.autoApprovedTools.joinToString(", "),
+                        showDivider = true,
+                        onClick = { update { it.copy(autoApprovedTools = emptySet()) } },
+                    )
+                }
+                // 执行与编译：本地跑脚本、云端跑构建 —— 是「能力」，跟着 Agent 走
                 SettingRow(
                     title = s.execSectionTitle,
-                    subtitle = if (settings.localExecEnabled || settings.cloudBuildEnabled) {
-                        "已开启：" +
-                            listOfNotNull(
-                                "本地执行".takeIf { settings.localExecEnabled },
-                                "云端编译".takeIf { settings.cloudBuildEnabled },
-                            ).joinToString("、")
-                    } else {
-                        s.execSectionDesc
-                    },
+                    subtitle = execSummary,
                     trailing = "›",
-                    showDivider = false,
                     onClick = { nav.push(Screen.ExecSettings) },
                 )
             }
 
-            // ---------------- 外观 ----------------
+            // ---------------- 3. 对话 ----------------
+            SectionHeader(s.groupChat)
+            SettingCard {
+                SwitchRow(
+                    title = s.showReasoning,
+                    checked = settings.showReasoning,
+                    onCheckedChange = { v -> update { it.copy(showReasoning = v) } },
+                )
+                SwitchRow(
+                    title = s.autoScroll,
+                    checked = settings.autoScroll,
+                    onCheckedChange = { v -> update { it.copy(autoScroll = v) } },
+                )
+                SwitchRow(
+                    title = s.showTokenBadge,
+                    checked = settings.showTokenBadge,
+                    onCheckedChange = { v -> update { it.copy(showTokenBadge = v) } },
+                )
+                SwitchRow(
+                    title = s.haptics,
+                    checked = settings.haptics,
+                    onCheckedChange = { v -> update { it.copy(haptics = v) } },
+                )
+            }
+
+            // ---------------- 4. 外观 ----------------
             SectionHeader(s.groupAppearance)
             SettingCard {
                 Text(
@@ -219,6 +293,7 @@ fun SettingsScreen(
                     SettingRow(
                         title = s.reset,
                         trailing = s.cornerInsetAuto,
+                        showDivider = true,
                         onClick = { update { it.copy(cornerInsetDp = -1) } },
                     )
                 }
@@ -226,62 +301,13 @@ fun SettingsScreen(
                     title = s.showMascot,
                     subtitle = s.mascotHint,
                     trailing = if (settings.showMascot) "✓" else "—",
-                    showDivider = true,
                     onClick = { update { it.copy(showMascot = !it.showMascot) } },
                 )
                 Spacer(Modifier.height(4.dp))
             }
 
-            // ---------------- AI Agent ----------------
-            SectionHeader(s.groupAgent)
-            SettingCard {
-                SettingRow(
-                    title = s.agentMode,
-                    subtitle = settings.agentMode.desc,
-                    trailing = settings.agentMode.label,
-                    showDivider = true,
-                    onClick = { showAgentDialog = true },
-                )
-                StepperRow(
-                    title = s.agentMaxSteps,
-                    subtitle = "单次任务最多跑几轮工具",
-                    value = settings.maxAgentSteps.toString(),
-                    onDecrease = {
-                        update { it.copy(maxAgentSteps = (settings.maxAgentSteps - 2).coerceAtLeast(1)) }
-                    },
-                    onIncrease = {
-                        update { it.copy(maxAgentSteps = (settings.maxAgentSteps + 2).coerceAtMost(20)) }
-                    },
-                )
-                SettingRow(
-                    title = s.agentTools,
-                    subtitle = s.agentToolsHint,
-                    trailing = "${tools.size} ›",
-                    showDivider = showTools,
-                    onClick = { showTools = !showTools },
-                )
-                if (showTools) {
-                    tools.forEach { tool ->
-                        Text(
-                            text = "· ${tool.name}（${tool.safety.label}）",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 2.dp),
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-                if (settings.autoApprovedTools.isNotEmpty()) {
-                    SettingRow(
-                        title = s.agentClearApprovals,
-                        subtitle = settings.autoApprovedTools.joinToString(", "),
-                        onClick = { update { it.copy(autoApprovedTools = emptySet()) } },
-                    )
-                }
-            }
-
-            // ---------------- 工作空间 ----------------
-            SectionHeader(s.navWorkspace)
+            // ---------------- 5. 文件与存储 ----------------
+            SectionHeader(s.groupFiles)
             SettingCard {
                 SettingRow(
                     title = s.workspaceLocation,
@@ -309,12 +335,18 @@ fun SettingsScreen(
                     title = s.workspaceRootPath,
                     subtitle = workspacePath,
                     trailing = "›",
+                    showDivider = true,
                     onClick = { nav.push(Screen.Workspace) },
+                )
+                SettingRow(
+                    title = s.storageUsed,
+                    subtitle = s.entryStorageDesc,
+                    trailing = storageText,
                 )
             }
 
-            // ---------------- 性能 ----------------
-            SectionHeader(s.groupPerformance)
+            // ---------------- 6. 性能与运行 ----------------
+            SectionHeader(s.groupRuntime)
             SettingCard {
                 Text(
                     text = s.perfMode,
@@ -412,6 +444,7 @@ fun SettingsScreen(
                 if (settings.maxRenderedMessagesOverride > 0 || settings.streamThrottleOverrideMs > 0) {
                     SettingRow(
                         title = s.reset,
+                        showDivider = true,
                         onClick = {
                             update {
                                 it.copy(
@@ -422,11 +455,7 @@ fun SettingsScreen(
                         },
                     )
                 }
-            }
-
-            // ---------------- 行为 ----------------
-            SectionHeader(s.groupBehavior)
-            SettingCard {
+                Spacer(Modifier.height(4.dp))
                 SwitchRow(
                     title = s.foregroundService,
                     subtitle = s.foregroundServiceHint,
@@ -438,34 +467,28 @@ fun SettingsScreen(
                     checked = settings.keepScreenOn,
                     onCheckedChange = { v -> update { it.copy(keepScreenOn = v) } },
                 )
-                SwitchRow(
-                    title = s.autoScroll,
-                    checked = settings.autoScroll,
-                    onCheckedChange = { v -> update { it.copy(autoScroll = v) } },
-                )
-                SwitchRow(
-                    title = s.showReasoning,
-                    checked = settings.showReasoning,
-                    onCheckedChange = { v -> update { it.copy(showReasoning = v) } },
-                )
-                SwitchRow(
-                    title = s.showTokenBadge,
-                    checked = settings.showTokenBadge,
-                    onCheckedChange = { v -> update { it.copy(showTokenBadge = v) } },
-                )
-                SwitchRow(
-                    title = s.haptics,
-                    checked = settings.haptics,
-                    onCheckedChange = { v -> update { it.copy(haptics = v) } },
-                )
             }
 
-            // ---------------- 数据 ----------------
-            SectionHeader(s.groupData)
+            // ---------------- 7. 连接与关于 ----------------
+            SectionHeader(s.groupConnection)
             SettingCard {
-                SettingRow(title = s.storageUsed, trailing = storageText, showDivider = true)
+                SettingRow(
+                    title = s.pairTitle,
+                    subtitle = s.entryPairDesc,
+                    trailing = "›",
+                    showDivider = true,
+                    onClick = { nav.push(Screen.Pair) },
+                )
+                SettingRow(
+                    title = s.navDiagnostics,
+                    subtitle = s.entryDiagnosticsDesc,
+                    trailing = "›",
+                    showDivider = true,
+                    onClick = { nav.push(Screen.Diagnostics) },
+                )
                 SettingRow(
                     title = s.aboutTitle,
+                    subtitle = s.entryAboutDesc,
                     trailing = "›",
                     onClick = { nav.push(Screen.About) },
                 )
@@ -473,7 +496,8 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "当前生效：渲染 ${perf.maxRenderedMessages} 条 · 节流 ${perf.streamThrottleMs}ms · 代码着色 ${if (perf.enableCodeHighlight) "开" else "关"}",
+                text = "当前生效：渲染 ${perf.maxRenderedMessages} 条 · 节流 ${perf.streamThrottleMs}ms · " +
+                    "代码着色 ${if (perf.enableCodeHighlight) "开" else "关"}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(horizontal = 4.dp),

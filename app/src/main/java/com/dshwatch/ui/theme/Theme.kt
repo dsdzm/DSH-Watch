@@ -56,8 +56,9 @@ object WatchDimens {
     val iconButton: Dp = 34.dp
     val buttonHeight: Dp = 38.dp
 
-    val cardRadius: Dp = 14.dp
-    val bubbleRadius: Dp = 12.dp
+    // 圆角整体调大一档：手表屏幕小、信息密度高，圆一点更松弛，也和大 R 角屏幕更协调
+    val cardRadius: Dp = 18.dp
+    val bubbleRadius: Dp = 16.dp
     val chipHeight: Dp = 26.dp
 
     val hairline: Dp = 1.dp
