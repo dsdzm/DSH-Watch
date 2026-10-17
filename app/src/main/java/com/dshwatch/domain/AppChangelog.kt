@@ -18,6 +18,18 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.5",
+            date = "2026-10-17",
+            highlights = listOf(
+                "云端编译真正可用了：修掉装 SDK 失败、仓库没有 gradlew、源码包被忽略三处硬伤，" +
+                    "现在从触发到拿到 APK 全程无需人工干预",
+                "提交后不再卡住：立即返回运行链接，构建在云端继续跑，随时可查进度与日志",
+                "工具卡片直接标注预计耗时（通常 3–8 分钟，首次要下依赖会更久）",
+                "lite 版不再出现 Python 入口，也不会再尝试本地编译；需要 Python 用 full 版或云端",
+                "查询进度改为每分钟一次，省电也更省 GitHub 额度",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.4",
             date = "2026-10-17",
             highlights = listOf(

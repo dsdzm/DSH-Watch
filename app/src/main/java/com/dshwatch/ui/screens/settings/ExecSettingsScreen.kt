@@ -122,12 +122,22 @@ fun ExecSettingsScreen(
                         checked = settings.allowJs,
                         onCheckedChange = { on -> persist { it.copy(allowJs = on) } },
                     )
-                    SwitchRow(
-                        title = "Python",
-                        subtitle = if (pythonReady) s.execPythonReady else s.execPythonMissing,
-                        checked = settings.allowPython,
-                        onCheckedChange = { on -> persist { it.copy(allowPython = on) } },
-                    )
+                    if (pythonReady) {
+                        SwitchRow(
+                            title = "Python",
+                            subtitle = s.execPythonReady,
+                            checked = settings.allowPython,
+                            onCheckedChange = { on -> persist { it.copy(allowPython = on) } },
+                        )
+                    } else {
+                        // lite 版没有解释器：摆一个永远跑不起来的开关只会让人以为能用
+                        Text(
+                            text = s.execPythonMissing,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
                     StepperRow(
                         title = s.execTimeoutLabel,
                         value = "${settings.execTimeoutSec}${s.execSecondsSuffix}",

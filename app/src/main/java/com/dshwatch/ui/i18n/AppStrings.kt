@@ -243,6 +243,7 @@ interface AppStrings {
     val execPythonMissing: String
     val execConfirmNotice: String
     val cloudEnable: String
+    val cloudBuildEta: String
     val cloudEnableDesc: String
     val cloudRepoLabel: String
     val cloudRepoHint: String
@@ -736,6 +737,7 @@ object Zh : AppStrings {
         "本地执行权限很大：脚本能读写当前工作目录、能联网。" +
             "开启后每次执行仍会单独确认一次，不会因为你点过「总是允许」就永久放行。"
     override val cloudEnable = "启用云端编译"
+    override val cloudBuildEta = "云端构建通常 3–8 分钟，首次要下依赖会更久"
     override val cloudEnableDesc = "把手表做不了的事（编 apk、跑 gradle）交给 GitHub Actions"
     override val cloudRepoLabel = "目标仓库"
     override val cloudRepoHint = "只写 owner/repo，如 dsdzm/DSH-Watch"
@@ -1142,6 +1144,7 @@ object En : AppStrings {
             "directory and use the network. Even when enabled, every run asks for " +
             "confirmation again — an \"always allow\" tap never unlocks it permanently."
     override val cloudEnable = "Enable cloud build"
+    override val cloudBuildEta = "Cloud builds usually take 3–8 min; the first run is slower"
     override val cloudEnableDesc = "Hand tasks a watch cannot do (APK, gradle) to GitHub Actions"
     override val cloudRepoLabel = "Target repository"
     override val cloudRepoHint = "owner/repo only, e.g. dsdzm/DSH-Watch"

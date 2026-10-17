@@ -6,6 +6,32 @@
 
 ---
 
+## [1.5] — 2026-10-17（versionCode 13）
+
+### 修复
+
+- **云端编译从「必然失败」变成「能出包」**，三个独立故障：
+  1. `android-actions/setup-android@v3` 默认安装已下架的 `tools` 包，
+     `sdkmanager` 返回非零后 job 直接结束 —— 改用 runner 自带 SDK，
+     只补 `platform-tools` / `platforms;android-35` / `build-tools;35.0.0`
+  2. 目标仓库只放 workflow、没有源码，`chmod ./gradlew` 找不到文件 ——
+     模板新增 `source_repo`，缺源码时浅克隆后构建
+  3. `.gitignore` 里裸写 `build/` 把 `domain/agent/build/` 整个包忽略，
+     推上去的仓库缺 3 个源文件，克隆下来必然 `Unresolved reference 'build'`
+- **`cloud_build` 默认不再阻塞等待**：提交后立即返回 run 链接，
+  构建在云端继续；进度用 `cloud_job(action=status)` 查
+- **轮询间隔 8 秒 → 60 秒**：云端构建本来就要几分钟，高频查询既费电又吃额度
+
+### 改进
+
+- 云端编译的工具卡片上直接显示预计耗时（3–8 分钟，首次更久）
+- lite 版隐藏 Python 入口，`run_script` 的能力清单也只列 shell / js；
+  系统提示同步说明「本机没有编译器，不要说在本地编译」
+
+---
+
+
+
 ## [1.4] — 2026-10-17（versionCode 12）
 
 ### 新增

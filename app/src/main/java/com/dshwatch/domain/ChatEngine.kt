@@ -16,6 +16,7 @@ import com.dshwatch.domain.agent.ToolArgs
 import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
+import com.dshwatch.domain.agent.exec.PythonBridge
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
@@ -1088,6 +1089,17 @@ class ChatEngine(
         }
         // Agent 模式下追加一段工具使用约定：
         // 不加的话模型经常把工具当装饰不用，或者凭记忆编造实时信息。
+        //
+        // 能力清单必须按**本安装实际有的引擎**生成：lite 版没有 CPython，
+        // 若还告诉模型"可以跑 Python"，它就会去调、失败、再解释一遍 —— 用户看到的是
+        // "明明说支持却跑不了"。这里直接不给这个选项。
+        val pythonReady = PythonBridge.classPresent()
+        val pythonLine = if (pythonReady) {
+            "- language=python：真 CPython（仅标准库）。"
+        } else {
+            "- language=python：**本次安装不含 Python 引擎（lite 版），不要调用**；" +
+                "需要 Python 就交给 cloud_build 在云端跑。"
+        }
         val agentHint = if (settings.agentMode != AgentMode.OFF) {
             """
 
@@ -1110,6 +1122,7 @@ class ChatEngine(
             写完代码后调一次 build_project。它会按语言做静态检查（括号与字符串闭合、
             Python 缩进与冒号、HTML/XML 标签配对、JSON/YAML 语法等）并给出「文件:行号」。
             这是你**在本机验证代码最快的手段**，不要写完就直接交付。
+            ⚠️ 它只做静态校验，**不产出可执行文件** —— 手表上没有编译器，别说"我在本地编译"。
             有报错就改完再调一次，直到通过。
 
             【校验通过 ≠ 真的能跑，要跑就用 run_script】
@@ -1117,7 +1130,7 @@ class ChatEngine(
             只有执行才暴露。要验证结果对不对，用 run_script 真的跑一遍：
             - language=shell：设备上真实的 sh，可以 `ls`、`grep`、`sed`、跑已写好的 sh 脚本；
             - language=js：JavaScript（ES6，**不支持 async/await**，无 DOM/fetch）；
-            - language=python：真 CPython（仅标准库；lite 版会明确告知不可用）。
+            $pythonLine
             ⚠️ **shell 里没有 python / node / java / gcc** —— 手表上没有系统级运行时，
             三种语言是彼此独立的执行路径。`language=shell` + `python main.py` 一定失败，
             要跑 Python 就传 language=python、把源码放在 code 里（或先 write_file 再用 python 读它）。

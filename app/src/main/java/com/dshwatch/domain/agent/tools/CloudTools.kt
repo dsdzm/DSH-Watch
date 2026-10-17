@@ -52,7 +52,8 @@ object CloudTools {
     fun all(): List<AgentTool> = listOf(CloudBuildTool, CloudJobTool)
 
     /** 轮询间隔：Actions 起步就要十几秒，8 秒一次既及时又不会刷爆速率限制 */
-    private const val POLL_INTERVAL_MS = 8_000L
+    // 一分钟一次：云端构建本来就要 5–10 分钟，8 秒一查纯属浪费额度与电量
+    private const val POLL_INTERVAL_MS = 60_000L
 
     object CloudBuildTool : AgentTool {
         override val name = "cloud_build"

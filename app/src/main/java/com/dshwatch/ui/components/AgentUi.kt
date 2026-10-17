@@ -162,6 +162,18 @@ fun ToolCallCard(
             )
         }
 
+        // 云端构建要几分钟，卡片上先把预期写清楚 —— 否则用户只会看到"一直在跑"
+        if (call.name == "cloud_build") {
+            Text(
+                text = s.cloudBuildEta,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 28.dp, top = 1.dp),
+            )
+        }
+
         // 参数摘要常显：用户不用展开就知道它动了什么
         if (call.summary.isNotBlank()) {
             Spacer(Modifier.height(2.dp))

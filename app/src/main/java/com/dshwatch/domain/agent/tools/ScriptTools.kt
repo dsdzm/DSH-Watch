@@ -71,14 +71,27 @@ object ScriptTools {
 
     object RunScriptTool : AgentTool {
         override val name = "run_script"
+
+        // 能力清单按本安装实际有的引擎生成：lite 版没有 CPython，
+        // 描述里就不该出现「可以跑 Python」—— 否则模型会一直试，用户只看到失败。
+        private val pythonReady = PythonBridge.classPresent()
+
+        private val pythonNote = if (pythonReady) {
+            "- language=python：真 CPython，仅标准库（full 版才有）。" +
+                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
+                "几种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
+                "要跑 Python 就用 language=python，要跑 JS 就用 language=js。"
+        } else {
+            "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时。" +
+                "本安装不含 Python 引擎，**不要用 language=python**；需要 Python 就交给 cloud_build。"
+        }
+
         override val description =
-            "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。三种语言：" +
+            "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。" +
+                (if (pythonReady) "三种语言：" else "两种语言（lite 版没有 Python）：") +
                 "- language=shell：设备上真实的 sh，管道、重定向、grep/sed/awk 都能用；" +
                 "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）；" +
-                "- language=python：真 CPython，仅标准库（full 版才有；lite 版会明确告诉你不可用）。" +
-                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
-                "三种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
-                "要跑 Python 就用 language=python，要跑 JS 就用 language=js。" +
+                pythonNote +
                 "什么时候用：写完代码想验证**真的能跑通、结果对不对**时用。" +
                 "只想快速查语法错误用 build_project（更快、零风险）。" +
                 "需要「编译出东西」（apk、gcc、gradle）用 cloud_build —— 那些本机做不到。" +
@@ -90,7 +103,7 @@ object ScriptTools {
             properties = mapOf(
                 "language" to Schema.str(
                     "执行语言",
-                    enum = listOf("shell", "js", "python"),
+                    enum = if (pythonReady) listOf("shell", "js", "python") else listOf("shell", "js"),
                 ),
                 "code" to Schema.str(
                     "脚本正文。不要写成文件路径 —— 这里直接放源码；" +
