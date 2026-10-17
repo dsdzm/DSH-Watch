@@ -1474,6 +1474,8 @@ write_file 写源码 → cloud_build 触发 workflow → 轮询到结束
 - 日志可能几十 MB，只取尾部
 
 > 完整用法（两个模板的分工、产物怎么回来、常见错误对照表）见 **[docs/CLOUD.md](docs/CLOUD.md)**。
+> v1.5 修掉的三处云端硬伤（装 SDK 失败 / 仓库没有 gradlew / 源码包被 .gitignore 吞掉）
+> 的根因与验证方式见 **[docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)**。
 
 **模板**（`app/src/main/assets/cloud/`，设置页一键装进你的仓库）：
 

@@ -28,6 +28,8 @@
 - lite 版隐藏 Python 入口，`run_script` 的能力清单也只列 shell / js；
   系统提示同步说明「本机没有编译器，不要说在本地编译」
 
+> 本版每处改动的根因、实现机制与验证方式见 **[docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)**。
+
 ---
 
 
