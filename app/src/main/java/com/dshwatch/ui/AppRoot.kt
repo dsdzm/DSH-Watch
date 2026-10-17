@@ -15,6 +15,7 @@ import com.dshwatch.ui.screens.provider.ProviderEditScreen
 import com.dshwatch.ui.screens.provider.ProvidersScreen
 import com.dshwatch.ui.screens.sessions.SessionsScreen
 import com.dshwatch.ui.screens.settings.ExecSettingsScreen
+import com.dshwatch.ui.screens.settings.SettingsGroupScreen
 import com.dshwatch.ui.screens.settings.SettingsScreen
 import com.dshwatch.ui.screens.usage.UsageScreen
 import com.dshwatch.ui.screens.workspace.WorkspacePreviewScreen
@@ -46,6 +47,14 @@ fun AppRoot(
             settings = settings,
             nav = nav,
         )
+        is Screen.SettingsGroup -> SettingsGroupScreen(
+            groupId = screen.id,
+            container = container,
+            settings = settings,
+            profile = profile,
+            nav = nav,
+        )
+
         is Screen.WorkspacePreview -> WorkspacePreviewScreen(
             container = container,
             path = screen.path,

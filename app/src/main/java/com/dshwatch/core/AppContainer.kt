@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -94,27 +96,35 @@ class AppContainer(private val app: Context) {
      */
     val githubApi = com.dshwatch.domain.agent.cloud.GitHubApi { keyStore.getGithubToken() }
 
-    /** agent 工具集；ToolContext 通过 lambda 拿实时设备画像 */
-    private val _toolRegistry = MutableStateFlow(
-        ToolRegistry(
-            ToolContext(
-                appContext = app,
-                workspace = workspaceStore,
-                usage = usageRepo,
-                profile = { _profile.value },
-                // sessionDir 是空的：真正的会话目录在每次执行工具时由 withSession 换上
-                workspaceRoot = { workspaceStore.rootPath() },
-                prompter = promptChannel,
-                alarms = alarmStore,
-                todos = todoBoard,
-                uiActions = uiActions,
-                settings = { settings.value },
-                cloudRuns = cloudRunStore,
-                github = githubApi,
-            )
-        )
+    /**
+     * 工具的公共上下文。
+     *
+     * 提成字段而不是内联在 ToolRegistry 构造里：MCP 连上/断开后要**重建**注册表，
+     * 重建时得复用同一个上下文（尤其 `settings` 那个 lambda —— 换成快照会让
+     * 工具一直看到旧设置）。
+     */
+    private val toolContext = ToolContext(
+        appContext = app,
+        workspace = workspaceStore,
+        usage = usageRepo,
+        profile = { _profile.value },
+        // sessionDir 是空的：真正的会话目录在每次执行工具时由 withSession 换上
+        workspaceRoot = { workspaceStore.rootPath() },
+        prompter = promptChannel,
+        alarms = alarmStore,
+        todos = todoBoard,
+        uiActions = uiActions,
+        settings = { settings.value },
+        cloudRuns = cloudRunStore,
+        github = githubApi,
     )
+
+    /** agent 工具集；ToolContext 通过 lambda 拿实时设备画像 */
+    private val _toolRegistry = MutableStateFlow(ToolRegistry(toolContext))
     val toolRegistry: StateFlow<ToolRegistry> = _toolRegistry.asStateFlow()
+
+    /** MCP 连接池：连接远程 server 并把它们的工具并入注册表 */
+    val mcpManager = com.dshwatch.domain.agent.mcp.McpManager(toolContext, keyStore)
 
     val settings: StateFlow<AppSettings> = settingsRepo.flow
         .stateIn(appScope, SharingStarted.Eagerly, AppSettings())
@@ -153,6 +163,33 @@ class AppContainer(private val app: Context) {
         appScope.launch { usageRepo.ensureLoaded() }
 
         appScope.launch {
+            // MCP 连接对齐。
+            // 用增量而不是"每次都全断全连"：用户只是勾掉一个工具时，
+            // 全量重连要等好几秒，而那个改动根本不需要重新握手。
+            settings
+                .map { it.mcpServers }
+                .distinctUntilChanged()
+                .collect { servers ->
+                    val wanted = servers.filter { it.enabled && it.confirmed && it.isValid }
+                        .map { it.id }.toSet()
+
+                    mcpManager.connectedIds().filter { it !in wanted }.forEach { mcpManager.disconnect(it) }
+
+                    var connectedAny = false
+                    for (server in servers.filter { it.id in wanted }) {
+                        if (server.id in mcpManager.connectedIds()) continue
+                        val outcome = runCatching { mcpManager.connect(server) }.getOrNull()
+                        if (outcome is com.dshwatch.domain.agent.mcp.McpConnectOutcome.Ok) {
+                            connectedAny = true
+                        }
+                    }
+
+                    // disabledTools 变化不需要重连，但需要重建表（工具会被过滤掉）
+                    if (connectedAny || servers.isNotEmpty()) refreshToolRegistry()
+                }
+        }
+
+        appScope.launch {
             // 清掉升级前堆积的空会话：旧版本每点一次「新建对话」就落一条盘，
             // 用户点几下之后列表里全是同名、点开没内容的「新对话」。
             // 现在既不再产生，也要把历史存量收干净。
@@ -179,6 +216,17 @@ class AppContainer(private val app: Context) {
                 }
             }
         }
+    }
+
+    /**
+     * 用「内置工具 + 当前 MCP 工具」重建注册表。
+     *
+     * 引擎每轮都实时读 `_toolRegistry.value`，所以热替换就能立刻生效 ——
+     * **不需要改 ChatEngine 一行代码**。这也是当初把注册表放在 StateFlow 上的原因。
+     */
+    fun refreshToolRegistry() {
+        val builtin = com.dshwatch.domain.agent.tools.BuiltinTools.all()
+        _toolRegistry.value = mcpManager.buildRegistry(builtin, settings.value.mcpServers)
     }
 
     /** 设置页用来显示工作空间实际路径 */

@@ -299,50 +299,75 @@ fun ChatScreen(
             return@WatchScaffold
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 2.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            val visible = if (messages.size > perf.maxRenderedMessages) {
-                messages.takeLast(perf.maxRenderedMessages)
-            } else {
-                messages
-            }
-            items(
-                items = visible,
-                key = { it.id },
-                contentType = { it.role },
-            ) { message ->
-                val isLive = live.messageId == message.id
-                MessageItem(
-                    message = message,
-                    live = if (isLive) live else null,
-                    settings = settings,
-                    onCopy = { text ->
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-                    },
-                    onRegenerate = { engine.regenerate(message.id) },
-                    onDelete = { pendingDelete = message },
-                    sizeOf = { path -> artifactSizeOf(container, path) },
-                    onOpenArtifact = { path -> nav.push(Screen.WorkspacePreview(path)) },
-                    onExportArtifact = { path ->
-                        // 导出要么成功（系统弹出分享面板，本身就是反馈），
-                        // 要么失败 —— 失败必须说出来。以前这里是一句 runCatching 吞掉，
-                        // 用户点了半天「没反应」，根本不知道发生了什么。
-                        val result = shareFile(context, container.workspaceStore.resolveForUi(path))
-                        if (result is ShareResult.Fail) {
-                            Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                )
+        // 消息区右下角：往上翻看历史时一键回到最新。
+        // 放在消息区的 Box 里，而不是 WatchScaffold 的 bottom 槽 —— 后者是输入框。
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val visible = if (messages.size > perf.maxRenderedMessages) {
+                    messages.takeLast(perf.maxRenderedMessages)
+                } else {
+                    messages
+                }
+                items(
+                    items = visible,
+                    key = { it.id },
+                    contentType = { it.role },
+                ) { message ->
+                    val isLive = live.messageId == message.id
+                    MessageItem(
+                        message = message,
+                        live = if (isLive) live else null,
+                        settings = settings,
+                        onCopy = { text ->
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                        },
+                        onRegenerate = { engine.regenerate(message.id) },
+                        onDelete = { pendingDelete = message },
+                        sizeOf = { path -> artifactSizeOf(container, path) },
+                        onOpenArtifact = { path -> nav.push(Screen.WorkspacePreview(path)) },
+                        onExportArtifact = { path ->
+                            // 导出要么成功（系统弹出分享面板，本身就是反馈），
+                            // 要么失败 —— 失败必须说出来。以前这里是一句 runCatching 吞掉，
+                            // 用户点了半天「没反应」，根本不知道发生了什么。
+                            val result = shareFile(context, container.workspaceStore.resolveForUi(path))
+                            if (result is ShareResult.Fail) {
+                                Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                    )
 
-                if (settings.showTokenBadge && message.role == Role.ASSISTANT && message.usage != null) {
-                    TokenBadgeBar(message)
+                    if (settings.showTokenBadge && message.role == Role.ASSISTANT && message.usage != null) {
+                        TokenBadgeBar(message)
+                    }
+                }
+                item(key = "__tail__") { Spacer(Modifier.height(6.dp)) }
+            }
+
+            if (!atBottom && messages.isNotEmpty()) {
+                // 带底色的圆形按钮：纯图标直接浮在消息上会看不清
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 2.dp, bottom = 2.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                ) {
+                    IconTap(
+                        icon = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = s.backToBottom,
+                        tint = MaterialTheme.colorScheme.primary,
+                    ) {
+                        scope.launch {
+                            runCatching { listState.animateScrollToItem(messages.lastIndex) }
+                        }
+                    }
                 }
             }
-            item(key = "__tail__") { Spacer(Modifier.height(6.dp)) }
         }
     }
 
@@ -376,15 +401,9 @@ fun ChatScreen(
     if (showAgentDialog) {
         AgentModeDialog(
             current = settings.agentMode,
-            maxSteps = settings.maxAgentSteps,
             onPickMode = { mode ->
                 scope.launch {
                     container.settingsRepo.update { it.copy(agentMode = mode) }
-                }
-            },
-            onStepsChange = { steps ->
-                scope.launch {
-                    container.settingsRepo.update { it.copy(maxAgentSteps = steps) }
                 }
             },
             onDismiss = { showAgentDialog = false },

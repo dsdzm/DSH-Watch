@@ -6,6 +6,12 @@ import com.dshwatch.data.store.ConversationStore
 import com.dshwatch.data.store.StoredConversation
 import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.agent.AgentTool
+import com.dshwatch.domain.agent.ProgressTracker
+import com.dshwatch.domain.plugin.PluginRegistry
+import com.dshwatch.domain.plugin.PromptContext
+import com.dshwatch.domain.plugin.TextClip
+import com.dshwatch.domain.plugin.ToolResultInput
+import com.dshwatch.domain.plugin.TurnContext
 import com.dshwatch.domain.agent.ToolArgs
 import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.agent.ToolResult
@@ -406,9 +412,27 @@ class ChatEngine(
             provider.type == ProviderType.OPENAI_COMPAT &&
             registry.tools.isNotEmpty()
         val toolSpecs = if (agentOn) registry.specs() else emptyList()
-        val maxSteps = if (agentOn) settings.maxAgentSteps.coerceIn(1, 20) else 1
+        // 不再用 settings.maxAgentSteps 限制轮数：它和任务复杂度无关 ——
+        // 读 8 个文件改 5 个文件的重构，20 步根本不够；而模型卡住时，
+        // 20 步全是重复调同一个工具，白烧二十轮 token。
+        // 真正会失控的是"原地打转"，交给 ProgressTracker 判断；这里的上限只防病态情况。
+        val maxSteps = if (agentOn) HARD_STEP_CEILING else 1
+        val progressTracker = if (agentOn) ProgressTracker() else null
 
-        val systemPrompt = buildSystemPrompt(provider, settings, conv.workDir)
+        // 插件：常驻段在这里算一次，路由段每轮现算（风神只在首轮插手）
+        val plugins = PluginRegistry.from(settings)
+        val baseSystemPrompt = buildSystemPrompt(provider, settings, conv.workDir)
+        val pluginPrompt = runCatching {
+            plugins.promptSuffix(PromptContext(settings = settings, workDir = conv.workDir))
+        }.getOrDefault("")
+        val systemPrompt = if (pluginPrompt.isBlank()) {
+            baseSystemPrompt
+        } else {
+            baseSystemPrompt + "\n\n" + pluginPrompt
+        }
+        // 首轮路由靠它判任务类型。取**第一条**用户消息而不是最后一条：
+        // 风神的语义是"这个会话在干什么"，而不是"这一句在说什么"
+        val firstUserMessage = workingList.firstOrNull { it.role == Role.USER }?.content.orEmpty()
         val apiKey = keyStore.getApiKey(provider.id).orEmpty()
         val token = keyStore.getServerToken(provider.id).orEmpty()
 
@@ -429,6 +453,22 @@ class ChatEngine(
             if (!currentCoroutineContext().isActive) break
             usedSteps = step
 
+            // 插件路由：目前只有风神，首轮返回 persona + 收窄工具面，之后返回 null
+            val overlay = runCatching {
+                plugins.overlay(
+                    TurnContext(step = step, firstUserMessage = firstUserMessage, settings = settings)
+                )
+            }.getOrNull()
+            val roundPrompt = overlay?.promptSuffix?.takeIf { it.isNotBlank() }
+                ?.let { systemPrompt + "\n\n" + it }
+                ?: systemPrompt
+            val roundSpecs = overlay?.allowedTools?.let { allowed ->
+                val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
+                // 收窄后一个都不剩就别收窄了 —— 否则模型没有任何工具可用，
+                // 表现为"这轮它什么都不做，只回一段文字"
+                narrowed.ifEmpty { toolSpecs }
+            } ?: toolSpecs
+
             val placeholder = ChatMessage(
                 id = Ids.new(),
                 role = Role.ASSISTANT,
@@ -448,7 +488,7 @@ class ChatEngine(
             // [assistant(tool_calls), tool, ...] 这组从中间切断，服务端直接 400。
             // 条数上限通过 maxTurns 交给裁剪器按组处理。
             val trimmed = TokenEstimator.trimToBudget(
-                systemTokens = TokenEstimator.estimate(systemPrompt),
+                systemTokens = TokenEstimator.estimate(roundPrompt),
                 history = turns,
                 contextWindow = provider.contextWindow,
                 maxOutputTokens = provider.maxTokens,
@@ -461,7 +501,7 @@ class ChatEngine(
                 apiKey = apiKey,
                 serverToken = token,
                 model = model,
-                systemPrompt = systemPrompt,
+                systemPrompt = roundPrompt,
                 history = trimmed,
                 temperature = provider.temperature,
                 topP = provider.topP,
@@ -470,7 +510,7 @@ class ChatEngine(
                 reasoningEffort = provider.reasoningEffort,
                 usageInStream = provider.requestUsageInStream,
                 remoteSessionId = conv.remoteSessionId,
-                tools = toolSpecs,
+                tools = roundSpecs,
             )
 
             val result = streamStep(request, placeholder, perf)
@@ -478,7 +518,7 @@ class ChatEngine(
 
             val estimated = result.usage == null
             val effectiveUsage = result.usage ?: TokenUsage(
-                prompt = TokenEstimator.estimateTurns(trimmed) + TokenEstimator.estimate(systemPrompt),
+                prompt = TokenEstimator.estimateTurns(trimmed) + TokenEstimator.estimate(roundPrompt),
                 completion = TokenEstimator.estimate(result.text) + TokenEstimator.estimate(result.reasoning),
             )
 
@@ -566,9 +606,31 @@ class ChatEngine(
                 sessionDir = conv.workDir,
             )
             executed.forEach { call ->
+                // 插件在这里接管工具结果 —— 这是**唯一**能省下 tool 结果 token 的位置。
+                // 放到别处都不行：太早（工具内部）拿不到工具名与产物，太晚（请求前）
+                // 消息已经被 trimToBudget 按组切过了。
+                val content = if (plugins.hasResultPlugins) {
+                    runCatching {
+                        plugins.transformToolResult(
+                            ToolResultInput(
+                                toolName = call.name,
+                                content = call.result,
+                                artifact = call.artifact.ifBlank { null },
+                                sessionDir = conv.workDir,
+                                workspace = registry.toolContext.workspace,
+                                settings = settings,
+                            )
+                        )
+                    }.getOrElse { t ->
+                        Logx.w(TAG, "插件处理工具结果失败，用原内容", t)
+                        call.result
+                    }
+                } else {
+                    call.result
+                }
                 turns = turns + ChatTurn(
                     role = "tool",
-                    content = call.result.ifBlank { "(无输出)" },
+                    content = content.ifBlank { "(无输出)" },
                     toolCallId = call.id,
                 )
             }
@@ -588,12 +650,21 @@ class ChatEngine(
                 denialFedBack = true
             }
 
-            // 跑到最后一步仍然要调工具 → 说明任务没做完
+            // 停滞检测：连续几步没有任何新进展，就别再让它空转
+            val verdict = progressTracker?.record(executed)
+            if (verdict is ProgressTracker.Verdict.Stalled) {
+                _banner.value = Banner(verdict.reason + "任务可能卡住了 —— 可以补充信息后继续。")
+                break
+            }
+
+            // 跑到兜底上限仍在要工具（正常任务到不了这里）
             if (step == maxSteps) awaitingMoreSteps = true
         }
 
         if (failure == null && awaitingMoreSteps) {
-            _banner.value = Banner("已达到最大步数 $maxSteps，任务可能还没完成。可在「设置 → 行为」里调大。")
+            _banner.value = Banner(
+                "已连续执行 $HARD_STEP_CEILING 步仍未结束，已停下。任务可能过于复杂，建议拆成几步来做。"
+            )
         }
 
         val f = failure
@@ -829,7 +900,8 @@ class ChatEngine(
                 }
             val rec = call.copy(
                 status = if (result.ok) ToolStatus.SUCCESS else ToolStatus.FAILED,
-                result = result.content.take(MAX_TOOL_RESULT_CHARS),
+                // 头尾双留：报错永远在最后几行，只留头部等于把最有用的信息扔掉
+                result = TextClip.headTail(result.content, MAX_TOOL_RESULT_CHARS),
                 summary = summary,
                 startedAt = startedAt,
                 elapsedMs = System.currentTimeMillis() - startedAt,
@@ -1034,6 +1106,12 @@ class ChatEngine(
             ② 云端跑一次要几分钟，**不要重复触发**，要看进度用 cloud_job；
             ③ 工作目录文件太多太大时会超出云端能接收的长度上限，这时用 files 参数只挑必要的文件。
 
+            【以 mcp_ 开头的工具来自外部服务】
+            它们是用户自己接上的 MCP server 提供的，调用等于把参数**发到那台服务器**。
+            所以：只在这些工具确实能完成任务时用，不要为"试试看"而调用；
+            调用前在参数里只放必要的字段，别把整段文件内容或凭据塞进去；
+            失败了先读错误信息（通常写明了地址/权限问题），不要原样重试。
+
             【需要用户操作时，直接送他过去】
             要用户手动做某件事（配置 API Key、开本地执行、看产物、设日程）时，用 open_screen / open_file /
             create_event 把界面打开，而不是只在回答里描述路径 —— 手表屏幕上找菜单很费劲。
@@ -1134,6 +1212,14 @@ class ChatEngine(
     data class Banner(val text: String)
 
     companion object {
+
+        /**
+         * 兜底步数上限。
+         *
+         * 正常情况下靠 ProgressTracker 停（它检测"原地打转"）；
+         * 这个数字只是防止病态场景真的跑飞，正常任务永远碰不到。
+         */
+        private const val HARD_STEP_CEILING = 200
 
         /**
          * 每次都必须确认的工具。

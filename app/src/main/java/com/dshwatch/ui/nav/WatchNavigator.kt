@@ -21,6 +21,9 @@ sealed interface Screen {
     data class WorkspacePreview(val path: String) : Screen
     data class Input(val initial: String = "") : Screen
     data object ExecSettings : Screen
+
+    /** 设置页的二级分组（id 见 SettingsGroups） */
+    data class SettingsGroup(val id: String) : Screen
 }
 
 /**
@@ -83,6 +86,7 @@ class WatchNavigator internal constructor(
             Screen.ExecSettings -> "exec"
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
+            is Screen.SettingsGroup -> "sgroup${SEP}${screen.id}"
         }
 
         private fun decode(raw: String): Screen {
@@ -101,6 +105,7 @@ class WatchNavigator internal constructor(
                 "wsp" -> Screen.WorkspacePreview(parts.getOrNull(1).orEmpty())
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())
+                "sgroup" -> Screen.SettingsGroup(parts.getOrNull(1).orEmpty())
                 else -> Screen.Chat
             }
         }

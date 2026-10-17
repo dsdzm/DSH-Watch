@@ -398,13 +398,16 @@ private fun ApprovalButton(
     }
 }
 
-/** Agent 模式 + 步数上限的快捷设置弹窗（在聊天页就能改） */
+/**
+ * Agent 模式的快捷设置弹窗（聊天页和设置页都能改）。
+ *
+ * 这里**不再**提供「步数上限」：现在不按轮数限制，改成检测停滞
+ * （见 `ProgressTracker`）。留一个调不动的旋钮只会让人以为还有上限。
+ */
 @Composable
 fun AgentModeDialog(
     current: AgentMode,
-    maxSteps: Int,
     onPickMode: (AgentMode) -> Unit,
-    onStepsChange: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val s: AppStrings = LocalStrings.current
@@ -436,17 +439,12 @@ fun AgentModeDialog(
                         )
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "${s.agentMaxSteps}：$maxSteps",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip(text = "-2", onClick = { onStepsChange((maxSteps - 2).coerceAtLeast(1)) })
-                    Chip(text = "+2", onClick = { onStepsChange((maxSteps + 2).coerceAtMost(20)) })
-                }
+                Text(
+                    text = s.entryAgentStepsDesc,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
             }
         },
         confirmButton = {

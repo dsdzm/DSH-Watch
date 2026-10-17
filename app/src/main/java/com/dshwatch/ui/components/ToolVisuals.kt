@@ -80,7 +80,9 @@ object ToolVisuals {
         "cloud_build" -> Icons.Filled.Share
         "cloud_job" -> Icons.Filled.Info
 
-        else -> Icons.Filled.Build
+        // MCP 工具名字形如 mcp_<server>_<tool>，用 Share 图标表示"数据会出去"，
+        // 让用户一眼看出这不是 App 自带的能力
+        else -> if (tool.startsWith("mcp_")) Icons.Filled.Share else Icons.Filled.Build
     }
 
     /** 会产出文件、值得渲染「产物卡片」的工具 */

@@ -18,6 +18,19 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.4",
+            date = "2026-10-17",
+            highlights = listOf(
+                "新增「MCP 服务器」：把手表接上 GitHub、数据库、搜索这些外部服务，" +
+                    "对方的工具会直接出现在 Agent 的工具清单里",
+                "新增「插件」：四个可选模块 —— 工具结果裁剪、TOON 编码压缩、极简回复、" +
+                    "首轮路由，逐个开关，关掉即恢复默认",
+                "不再限制步数：长任务能一直做完；卡住时会自动停下并说明原因",
+                "设置页拆成二级：八个分组入口各带当前状态摘要，不用再滚动找东西",
+                "对话页新增「回到最新」按钮；整体圆角调大，更贴合手表的屏幕",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.3",
             date = "2026-10-15",
             highlights = listOf(

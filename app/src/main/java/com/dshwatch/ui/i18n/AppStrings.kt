@@ -42,6 +42,7 @@ interface AppStrings {
     val navChat: String
     val navSessions: String
     val navSettings: String
+    val backToBottom: String
     val navUsage: String
     val navProviders: String
     val navAbout: String
@@ -123,6 +124,21 @@ interface AppStrings {
     val groupFiles: String
     val groupRuntime: String
     val groupConnection: String
+    val groupPlugins: String
+    val pluginsHint: String
+    val groupMcp: String
+    val mcpHint: String
+    val mcpAdd: String
+    val mcpNameLabel: String
+    val mcpUrlLabel: String
+    val mcpTokenLabel: String
+    val mcpConnect: String
+    val mcpToolsTitle: String
+    val mcpToolsHint: String
+    val mcpEmpty: String
+
+    fun pluginTitle(id: String): String
+    fun pluginDesc(id: String): String
 
     // 设置页条目说明
     val entryProviderUnset: String
@@ -389,6 +405,7 @@ object Zh : AppStrings {
     override val navChat = "对话"
     override val navSessions = "会话"
     override val navSettings = "设置"
+    override val backToBottom = "回到最新"
     override val navUsage = "用量"
     override val navProviders = "供应商"
     override val navAbout = "关于"
@@ -466,6 +483,40 @@ object Zh : AppStrings {
     override val groupFiles = "文件与存储"
     override val groupRuntime = "性能与运行"
     override val groupConnection = "连接与关于"
+    override val groupPlugins = "插件"
+    override val groupMcp = "MCP 服务器"
+    override val mcpHint =
+        "MCP 能把手表接上外部服务（GitHub、数据库、搜索……）。" +
+            "对方的工具描述会进入模型上下文，所以第一次连接会先让你看清清单。"
+    override val mcpAdd = "添加服务器"
+    override val mcpNameLabel = "名称"
+    override val mcpUrlLabel = "MCP 地址"
+    override val mcpTokenLabel = "访问令牌"
+    override val mcpConnect = "保存并连接"
+    override val mcpToolsTitle = "工具清单"
+    override val mcpToolsHint = "这些描述会发给模型。不认识的项关掉即可，关掉的不会出现。"
+    override val mcpEmpty = "还没有添加服务器"
+    override val pluginsHint = "插件改变模型看到或写出的内容。关掉就完全回到默认行为。"
+
+    override fun pluginTitle(id: String): String = when (id) {
+        "dsh-token-saver" -> "结果裁剪"
+        "dsh-plugin-save-token" -> "TOON 编码"
+        "dsh-whale" -> "极简回复"
+        "dsh-fengshen" -> "首轮路由"
+        else -> id
+    }
+
+    override fun pluginDesc(id: String): String = when (id) {
+        "dsh-token-saver" ->
+            "工具结果太长时保留头尾、折叠中间。不改含义，只删冗余"
+        "dsh-plugin-save-token" ->
+            "把 JSON 结果压成表格形态，原文存进工作空间可随时取回（省得更多，但换了形态）"
+        "dsh-whale" ->
+            "回复不复述、不预告、不总结，省输出 token"
+        "dsh-fengshen" ->
+            "首轮判断是修 bug 还是建功能，只给 4 个工具，之后放开"
+        else -> ""
+    }
 
     override val entryProviderUnset = "未配置"
     override val entryUsageDesc = "token 消耗与估算花费"
@@ -473,7 +524,7 @@ object Zh : AppStrings {
     override val entryWorkspaceDesc = "AI 生成的文件与构建产物"
     override val entryDiagnosticsDesc = "连不上时先跑这个，能看到每一步的原始报错"
     override val entryAboutDesc = "版本、更新日志与作者"
-    override val entryAgentStepsDesc = "单次任务最多跑几轮工具"
+    override val entryAgentStepsDesc = "不再按轮数限制，停滞时自动停下"
     override val entryStorageDesc = "会话、工作空间与缓存合计"
     override val storageUsed = "本地占用"
 
@@ -573,7 +624,7 @@ object Zh : AppStrings {
 
     override val groupAgent = "AI Agent"
     override val agentMode = "工具调用策略"
-    override val agentMaxSteps = "最大步数"
+    override val agentMaxSteps = "步数限制"
     override val agentTools = "可用工具"
     override val agentToolsHint = "模型可以自主调用这些工具"
     override val agentClearApprovals = "清除「总是允许」记录"
@@ -758,6 +809,7 @@ object En : AppStrings {
     override val navChat = "Chat"
     override val navSessions = "Chats"
     override val navSettings = "Settings"
+    override val backToBottom = "Jump to latest"
     override val navUsage = "Usage"
     override val navProviders = "Providers"
     override val navAbout = "About"
@@ -835,6 +887,41 @@ object En : AppStrings {
     override val groupFiles = "Files & storage"
     override val groupRuntime = "Performance & runtime"
     override val groupConnection = "Connection & about"
+    override val groupPlugins = "Plugins"
+    override val groupMcp = "MCP servers"
+    override val mcpHint =
+        "MCP connects the watch to external services (GitHub, databases, search…). " +
+            "Their tool descriptions go into the model context, so the first connection shows you the list first."
+    override val mcpAdd = "Add server"
+    override val mcpNameLabel = "Name"
+    override val mcpUrlLabel = "MCP URL"
+    override val mcpTokenLabel = "Access token"
+    override val mcpConnect = "Save and connect"
+    override val mcpToolsTitle = "Tools"
+    override val mcpToolsHint = "These descriptions go to the model. Turn off anything you do not recognise."
+    override val mcpEmpty = "No servers yet"
+    override val pluginsHint =
+        "Plugins change what the model sees or writes. Turning one off restores the default behaviour."
+
+    override fun pluginTitle(id: String): String = when (id) {
+        "dsh-token-saver" -> "Result trimming"
+        "dsh-plugin-save-token" -> "TOON encoding"
+        "dsh-whale" -> "Terse replies"
+        "dsh-fengshen" -> "First-turn routing"
+        else -> id
+    }
+
+    override fun pluginDesc(id: String): String = when (id) {
+        "dsh-token-saver" ->
+            "Keep head and tail of long tool results, fold the middle. Meaning preserved"
+        "dsh-plugin-save-token" ->
+            "Re-encode JSON results as tables; the original is saved in the workspace (saves more, changes shape)"
+        "dsh-whale" ->
+            "No restating, no preamble, no summary — saves output tokens"
+        "dsh-fengshen" ->
+            "First turn decides bug-fix vs build, exposes only 4 tools, then lets go"
+        else -> ""
+    }
 
     override val entryProviderUnset = "Not configured"
     override val entryUsageDesc = "Token usage and estimated cost"
@@ -842,7 +929,7 @@ object En : AppStrings {
     override val entryWorkspaceDesc = "Files and build outputs from AI"
     override val entryDiagnosticsDesc = "Run this first when it fails; shows the raw error at each step"
     override val entryAboutDesc = "Version, changelog and author"
-    override val entryAgentStepsDesc = "Max tool rounds per task"
+    override val entryAgentStepsDesc = "No round limit; stops when stalled"
     override val entryStorageDesc = "Sessions, workspace and cache combined"
     override val storageUsed = "Local storage"
 
@@ -942,7 +1029,7 @@ object En : AppStrings {
 
     override val groupAgent = "AI Agent"
     override val agentMode = "Tool policy"
-    override val agentMaxSteps = "Max steps"
+    override val agentMaxSteps = "Step limit"
     override val agentTools = "Available tools"
     override val agentToolsHint = "Tools the model may call"
     override val agentClearApprovals = "Clear \"always allow\" list"

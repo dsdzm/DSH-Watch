@@ -184,9 +184,46 @@ data class AppSettings(
     val cloudWorkflowFile: String = "dsh-run.yml",
     /** 等待云端运行结束的上限（秒）。Actions 排队 + 构建经常要几分钟 */
     val cloudPollTimeoutSec: Int = 900,
+
+    // ---------------- 插件 ----------------
+    /**
+     * 已开启的插件 id。
+     *
+     * 存 id 集合而不是一堆布尔字段：插件会增删，用集合时新增插件不需要动
+     * 数据类的结构（老设置里没有它的 id 就是没开）。
+     *
+     * 默认值**不在这里写死**，而是由 `PluginRegistry.defaultEnabled()` 决定 ——
+     * 插件的默认开关是插件自己的属性，写两处必然对不上。
+     * 空集合表示"用的是默认值"，见 [pluginsResolved]。
+     */
+    val enabledPlugins: Set<String> = emptySet(),
+
+    /**
+     * 用户是否动过插件开关。
+     *
+     * 需要这个标志的原因：`enabledPlugins` 为空既可能是"用户全关了"，
+     * 也可能是"从没动过"（老版本升级上来）。两者行为完全不同 ——
+     * 前者要尊重用户，后者要套用默认值。用一个显式布尔区分，
+     * 比在空集合上猜要可靠得多。
+     */
+    val pluginsCustomized: Boolean = false,
+
+    // ---------------- MCP ----------------
+    /**
+     * 远程 MCP server 列表。
+     *
+     * 每个 server 默认 `enabled = false` —— 与 `cloud_build` 同档：
+     * 它会把工具调用的参数发到第三方，属于"数据离开设备"的操作，
+     * 必须由用户显式开启并确认工具清单。
+     */
+    val mcpServers: List<McpServerConfig> = emptyList(),
 ) {
     val activeProvider: Provider? get() = providers.firstOrNull { it.id == activeProviderId }
         ?: providers.firstOrNull()
 
     val isConfigured: Boolean get() = activeProvider != null
+
+    /** 实际生效的插件集合（区分"用户全关"与"从没设置过"） */
+    fun pluginsResolved(defaults: Set<String>): Set<String> =
+        if (pluginsCustomized) enabledPlugins else defaults
 }

@@ -38,6 +38,8 @@ import com.dshwatch.net.backend.DshError
 import com.dshwatch.net.backend.TurnSanitizer
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
@@ -133,6 +135,15 @@ class ChatEngineTest {
     }
 
     /** 不碰任何系统能力的工具，用来验证循环本身 */
+    /** 只关心"工具面里有没有它"，执行本身不重要 */
+    private class NamedTool(override val name: String) : AgentTool {
+        override val description = "测试用工具"
+        override val safety = ToolSafety.READ_ONLY
+        override val parameters = Schema.obj(properties = emptyMap(), required = emptyList())
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext) = ToolResult.ok("ok")
+    }
+
     private class EchoTool : AgentTool {
         override val name = "echo"
         override val description = "把输入原样返回"
@@ -351,6 +362,92 @@ class ChatEngineTest {
 
     // ================= Agent 循环 =================
 
+    // ---------------- 插件 hook 接线 ----------------
+
+    @Test
+    fun `whale plugin adds terseness to the system prompt`() = runTest {
+        // 验证的是**接线**：插件本身对，但 ChatEngine 没把它的输出拼进请求，
+        // 那用户打开开关后不会有任何变化，而单元测试仍然全绿
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            enabledPlugins = setOf("dsh-whale"),
+            pluginsCustomized = true,
+        )
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().systemPrompt).contains("极简")
+    }
+
+    @Test
+    fun `plugins off keeps the system prompt untouched`() = runTest {
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            enabledPlugins = emptySet(),
+            pluginsCustomized = true,
+        )
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().systemPrompt).doesNotContain("极简")
+        assertThat(backend.requests.first().systemPrompt).doesNotContain("首轮判定")
+    }
+
+    @Test
+    fun `fengshen narrows tools on the first turn then releases`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                toolCallScript(name = "read_file", argsChunks = listOf("""{"path":"a.txt"}""")),
+                toolCallScript(id = "call_2", name = "read_file", argsChunks = listOf("""{"path":"b.txt"}""")),
+                listOf(ChatEvent.Text("好了"), ChatEvent.Completed),
+            )
+        )
+        val settings = settingsWithProvider().copy(
+            agentMode = AgentMode.AUTO_ALL,
+            enabledPlugins = setOf("dsh-fengshen"),
+            pluginsCustomized = true,
+        )
+        val (engine, _) = buildEngine(
+            this,
+            settings,
+            backend,
+            tools = listOf(NamedTool("read_file"), NamedTool("delete_file")),
+        )
+
+        engine.send("帮我修复这个崩溃")
+        advanceUntilIdle()
+
+        assertThat(backend.requests[0].tools.map { it.toolName() }).containsExactly("read_file")
+        // 第二轮必须恢复全量 —— 一直收窄会让模型想用的工具不在清单里
+        assertThat(backend.requests[1].tools.map { it.toolName() })
+            .containsExactly("read_file", "delete_file")
+    }
+
+    @Test
+    fun `narrowing falls back to the full set when nothing survives`() = runTest {
+        // 收窄名单里的工具一个都不存在时不能把工具面清空 ——
+        // 那会让模型这一轮什么都做不了，只回一段文字
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            agentMode = AgentMode.AUTO_ALL,
+            enabledPlugins = setOf("dsh-fengshen"),
+            pluginsCustomized = true,
+        )
+        val (engine, _) = buildEngine(this, settings, backend, tools = listOf(EchoTool()))
+
+        engine.send("帮我修复这个崩溃")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().tools.map { it.toolName() }).containsExactly("echo")
+    }
+
+    private fun JsonObject.toolName(): String =
+        this["function"]!!.jsonObject["name"]!!.jsonPrimitive.content
+
     private fun toolCallScript(
         index: Int = 0,
         id: String = "call_1",
@@ -514,20 +611,42 @@ class ChatEngineTest {
     }
 
     @Test
-    fun `max steps stops a runaway loop`() = runTest {
+    fun `runaway loop is stopped by the stall detector, not by a step cap`() = runTest {
         val echo = EchoTool()
-        // 后端永远返回工具调用，如果没有步数上限就会无限循环
+        // 后端永远返回同一个工具、同一份参数 —— 模型在原地打转
         val backend = ScriptedBackend(List(10) { toolCallScript() })
+        // 故意把 maxAgentSteps 设成 3：它已经**不再**决定停止点
         val settings = settingsWithProvider().copy(agentMode = AgentMode.AUTO_ALL, maxAgentSteps = 3)
         val (engine, _) = buildEngine(this, settings, backend, tools = listOf(echo))
 
         engine.send("无限调用")
         advanceUntilIdle()
 
-        assertThat(backend.calls).isEqualTo(3)
-        assertThat(echo.executed).isEqualTo(3)
-        assertThat(engine.banner.value?.text).contains("最大步数")
+        // 第 1 步是新指纹（算进展），之后连续 3 步重复 → 第 4 次调用后判停滞
+        assertThat(backend.calls).isEqualTo(4)
+        assertThat(echo.executed).isEqualTo(4)
+        assertThat(engine.banner.value?.text.orEmpty()).contains("没有产生新结果")
         assertThat(engine.streaming.value).isFalse()
+    }
+
+    @Test
+    fun `step cap no longer stops a task that keeps making progress`() = runTest {
+        val echo = EchoTool()
+        // 每一步参数都不同 → 每步都是新指纹，属于"有进展"
+        val backend = ScriptedBackend(
+            List(3) { i ->
+                toolCallScript(id = "call_$i", argsChunks = listOf("""{"text":"step $i"}"""))
+            } + listOf(listOf(ChatEvent.Text("完成"), ChatEvent.Completed))
+        )
+        // maxAgentSteps = 1：旧实现会在这里就停
+        val settings = settingsWithProvider().copy(agentMode = AgentMode.AUTO_ALL, maxAgentSteps = 1)
+        val (engine, _) = buildEngine(this, settings, backend, tools = listOf(echo))
+
+        engine.send("做三步")
+        advanceUntilIdle()
+
+        assertThat(echo.executed).isEqualTo(3)
+        assertThat(engine.banner.value?.text.orEmpty()).isEmpty()
     }
 
     @Test

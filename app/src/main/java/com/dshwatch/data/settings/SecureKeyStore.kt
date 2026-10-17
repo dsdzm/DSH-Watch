@@ -93,6 +93,22 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
 
     fun putGithubToken(value: String?) = put(k(CLOUD_SCOPE, FIELD_GITHUB_TOKEN), value)
 
+    /**
+     * 某个 MCP server 的访问令牌。
+     *
+     * 用 `mcp:<serverId>` 作为合成 scope：serverId 是用户配置时生成的随机 id，
+     * 与 provider 的 id 分处两个命名空间，加前缀避免撞上（撞了会导致
+     * 一个 server 的令牌被当成某个模型的 API Key 发出去）。
+     */
+    fun getMcpToken(serverId: String): String? = get(k("$MCP_SCOPE:$serverId", FIELD_MCP_TOKEN))
+
+    fun putMcpToken(serverId: String, value: String?) =
+        put(k("$MCP_SCOPE:$serverId", FIELD_MCP_TOKEN), value)
+
+    fun clearMcpToken(serverId: String) {
+        runCatching { prefs.edit().remove(k("$MCP_SCOPE:$serverId", FIELD_MCP_TOKEN)).apply() }
+    }
+
     fun clear(providerId: String) {
         runCatching {
             prefs.edit()
@@ -167,6 +183,8 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         /** GitHub 令牌不属于任何 provider，用一个合成作用域复用同一套存储 */
         private const val CLOUD_SCOPE = "cloud"
         private const val FIELD_GITHUB_TOKEN = "githubToken"
+        private const val FIELD_MCP_TOKEN = "mcpToken"
+        private const val MCP_SCOPE = "mcp"
         private const val PROBE_KEY = "__probe__"
     }
 }
