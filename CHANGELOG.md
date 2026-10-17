@@ -99,6 +99,12 @@
   失败时能明确指出是哪个字段的问题
 - 「测试连接」改为两步诊断；保存字段时回显规范化结果（让用户看见自己被改成了什么）
 - `cloud_build` / `cloud_job` 各自兜一次字段归一化，避免旧设置让模型卡住
+- **云端「模板参数不匹配」**：`cloud_build` 无条件要求并传递 `command`，
+  而 `dsh-build.yml` 只接受 `variant` / `with_python` —— 用那个模板构建 APK 直接 422
+  （`Unexpected inputs provided: ["command"]`），提示还说是"分支名不存在"。
+  现在先读 workflow 声明了哪些 inputs，只传它接受的；不接受 `command` 时
+  明确告诉调用方该换成 `dsh-run.yml`，参数被过滤时在结果里列出。
+  另加一层 422 兜底：从报错里解析被拒的键名，去掉重试一次
 
 ### 修复（真机反馈之三）
 

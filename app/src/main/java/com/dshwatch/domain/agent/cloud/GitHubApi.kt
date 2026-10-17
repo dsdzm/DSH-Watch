@@ -147,6 +147,37 @@ class GitHubApi(private val tokenProvider: () -> String?) {
         }
     }
 
+    /**
+     * 读这个 workflow 的 `workflow_dispatch.inputs` 声明了哪些键。
+     *
+     * 直接读仓库里的 YAML 文件（contents API），而不是从 Actions 元数据取 ——
+     * GitHub 的 workflow 元数据里**不含 inputs 定义**，只有文件里才有。
+     *
+     * 返回 `null` 表示读不到（文件太大 / 权限不足 / YAML 看不懂），调用方按"不限制"处理。
+     */
+    suspend fun workflowInputs(
+        repo: String,
+        file: String,
+        ref: String,
+    ): Set<String>? = withContext(Dispatchers.IO) {
+        val slug = CloudTargets.normalizeRepo(repo) ?: return@withContext null
+        val name = CloudTargets.normalizeWorkflow(file) ?: return@withContext null
+        val resp = call(
+            request("GET", "/repos/$slug/contents/.github/workflows/$name?ref=$ref"),
+            allowFailure = true,
+            scope = CloudErrors.Scope.WORKFLOW,
+        )
+        if (resp.code != 200) return@withContext null
+        val encoded = runCatching {
+            json.parseToJsonElement(resp.body).jsonObject["content"]?.jsonPrimitive?.contentOrNull
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: return@withContext null
+        // contents API 的 base64 带换行，必须用 MIME 解码器
+        val yaml = runCatching {
+            String(Base64.getMimeDecoder().decode(encoded), Charsets.UTF_8)
+        }.getOrNull() ?: return@withContext null
+        CloudTargets.parseDispatchInputs(yaml)
+    }
+
     /** 只要一个布尔值时的便捷包装（内部同样会归一化字段） */
     suspend fun workflowExists(repo: String, file: String): Boolean = probeWorkflow(repo, file).ok
 
@@ -270,6 +301,32 @@ class GitHubApi(private val tokenProvider: () -> String?) {
         val name = CloudTargets.normalizeWorkflow(file)
             ?: throw GitHubException(400, "「默认 workflow」要写文件名，例如 dsh-run.yml。")
 
+        // 422 兜底：即使调用方尽力按 workflow 的声明过滤，也可能因为
+        // YAML 写法特殊而漏判。GitHub 的报错里直接列出了多余的键名，
+        // 那就去掉它们重试一次 —— 比让用户对着 "Unexpected inputs provided" 猜要好。
+        var current = inputs
+        var retried = false
+        while (true) {
+            try {
+                return@withContext dispatchOnce(slug, name, ref, current)
+            } catch (e: GitHubException) {
+                if (e.code != 422 || retried) throw e
+                val rejected = CloudTargets.parseRejectedInputs(e.message.orEmpty())
+                if (rejected.isEmpty() || current.keys.none { it in rejected }) throw e
+                current = current.filterKeys { it !in rejected }
+                retried = true
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        null
+    }
+
+    private fun dispatchOnce(
+        slug: String,
+        name: String,
+        ref: String,
+        inputs: Map<String, String>,
+    ): Long? {
         val payload = buildJsonObject {
             put("ref", ref)
             if (inputs.isNotEmpty()) {
@@ -283,7 +340,7 @@ class GitHubApi(private val tokenProvider: () -> String?) {
             scope = CloudErrors.Scope.WORKFLOW,
         )
         // 204 无 body 是正常返回；有 body 时里面带 workflow_run_id
-        resp.body.takeIf { it.isNotBlank() }
+        return resp.body.takeIf { it.isNotBlank() }
             ?.let { runCatching { json.parseToJsonElement(it).jsonObject["workflow_run_id"]?.jsonPrimitive?.longOrNull }.getOrNull() }
     }
 

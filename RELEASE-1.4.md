@@ -1,3 +1,36 @@
+## ⚠️ 发布后当天修复：模板参数不匹配（版本号仍为 1.4）
+
+用 `cloud_build` 触发 **`dsh-build.yml` 构建 APK** 会失败：
+
+```
+请求被拒绝（通常是分支名不存在，或 workflow 的 inputs 与模板不匹配）。
+原始响应：{"message":"Unexpected inputs provided: [\"command\"]","status":"422"}
+```
+
+**是我的 bug，不是你的配置问题。** 两个模板的参数完全不同：
+
+| 模板 | 声明的 inputs |
+| --- | --- |
+| `dsh-run.yml` | `command` `artifact_name` `artifact_path` `retention_days` |
+| `dsh-build.yml` | `variant` `with_python` |
+
+而工具无条件要求并传了 `command` —— 于是"构建 APK"这条路直接坏掉，
+报错还说是"分支名不存在"，把排查带到了反方向。
+
+现在改成**先读模板声明了哪些 inputs，只传它接受的**：
+
+- 模板接受 `command` → 照旧要求命令、自动打包工作目录
+- 不接受 `command` → 不再强求；若调用方仍传了，直接说明
+  "这个模板不接受命令，它接受的是 variant / with_python"
+- 其余参数按声明过滤，被丢掉的在结果里列出来
+
+实测（对真实仓库）：`dsh-build.yml` + `{variant: debug}` → **204**，
+`dsh-run.yml` + `{command}` → **204**（原有路径没坏）。
+
+**当前版本仍不能用 `dsh-build.yml` 构建 APK 的话，重新下载本页附件即可。**
+
+---
+
 # DSH肥鱼 v1.4 —— MCP + 插件 + 二级设置
 
 ## 一句话
@@ -110,10 +143,10 @@ lite 与 full **同包名、同签名**，可互相覆盖安装，数据不丢�
 1.0 / 1.2 / 1.3 的用户可直接覆盖升级。
 
 ```
-79d323c706a8692a0ec2d7dcfaa64611e51b381bd102be1dda11668e54e9567c  DSH-Watch-v1.4-full-debug.apk
-66c17dff8b4c7f5eea448ec836110e6cd6a8f12aab264dc45c18b3af9a06d0cf  DSH-Watch-v1.4-full-release.apk
-ecbd4e693097e2b7fa56b0b512e23afe9be717b077711b986e25d9ed1e602406  DSH-Watch-v1.4-lite-debug.apk
-6c7edc735fdca2f303dba5d8a5ead0cd8b369d0fc21e7e934c08b003f9e212ab  DSH-Watch-v1.4-lite-release.apk
+349b95062c4a2fcc2fa6acba499d168fc1494025e87ecaa3a9f715c0315595f4  DSH-Watch-v1.4-full-debug.apk
+cf8019ef3bd831c06852df006ffa3f2dc4681d367b3d1b5c8d1b7df619131288  DSH-Watch-v1.4-full-release.apk
+2caafcc5cc3c856329537476eebbe36820cd709614820f6232d51d245f35ea7a  DSH-Watch-v1.4-lite-debug.apk
+a143f727ce106c862a041361991a06674d77078133ec3033dd3ecadaaf7648d3  DSH-Watch-v1.4-lite-release.apk
 ```
 
 校验：`sha256sum -c SHA256SUMS.txt`

@@ -1975,3 +1975,59 @@ AI 能力要工具清单和弹窗），所以拆成**各自独立的 Composable*
   **收窄名单里的名字必须都是真实工具**
 - `PluginRegistryTest` 6 个 / `ChatEngineTest` 新增 4 个 ——
   后者验的是**接线**：插件本身对但没接进请求，用户开开关不会有任何变化
+
+### 20.9 发布后修复：模板的 inputs 不是共用的
+
+v1.4 发布当天，有用户用 `cloud_build` 触发 `dsh-build.yml` 构建 APK，得到：
+
+```
+请求被拒绝（通常是分支名不存在，或 workflow 的 inputs 与模板不匹配）。
+原始响应：{"message":"Unexpected inputs provided: [\"command\"]","status":"422"}
+```
+
+**这是我在 1.4 里引入的缺陷。** 为了"自动带上工作目录的文件"，我把
+`command` 变成了硬性输入 —— 而两个模板的参数集完全不同：
+
+| 模板 | 声明的 inputs |
+| --- | --- |
+| `dsh-run.yml` | `command` `artifact_name` `artifact_path` `retention_days` |
+| `dsh-build.yml` | `variant` `with_python` |
+
+`dsh-build.yml` 压根不接命令，它有自己的参数。于是"构建 APK"这条路径直接坏掉，
+而且错误信息还在说"通常是分支名不存在"—— 又一次把人带到错的方向。
+
+**根因不是"传错了参数"，是"没问模板要什么就传"。** 修法是先读声明：
+
+```
+GET /repos/{owner}/{repo}/contents/.github/workflows/{file}?ref=main
+  → base64 解码 → 解析 on.workflow_dispatch.inputs 的键
+```
+
+拿到集合之后：
+
+- 只有模板接受 `command` 时才要求命令、才做工作目录打包
+- 不接受时如果调用方仍传了 `command` → **直接说清"这个模板不接受命令，它接受的是
+  variant / with_python；要跑任意命令请换成 dsh-run.yml"**
+- 其余参数按集合过滤，被丢掉的在结果里列出来
+
+**为什么自己解析 YAML（40 行）而不引库**：只需要"某个块下面的第一层子键"，
+而 snakeyaml 对一个 6.4MB 的安装包来说太贵。解析器要处理三种情况 ——
+带 inputs 的块、明确没有 inputs 的块（返回空集）、以及看不懂的写法（返回 null）。
+后两者的区别很重要：空集意味着"传任何参数都会 422"，null 只是"我们没看懂，不该拦"。
+
+**再加一层兜底**：万一 YAML 写法超出预期，GitHub 的 422 响应里本来就列出了被拒的键名
+（`Unexpected inputs provided: ["command"]`），解析出来去掉重试一次。
+
+实测（对真实仓库）：
+
+```
+dsh-run.yml   → {artifact_name, artifact_path, command, retention_days}
+dsh-build.yml → {variant, with_python}
+
+dsh-build.yml + {variant: debug}  → 204   ← 修复前这条路走不通
+dsh-build.yml + {command: ...}    → 422   ← 复现用户报错
+dsh-run.yml   + {command: ...}    → 204   ← 原有路径没坏
+```
+
+`CloudTargetsInputsTest` 的 10 条用例直接用仓库里这两个**真实模板**当样本 ——
+哪天模板改了 input 名，这里会先炸，而不是等用户撞上 422。

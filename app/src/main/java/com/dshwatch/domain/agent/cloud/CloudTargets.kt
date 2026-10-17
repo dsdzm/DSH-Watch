@@ -88,6 +88,110 @@ object CloudTargets {
         val s = raw?.trim().orEmpty().trim('"', '\'', '`', '<', '>', ' ', '\t', '\n', '\r')
         return s.ifEmpty { null }
     }
+
+    // ------------------------------------------------------------------
+    // workflow 的 inputs 声明
+    // ------------------------------------------------------------------
+
+    /**
+     * 从 workflow 文件里解析 `on.workflow_dispatch.inputs` 声明了哪些键。
+     *
+     * **为什么需要这个**：不同模板的参数完全不同 —— `dsh-run.yml` 要 `command`，
+     * 而 `dsh-build.yml` 只认 `variant` / `with_python`。
+     * 不看声明就一律塞 `command`，会得到一个 422：
+     * `Unexpected inputs provided: ["command"]`，而这句话不会告诉你"这个模板压根不接命令"。
+     *
+     * 返回 `null` 表示**解析不出来**（找不到 `workflow_dispatch`、YAML 写法超出预期）——
+     * 调用方应把它当成"不限制"。返回空集表示**明确声明了没有 inputs**，
+     * 这两种情况必须区分：前者只是我们看不懂，后者传任何参数都会 422。
+     *
+     * 自己写 40 行而不是引入 YAML 库：这里只需要"某个块下面的第一层子键"，
+     * 而 snakeyaml 对一个 6MB 的安装包来说太贵了。
+     */
+    fun parseDispatchInputs(yaml: String): Set<String>? {
+        val lines = yaml.lines()
+        var index = 0
+
+        // 1) 找到 workflow_dispatch:
+        while (index < lines.size) {
+            val trimmed = lines[index].trim()
+            if (trimmed.startsWith("workflow_dispatch:") || trimmed == "workflow_dispatch") break
+            index++
+        }
+        // 单行写法 `on: workflow_dispatch` 是合法的，但它没法带 inputs
+        if (index >= lines.size) return null
+        val dispatchIndent = indentOf(lines[index])
+        val inline = lines[index].trim().removePrefix("workflow_dispatch:").trim()
+        if (inline.isNotEmpty() && inline != "{}") return null
+        index++
+
+        // 2) 在它的块里找 inputs:
+        var inputsIndent = -1
+        while (index < lines.size) {
+            val line = lines[index]
+            if (line.isBlank() || line.trimStart().startsWith("#")) {
+                index++
+                continue
+            }
+            val indent = indentOf(line)
+            if (indent <= dispatchIndent) return emptySet()   // 块结束了，说明没有 inputs
+            if (line.trim() == "inputs:") {
+                inputsIndent = indent
+                index++
+                break
+            }
+            index++
+        }
+        if (inputsIndent < 0) return emptySet()
+
+        // 3) 收集 inputs 下第一层的子键
+        val keys = mutableSetOf<String>()
+        var childIndent = -1
+        while (index < lines.size) {
+            val line = lines[index]
+            if (line.isBlank() || line.trimStart().startsWith("#")) {
+                index++
+                continue
+            }
+            val indent = indentOf(line)
+            if (indent <= inputsIndent) break              // inputs 块结束
+            if (childIndent < 0) childIndent = indent
+            if (indent == childIndent) {
+                val trimmed = line.trim()
+                if (trimmed.contains(':')) {
+                    val key = trimmed.substringBefore(':').trim().trim('"', '\'')
+                    if (key.isNotEmpty()) keys += key
+                }
+            }
+            // 更深缩进的行是多行描述 / 默认值，跳过
+            index++
+        }
+        return keys
+    }
+
+    /**
+     * 从 422 的响应体里抠出被拒绝的 input 名。
+     *
+     * GitHub 的原文是 `Unexpected inputs provided: ["command"]` —— 键名直接给出来了，
+     * 所以即使 [parseDispatchInputs] 看不懂那个模板，也能靠这句话兜一次重试。
+     */
+    fun parseRejectedInputs(message: String): Set<String> {
+        val marker = "Unexpected inputs provided:"
+        val start = message.indexOf(marker)
+        if (start < 0) return emptySet()
+        // 这里的 message 是被拼进提示语里的**字符串形式** JSON，
+        // 引号已经被转义成 \" —— 不先还原，正则会把反斜杠当成键名的一部分，
+        // 而且会把后面的 "documentation_url" 之类也一并匹配进来
+        val text = message.substring(start + marker.length).replace("\\\"", "\"")
+        // 只取第一对方括号之间的内容，避免把响应体里其它字段的字符串当成键名
+        val open = text.indexOf('[')
+        val close = if (open >= 0) text.indexOf(']', open) else -1
+        val body = if (open >= 0 && close > open) text.substring(open + 1, close) else text
+        return Regex("\"([^\"]+)\"").findAll(body).map { it.groupValues[1] }.toSet()
+    }
+
+    private fun indentOf(line: String): Int = line.length - line.trimStart().length
+
 }
 
 /**

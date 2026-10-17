@@ -128,33 +128,60 @@ object CloudTools {
                 .coerceIn(30, 3_600)
             val inputs = readInputs(args).toMutableMap()
             val command = inputs["command"].orEmpty()
-            if (command.isBlank()) {
-                return ToolResult.fail(
-                    "缺少命令。请在 inputs.command 里给出要执行的 shell 命令" +
-                        "（例如 `python main.py`、`gcc main.c -o main && ./main`）。"
-                )
+
+            // 先问清楚这个 workflow 到底接受哪些参数。
+            //
+            // 不同模板的参数完全不同：dsh-run.yml 要 command，dsh-build.yml 只认
+            // variant / with_python。不看声明就一律塞 command，会得到
+            // 422 `Unexpected inputs provided: ["command"]` —— 而这句话不会告诉你
+            // "这个模板压根不接命令"，看起来像"分支名不对"（真机上就是这么撞的）。
+            val accepted = runCatching { api.workflowInputs(repo, workflow, ref) }.getOrNull()
+            val acceptsCommand = accepted == null || "command" in accepted
+
+            if (!acceptsCommand) {
+                if (command.isNotBlank()) {
+                    return ToolResult.fail(
+                        "workflow `$workflow` 不接受 `command` 参数" +
+                            "（它接受：${accepted.orEmpty().sorted().joinToString("、").ifBlank { "无" }}）。\n" +
+                            "要跑任意命令，把 workflow 换成 dsh-run.yml；" +
+                            "这个模板有自己的参数，按它的 inputs 传即可 —— " +
+                            "例如构建本项目 APK 用 dsh-build.yml，只需 inputs.variant=debug 或 release。"
+                    )
+                }
+            } else {
+                if (command.isBlank()) {
+                    return ToolResult.fail(
+                        "缺少命令。请在 inputs.command 里给出要执行的 shell 命令" +
+                            "（例如 `python main.py`、`gcc main.c -o main && ./main`）。"
+                    )
+                }
+
+                // 工作目录里的文件要一起带上：云端是在一个空仓库里执行命令的，
+                // 手表上 write_file 写出来的文件不会自己过去 —— 真机上就踩了这一条，
+                // 云端报 `python: can't open file '.../main.py'`，模型只好自己
+                // 把源码 heredoc 内联进命令，还在回答里提醒用户"记住这个坑"
+                val workDir = File(ctx.workspace.rootDir(), ctx.sessionDir)
+                when (val payload = CloudPayload.pack(workDir, args.stringListOf("files"))) {
+                    is CloudPayload.Outcome.Ok -> {
+                        inputs["command"] = CloudPayload.wrap(command, payload.packed)
+                    }
+                    // 目录里没文件：命令照原样执行，不引入任何额外脚本
+                    CloudPayload.Outcome.Nothing -> Unit
+                    is CloudPayload.Outcome.TooLarge -> return ToolResult.fail(
+                        "工作目录打包后超出云端能接收的长度上限" +
+                            "（${payload.fileCount} 个文件、压缩前 ${payload.rawBytes / 1024} KB，" +
+                            "内联后需要 ${payload.needChars} 字符，上限 ${CloudPayload.MAX_BASE64_CHARS}）。\n" +
+                            "两种办法：① 用 files 参数只挑必要的文件（例如 files=[\"main.py\"]）；" +
+                            "② 把关键源码内联进 command（用 heredoc 写文件再执行）。"
+                    )
+                    is CloudPayload.Outcome.Failed -> return ToolResult.fail(payload.message)
+                }
             }
 
-            // 工作目录里的文件要一起带上：云端是在一个空仓库里执行命令的，
-            // 手表上 write_file 写出来的文件不会自己过去 —— 真机上就踩了这一条，
-            // 云端报 `python: can't open file '.../main.py'`，模型只好自己
-            // 把源码 heredoc 内联进命令，还在回答里提醒用户"记住这个坑"
-            val workDir = File(ctx.workspace.rootDir(), ctx.sessionDir)
-            when (val payload = CloudPayload.pack(workDir, args.stringListOf("files"))) {
-                is CloudPayload.Outcome.Ok -> {
-                    inputs["command"] = CloudPayload.wrap(command, payload.packed)
-                }
-                // 目录里没文件：命令照原样执行，不引入任何额外脚本
-                CloudPayload.Outcome.Nothing -> Unit
-                is CloudPayload.Outcome.TooLarge -> return ToolResult.fail(
-                    "工作目录打包后超出云端能接收的长度上限" +
-                        "（${payload.fileCount} 个文件、压缩前 ${payload.rawBytes / 1024} KB，" +
-                        "内联后需要 ${payload.needChars} 字符，上限 ${CloudPayload.MAX_BASE64_CHARS}）。\n" +
-                        "两种办法：① 用 files 参数只挑必要的文件（例如 files=[\"main.py\"]）；" +
-                        "② 把关键源码内联进 command（用 heredoc 写文件再执行）。"
-                )
-                is CloudPayload.Outcome.Failed -> return ToolResult.fail(payload.message)
-            }
+            // 只保留模板真的接受的键。多传的必须丢掉 —— GitHub 遇到未声明的 input
+            // 不是"忽略"，是直接 422 拒绝整个请求。
+            val finalInputs = if (accepted == null) inputs else inputs.filterKeys { it in accepted }
+            val droppedKeys = inputs.keys - finalInputs.keys
 
             return try {
                 // 分两步探：仓库 → workflow。
@@ -179,7 +206,7 @@ object CloudTools {
                 val baselineId = runCatching { api.latestRunId(repo, workflow) }.getOrNull()
 
                 val triggeredAt = System.currentTimeMillis()
-                val runId = api.dispatch(repo, workflow, ref, inputs)
+                val runId = api.dispatch(repo, workflow, ref, finalInputs)
 
                 val located = if (runId != null) {
                     runCatching { api.getRun(repo, runId) }.getOrNull()
@@ -216,6 +243,11 @@ object CloudTools {
 
                 val text = StringBuilder()
                 text.append(formatRun(record)).append('\n')
+                if (droppedKeys.isNotEmpty()) {
+                    text.append("（已忽略该 workflow 不接受的参数：")
+                        .append(droppedKeys.sorted().joinToString("、"))
+                        .append("）\n")
+                }
 
                 if (record.conclusion != "success") {
                     val tail = runCatching { latestJobLogTail(api, repo, record.runId, 80) }.getOrNull()
