@@ -459,9 +459,38 @@ class ChatEngine(
                     TurnContext(step = step, firstUserMessage = firstUserMessage, settings = settings)
                 )
             }.getOrNull()
-            val roundPrompt = overlay?.promptSuffix?.takeIf { it.isNotBlank() }
-                ?.let { systemPrompt + "\n\n" + it }
-                ?: systemPrompt
+            // 本轮实际开放的工具有哪些 —— 必须用**收窄后**的名单，
+            // 不能写全量。真机上出过这一幕：风神的首轮路由把工具面收窄到 5 个，
+            // 模型的思维链里写"工具列表里没有 cloud_build，我只有 read_file/write_file/
+            // edit_file/run_script/delete_file"，然后开始给用户解释"本机编不了 APK"。
+            // 它没有错 —— 它看到的确实只有那几个；错在这个事实只存在于 tools 数组里，
+            // 而"本轮是收窄的、下一轮会放开"这件事它无从得知。
+            val allowed = overlay?.allowedTools
+            val roundNames = if (allowed != null) {
+                registry.tools.filter { it.name in allowed }.map { it.name }
+            } else {
+                registry.tools.map { it.name }
+            }
+            val roster = if (roundNames.isEmpty()) {
+                ""
+            } else {
+                buildString {
+                    append("\n\n【可用工具】\n").append(roundNames.joinToString("、"))
+                    if (allowed != null) {
+                        append("\n注意：**本轮只开放了这些**（首轮聚焦，不是 App 的全部能力）。")
+                        append("从下一轮开始其余工具也会开放 —— 所以「这里没有某个工具」")
+                        append("不等于「App 做不到这件事」，不要据此告诉用户能力缺失。")
+                    } else {
+                        append("\n以上是全部可调用的工具。判断某个能力有没有工具时以此为准，")
+                        append("不要凭印象说\"没有某个工具\"。")
+                    }
+                }
+            }
+            val roundPrompt = buildString {
+                append(systemPrompt)
+                overlay?.promptSuffix?.takeIf { it.isNotBlank() }?.let { append("\n\n").append(it) }
+                append(roster)
+            }
             val roundSpecs = overlay?.allowedTools?.let { allowed ->
                 val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
                 // 收窄后一个都不剩就别收窄了 —— 否则模型没有任何工具可用，

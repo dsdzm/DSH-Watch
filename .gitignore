@@ -12,6 +12,9 @@
 .cxx
 local.properties
 app/build/
-build/
+# 只忽略构建输出目录，不能写裸 `build/` —— 那会把
+# app/src/main/java/com/dshwatch/domain/agent/build/ 整个包一起忽略掉，
+# 推上去的仓库就缺 ProjectBuilder / LanguageValidators / SourceValidator，
+# 云端编译必然 Unresolved reference 'build'。
 dist/
 *.apk

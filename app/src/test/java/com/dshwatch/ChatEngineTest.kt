@@ -445,6 +445,54 @@ class ChatEngineTest {
         assertThat(backend.requests.first().tools.map { it.toolName() }).containsExactly("echo")
     }
 
+    @Test
+    fun `system prompt lists the tools the model can actually call`() = runTest {
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(agentMode = AgentMode.AUTO_ALL)
+        val (engine, _) = buildEngine(
+            this, settings, backend,
+            tools = listOf(NamedTool("cloud_build"), NamedTool("read_file")),
+        )
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        val prompt = backend.requests.first().systemPrompt
+        assertThat(prompt).contains("【可用工具】")
+        assertThat(prompt).contains("cloud_build")
+        // 没有收窄时不该出现"本轮只开放"这种限定语
+        assertThat(prompt).doesNotContain("本轮只开放")
+    }
+
+    @Test
+    fun `narrowed turn tells the model it is narrowed`() = runTest {
+        // 真机现场：风神首轮把工具面收窄到 4 个，模型的思维链里写
+        // "工具列表里没有 cloud_build，我只有 read_file/write_file/edit_file/run_script"，
+        // 然后开始给用户解释"本机编不了 APK"。
+        // 它看到的确实只有那几个 —— 必须让它知道"这是本轮聚焦，不是没有"。
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            agentMode = AgentMode.AUTO_ALL,
+            enabledPlugins = setOf("dsh-fengshen"),
+            pluginsCustomized = true,
+        )
+        val (engine, _) = buildEngine(
+            this, settings, backend,
+            tools = listOf(NamedTool("read_file"), NamedTool("cloud_build")),
+        )
+
+        engine.send("帮我修复这个崩溃")
+        advanceUntilIdle()
+
+        val prompt = backend.requests.first().systemPrompt
+        assertThat(prompt).contains("本轮只开放")
+        assertThat(prompt).contains("下一轮")
+        // 只检查清单那一行：系统提示别处（agentHint）本来就提到 cloud_build
+        val roster = prompt.substringAfter("【可用工具】\n").substringBefore("\n")
+        assertThat(roster).contains("read_file")
+        assertThat(roster).doesNotContain("cloud_build")
+    }
+
     private fun JsonObject.toolName(): String =
         this["function"]!!.jsonObject["name"]!!.jsonPrimitive.content
 

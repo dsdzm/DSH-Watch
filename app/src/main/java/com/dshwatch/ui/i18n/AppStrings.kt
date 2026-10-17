@@ -514,7 +514,7 @@ object Zh : AppStrings {
         "dsh-whale" ->
             "回复不复述、不预告、不总结，省输出 token"
         "dsh-fengshen" ->
-            "首轮判断是修 bug 还是建功能，只给 4 个工具，之后放开"
+            "首轮判断是修 bug 还是建功能，只给读写执行 4 个工具（云端编译等下一轮才出现）"
         else -> ""
     }
 
@@ -919,7 +919,7 @@ object En : AppStrings {
         "dsh-whale" ->
             "No restating, no preamble, no summary — saves output tokens"
         "dsh-fengshen" ->
-            "First turn decides bug-fix vs build, exposes only 4 tools, then lets go"
+            "First turn decides bug-fix vs build, exposes only 4 file/exec tools (cloud tools return next turn)"
         else -> ""
     }
 

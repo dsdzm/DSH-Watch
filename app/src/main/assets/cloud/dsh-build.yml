@@ -25,6 +25,11 @@ on:
         required: false
         type: boolean
         default: false
+      source_repo:
+        description: '当前仓库不含源码时，从这个仓库取（owner/repo）'
+        required: false
+        type: string
+        default: dsdzm/DSH-Watch
 
 permissions:
   contents: read
@@ -36,6 +41,32 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+
+      # 目标仓库常常只是用来放 workflow 的（例如 dsdzm/dsh-），里面没有 gradlew —
+      # 手表端 dispatch 时源码没有跟着过来（inputs 装不下整个工程）。
+      # 这种情况从 source_repo 浅克隆一份再构建，而不是在空目录里执行 ./gradlew。
+      - name: Locate project
+        shell: bash
+        env:
+          SOURCE_REPO: ${{ inputs.source_repo }}
+        run: |
+          set -euo pipefail
+          if [ -f gradlew ]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            echo "当前仓库自带源码，直接构建"
+            exit 0
+          fi
+          if [ -z "${SOURCE_REPO:-}" ]; then
+            echo "::error::当前仓库没有 gradlew，且没有填 source_repo"
+            exit 1
+          fi
+          echo "当前仓库没有 gradlew，从 $SOURCE_REPO 取源码"
+          git clone --depth 1 "https://github.com/$SOURCE_REPO.git" src || {
+            echo "::error::克隆 $SOURCE_REPO 失败 —— 仓库要公开，名字写成 owner/repo"
+            exit 1
+          }
+          echo "PROJECT_DIR=src" >> "$GITHUB_ENV"
+          ls src | head -20
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -49,8 +80,41 @@ jobs:
         with:
           python-version: '3.11'
 
+      # 不用 android-actions/setup-android@v3：它默认要装 "tools" 包，
+      # 而该包已从 SDK 仓库下架（日志里的 "Failed to find package 'tools'"），
+      # sdkmanager 返回非零后 action 直接抛错，整个 job 卡在装 SDK 这一步。
+      # runner 镜像本来就自带 Android SDK，这里只补平台与 build-tools。
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "::error::找不到 Android SDK：$SDK_ROOT"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          # cmdline-tools 的目录名随镜像版本变化（latest / 16.0 …），找而不是写死
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager 2>/dev/null | head -1 || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::找不到 sdkmanager"
+            exit 1
+          fi
+
+          # 镜像里已经有了就别再联网装：runner 换镜像也不会因为源站波动而失败
+          if [ -d "$SDK_ROOT/platforms/android-35" ] && [ -d "$SDK_ROOT/build-tools/35.0.0" ]; then
+            echo "SDK 已就绪，跳过安装"
+          else
+            # 许可证全接受；yes 会被 SIGPIPE 打断，这里不关心它的退出码
+            yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+            "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+              "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          fi
+
+          echo "platforms:"; ls "$SDK_ROOT/platforms"
+          echo "build-tools:"; ls "$SDK_ROOT/build-tools"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -64,6 +128,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          cd "$PROJECT_DIR"
           ARGS=":app:assemble${{ inputs.variant == 'release' && 'Release' || 'Debug' }}"
           if [ "${{ inputs.with_python }}" = "true" ]; then
             ARGS="$ARGS -PwithPython=true"
@@ -76,7 +141,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dsh-out
-          find app/build/outputs/apk -name "*.apk" -exec cp {} dsh-out/ \; || true
+          find "${PROJECT_DIR:-.}/app/build/outputs/apk" -name "*.apk" -exec cp {} dsh-out/ \; || true
           ls -la dsh-out || true
 
       - name: Upload artifacts
