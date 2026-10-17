@@ -67,7 +67,9 @@ object CloudTools {
                 "· `dsh-build.yml`（构建本项目 APK）—— 自带 JDK 17 + Android SDK；参数是 " +
                 "`inputs.variant=debug|release`（可选 `with_python`），**它不接受 command**，传了会被拒绝。\n" +
                 "所以：**要编 Android 就用 dsh-build.yml，不要用 dsh-run.yml 跑 gradle**。" +
-                "返回结论、链接、日志尾部与产物路径。运行要几分钟，别重复触发；查进度用 cloud_job。" +
+                "**默认触发后立刻返回**（不阻塞等待），拿到的 run 链接可以直接给用户；" +
+                "查进度用 `cloud_job(action=status)`，看日志用 `action=logs`，下产物用 `action=artifacts`。" +
+                "只有确实需要同步结果时才传 `wait=true`（此时最多等到 timeout_sec，默认 300 秒）。" +
                 "注意：代码会离开设备发到用户自己的仓库，每次都会请用户确认。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
@@ -87,8 +89,11 @@ object CloudTools {
                         "留空则自动打包整个工作目录（已排除工具自建的临时目录）。" +
                         "打包后超出云端长度上限时，用这个参数只挑必要的文件。"
                 ),
-                "wait" to Schema.bool("是否等待运行结束（默认 true；只想触发不等就用 false）"),
-                "timeout_sec" to Schema.int("等待上限秒数，留空用设置里的值", min = 30, max = 3600),
+                "wait" to Schema.bool(
+                    "是否阻塞等待运行结束（默认 false：触发即返回；" +
+                        "构建类任务不要等，用 cloud_job 查进度）"
+                ),
+                "timeout_sec" to Schema.int("wait=true 时的等待上限秒数，留空用设置里的值", min = 30, max = 3600),
                 "collect_artifacts" to Schema.bool("结束后是否下载产物到工作目录（默认 true）"),
             ),
         )
@@ -125,7 +130,7 @@ object CloudTools {
                     "workflow 要写文件名，例如 dsh-run.yml（不要写 .github/workflows/ 完整路径）。"
                 )
             val ref = args.strOf("ref") ?: settings.cloudRef
-            val wait = args.boolOf("wait", default = true)
+            val wait = args.boolOf("wait", default = false)
             val collect = args.boolOf("collect_artifacts", default = true)
             val timeoutSec = (args.intOf("timeout_sec") ?: settings.cloudPollTimeoutSec)
                 .coerceIn(30, 3_600)
@@ -225,10 +230,12 @@ object CloudTools {
 
                 if (!wait) {
                     return ToolResult.ok(
-                        "已在云端触发 `$workflow`（分支 $ref）。\n" +
+                        "已在云端触发 `$workflow`（分支 $ref），**没有阻塞等待**。\n" +
                             formatRun(located) +
-                            "\n它正在跑，稍后用 cloud_job(action=status) 查看进度，" +
-                            "cloud_job(action=logs) 看日志，cloud_job(action=artifacts) 下载产物。"
+                            "\n运行页：https://github.com/$repo/actions/runs/${located.runId}\n" +
+                            "首次构建要下 Gradle 依赖，通常 5～10 分钟。稍后用 " +
+                            "cloud_job(action=status) 查进度，action=logs 看日志，" +
+                            "action=artifacts 下载产物。"
                     )
                 }
 
