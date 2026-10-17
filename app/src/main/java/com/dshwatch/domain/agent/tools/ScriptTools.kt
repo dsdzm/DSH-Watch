@@ -168,7 +168,7 @@ object ScriptTools {
                 } else {
                     null
                 }
-                val text = formatExecOutput(language, output)
+                val text = formatExecOutput(language, output, ctx.sessionDir)
                 return if (output.ok) {
                     ToolResult.ok(text, artifact.orEmpty())
                 } else {
@@ -248,7 +248,12 @@ object ScriptTools {
      * 而"超时/截断/仍在后台"这些**必须出现** —— 少写一句，
      * 模型就会把一次失败的执行当成成功的。
      */
-    internal fun formatExecOutput(language: String, out: ExecOutput): String = buildString {
+    internal fun formatExecOutput(
+        language: String,
+        out: ExecOutput,
+        /** 相对工作空间根的工作目录，失败时回显给模型看 */
+        workDir: String = "",
+    ): String = buildString {
         val label = when (language) {
             "shell" -> "shell"
             "js" -> "JavaScript"
@@ -262,6 +267,16 @@ object ScriptTools {
             append("$label 执行失败（退出码 ${out.exitCode}，用时 ${out.elapsedMs} ms）")
         }
         append('\n')
+
+        // 失败时把"当前在哪个目录"直接写出来。
+        // 真机上模型就是在这一点上栽的：它写了 `cd progress/8560e5`，
+        // 而脚本本来就已经在那个目录里，于是路径变成
+        // `.../progress/8560e5/progress/8560e5` → No such file or directory，
+        // 而它从报错里看不出"我根本不需要 cd"。
+        if (!out.ok && workDir.isNotBlank()) {
+            append("（脚本已在 `").append(workDir).append("` 下执行 —— ")
+            append("相对路径直接写文件名即可，不需要再 cd 进去）\n")
+        }
 
         if (out.stdout.isNotBlank()) {
             append("\n--- stdout ---\n").append(out.stdout.trimEnd()).append('\n')

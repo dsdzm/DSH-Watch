@@ -1449,6 +1449,8 @@ write_file 写源码 → cloud_build 触发 workflow → 轮询到结束
 - artifact 下载是 `302` 到 Azure 预签名地址，**那个地址 1 分钟过期**，拿到就立刻写盘
 - 日志可能几十 MB，只取尾部
 
+> 完整用法（两个模板的分工、产物怎么回来、常见错误对照表）见 **[docs/CLOUD.md](docs/CLOUD.md)**。
+
 **模板**（`app/src/main/assets/cloud/`，设置页一键装进你的仓库）：
 
 | 模板 | 用途 |

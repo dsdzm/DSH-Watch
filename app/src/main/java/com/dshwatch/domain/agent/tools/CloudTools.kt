@@ -57,15 +57,18 @@ object CloudTools {
     object CloudBuildTool : AgentTool {
         override val name = "cloud_build"
         override val description =
-            "在**云端 GitHub Actions** 上运行一个 workflow，用来编译本地做不了的东西" +
-                "（Android APK、Gradle/Maven 构建、gcc/g++、Kotlin/Java/Go/Rust 编译等）。" +
-                "默认会等待运行结束并把产物下载回当前工作目录（`artifacts/`），返回结论、链接和产物路径。" +
-                "用法：先用 write_file 把源码写进工作目录，再用 inputs.command 传命令 —— " +
-                "**工作目录里的文件会被自动打包上传**，命令行直接引用文件名即可" +
-                "（例如 `python main.py`、`gcc main.c -o main && ./main`）；" +
-                "文件太多太大时用 files 参数只挑必要的（构建本项目 APK 用 dsh-build.yml）。" +
-                "注意：**代码会离开设备**发到用户自己的 GitHub 仓库，所以每次调用都会请用户确认。" +
-                "运行可能几分钟，期间不要重复触发；要查进度用 cloud_job。"
+            "在**云端 GitHub Actions** 上运行一个 workflow，做本地做不到的事（编 APK、Gradle/Maven、" +
+                "gcc/g++、Kotlin/Java/Go/Rust 编译等）。工作目录里的文件会自动打包上传，" +
+                "命令里直接引用文件名即可（如 `python main.py`）。\n" +
+                "**两个模板分工不同，选错会白跑一次**：\n" +
+                "· `dsh-run.yml`（跑任意命令）—— 参数 `inputs.command`；环境是**基础 Ubuntu，" +
+                "没有 JDK / Android SDK**；产物写到 `dsh-out/`（为空时会自动从 app/build/outputs、" +
+                "build、dist、target/release 等目录收集常见产物）。\n" +
+                "· `dsh-build.yml`（构建本项目 APK）—— 自带 JDK 17 + Android SDK；参数是 " +
+                "`inputs.variant=debug|release`（可选 `with_python`），**它不接受 command**，传了会被拒绝。\n" +
+                "所以：**要编 Android 就用 dsh-build.yml，不要用 dsh-run.yml 跑 gradle**。" +
+                "返回结论、链接、日志尾部与产物路径。运行要几分钟，别重复触发；查进度用 cloud_job。" +
+                "注意：代码会离开设备发到用户自己的仓库，每次都会请用户确认。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -262,6 +265,15 @@ object CloudTools {
                     if (result != null) {
                         text.append('\n').append(result.first).append('\n')
                         artifactPath = result.second
+                    } else if (record.conclusion == "success") {
+                        // "跑成功了但什么都没有"是最容易让人懵的状态：
+                        // 用户看到绿勾，却在工作空间里找不到任何文件。
+                        // 直接说清模板只上传 dsh-out/，并指出 Android 构建该换模板
+                        text.append("\n云端运行成功，但**没有可下载的产物**。\n")
+                        text.append("模板只上传 `dsh-out/` 目录（为空时会自动收集 build/dist 等常见目录）。\n")
+                        text.append("如果命令本该产出文件：把它写到 `dsh-out/` 再跑一次；\n")
+                        text.append("如果是要构建 Android APK：改用 `dsh-build.yml` —— ")
+                        text.append("`dsh-run.yml` 的环境里没有 JDK / Android SDK，gradle 跑不起来。\n")
                     }
                 }
 

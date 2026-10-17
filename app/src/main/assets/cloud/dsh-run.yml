@@ -3,8 +3,12 @@
 # 由手表端 App 的 cloud_build 工具触发（workflow_dispatch）。
 # 用途：在云端跑手表上跑不了的东西 —— 编译、跑测试、生成二进制。
 #
-# 约定：命令请把产物写到 dsh-out/ 目录，这个目录会被作为 artifact 上传，
+# 约定：命令把产物写到 dsh-out/，这个目录会被作为 artifact 上传，
 # 手表端会自动下载并解压到当前会话工作目录的 artifacts/ 下。
+#
+# dsh-out/ 为空时会自动从常见目录（app/build/outputs、build、dist、out、target/release…）
+# 收集 apk / aab / jar / zip / so / exe / whl —— 但**构建 Android 请用 dsh-build.yml**：
+# 那个模板会装好 JDK 17 与 Android SDK，而这个模板只有基础 Ubuntu 环境。
 
 name: DSH Run
 
@@ -52,6 +56,32 @@ jobs:
         env:
           DSH_COMMAND: ${{ inputs.command }}
         run: bash -c "$DSH_COMMAND"
+
+      - name: Collect outputs
+        # dsh-out/ 为空时自动捞一遍常见构建产物目录。
+        #
+        # 为什么要有这一步：约定是"产物写到 dsh-out/"，但真实使用里没人记得住 ——
+        # 用户让模型跑 `./gradlew assembleDebug`，APK 在 app/build/outputs/apk/ 下，
+        # 而模板只上传 dsh-out/，于是"构建成功但拿不到产物"。
+        # 与其反复强调约定，不如让模板自己找一遍。
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p dsh-out
+          if [ -n "$(ls -A dsh-out 2>/dev/null)" ]; then
+            echo "[dsh] dsh-out 已有内容，跳过自动收集"
+            ls -la dsh-out
+            exit 0
+          fi
+          echo "[dsh] dsh-out 为空，自动收集常见产物"
+          for dir in app/build/outputs build/outputs build dist out target/release target/debug bin; do
+            [ -d "$dir" ] || continue
+            find "$dir" -maxdepth 5 -type f \
+              \( -name "*.apk" -o -name "*.aab" -o -name "*.jar" -o -name "*.zip" \
+                 -o -name "*.tar.gz" -o -name "*.so" -o -name "*.exe" -o -name "*.whl" \) \
+              -size -80M -exec cp -n {} dsh-out/ \; 2>/dev/null || true
+          done
+          ls -la dsh-out || true
 
       - name: Upload artifacts
         # always()：失败时也要把日志/中间产物留下，否则手表端只能看到"失败了"三个字

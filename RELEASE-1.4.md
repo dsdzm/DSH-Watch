@@ -143,10 +143,10 @@ lite 与 full **同包名、同签名**，可互相覆盖安装，数据不丢�
 1.0 / 1.2 / 1.3 的用户可直接覆盖升级。
 
 ```
-349b95062c4a2fcc2fa6acba499d168fc1494025e87ecaa3a9f715c0315595f4  DSH-Watch-v1.4-full-debug.apk
-cf8019ef3bd831c06852df006ffa3f2dc4681d367b3d1b5c8d1b7df619131288  DSH-Watch-v1.4-full-release.apk
-2caafcc5cc3c856329537476eebbe36820cd709614820f6232d51d245f35ea7a  DSH-Watch-v1.4-lite-debug.apk
-a143f727ce106c862a041361991a06674d77078133ec3033dd3ecadaaf7648d3  DSH-Watch-v1.4-lite-release.apk
+a201caf988edee3308ca7a7e17fc546a91a6d23c5c27207b1190f09e67fc4035  DSH-Watch-v1.4-full-debug.apk
+0b0dd2a2ee59c77b328becb35f505190242168b87c12a11f9d72c732e749b13d  DSH-Watch-v1.4-full-release.apk
+e51cb5f6f51baf443529c056b36e8205e94771b09f63c2dcf0fa9edaac5b7306  DSH-Watch-v1.4-lite-debug.apk
+e2ec5bb07b25f6da13512150b6df2ce86beb71875da516c979a55284de5b05a9  DSH-Watch-v1.4-lite-release.apk
 ```
 
 校验：`sha256sum -c SHA256SUMS.txt`

@@ -378,6 +378,33 @@ class CloudToolsTest {
         assertThat(text).contains("✓ Checkout")
         assertThat(text).contains("✗ Build")
     }
+    @Test
+    fun `failure echoes the working directory`() {
+        // 真机样本：模型写了 `cd progress/8560e5`，而脚本本来就在那个目录里，
+        // 路径变成 .../progress/8560e5/progress/8560e5 → No such file or directory。
+        // 它从报错里看不出"我根本不需要 cd"，所以失败的输出里要直接说清楚。
+        val out = com.dshwatch.domain.agent.exec.ExecOutput(
+            exitCode = 2,
+            stdout = "",
+            stderr = "cd: /storage/.../progress/8560e5/progress/8560e5: No such file or directory",
+        )
+
+        val text = ScriptTools.formatExecOutput("shell", out, "progress/8560e5")
+
+        assertThat(text).contains("progress/8560e5")
+        assertThat(text).contains("不需要再 cd")
+    }
+
+    @Test
+    fun `success does not repeat the directory`() {
+        // 成功时不必浪费 token 说这句 —— 模型大概率是对的
+        val out = com.dshwatch.domain.agent.exec.ExecOutput(exitCode = 0, stdout = "ok", stderr = "")
+
+        val text = ScriptTools.formatExecOutput("shell", out, "progress/8560e5")
+
+        assertThat(text).doesNotContain("不需要再 cd")
+    }
+
 }
 
 private fun testProfile() = DeviceProfile(

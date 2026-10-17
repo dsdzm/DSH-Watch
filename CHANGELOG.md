@@ -105,6 +105,16 @@
   现在先读 workflow 声明了哪些 inputs，只传它接受的；不接受 `command` 时
   明确告诉调用方该换成 `dsh-run.yml`，参数被过滤时在结果里列出。
   另加一层 422 兜底：从报错里解析被拒的键名，去掉重试一次
+- **云端「没有可下载的产物」**：`dsh-run.yml` 里 `dsh-out/` 为空时，
+  现在会自动从 `app/build/outputs`、`build`、`dist`、`out`、`target/release` 等目录
+  收集 apk/aab/jar/zip/so/exe/whl —— 不必再靠"记得把产物写到 dsh-out/"
+- 运行成功但没有产物时，结果里会**明确说明**这是为什么、以及 Android 构建该换哪个模板
+- `cloud_build` 的工具描述写清两个模板的分工（环境 / 参数 / 不能混用），
+  避免再用 `dsh-run.yml` 跑 gradle
+- **shell 失败时回显工作目录**：真机上模型写了 `cd progress/<id>`，
+  而脚本本来就在那个目录里，路径变成 `.../progress/<id>/progress/<id>` 直接失败
+- 新增 `docs/CLOUD.md`：云端编译的完整说明（两个模板、产物怎么回来、常见错误对照表、
+  从零造 App 的成本）
 
 ### 修复（真机反馈之三）
 
