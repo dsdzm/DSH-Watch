@@ -2,6 +2,7 @@ package com.dshwatch
 
 import com.dshwatch.domain.TokenEstimator
 import com.dshwatch.domain.model.ChatTurn
+import com.dshwatch.domain.model.ToolCallRecord
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -102,5 +103,68 @@ class TokenEstimatorTest {
         )
 
         assertThat(kept).doesNotContain(task)
+    }
+
+    @Test
+    fun `full context keeps every turn when the window allows`() {
+        val history = (1..30).map { ChatTurn(role = "user", content = "第 $it 步：完成了一些工作。") } +
+            ChatTurn(role = "assistant", content = "收尾")
+
+        val kept = TokenEstimator.trimToBudget(
+            systemTokens = 500,
+            history = history,
+            contextWindow = 200_000,
+            maxOutputTokens = 8_000,
+            fullContext = true,
+        )
+
+        // 一条不裁：模型必须看得见自己前面做过的每一步
+        assertThat(kept).hasSize(history.size)
+        assertThat(kept).isEqualTo(history)
+    }
+
+    @Test
+    fun `full context falls back to budget when exceeding the model window`() {
+        val history = (1..40).map {
+            ChatTurn(role = "user", content = "这是一条比较长的消息，用来把上下文撑满。".repeat(12))
+        }
+
+        val kept = TokenEstimator.trimToBudget(
+            systemTokens = 200,
+            history = history,
+            contextWindow = 8_000,
+            maxOutputTokens = 1_000,
+            fullContext = true,
+        )
+
+        // 超出模型真实窗口（服务端必然 400）才退化为按预算装填，保住基本可用
+        assertThat(kept).isNotEmpty()
+        assertThat(kept.size).isLessThan(history.size)
+        assertThat(kept.last()).isEqualTo(history.last())
+    }
+
+    @Test
+    fun `full context never splits tool call groups`() {
+        val assistant = ChatTurn(
+            role = "assistant",
+            content = "",
+            toolCalls = listOf(ToolCallRecord(id = "c1", name = "read_file", arguments = "{}")),
+        )
+        val toolResult = ChatTurn(role = "tool", toolCallId = "c1", content = "文件内容".repeat(500))
+        val history = (1..20).map {
+            ChatTurn(role = "user", content = "填充消息，把上下文撑大。".repeat(50))
+        } + assistant + toolResult
+
+        val kept = TokenEstimator.trimToBudget(
+            systemTokens = 100,
+            history = history,
+            contextWindow = 200_000,
+            maxOutputTokens = 4_000,
+            fullContext = true,
+        )
+
+        assertThat(kept).hasSize(history.size)
+        // assistant(tool_calls) 与 role=tool 必须成对且相邻，否则服务端 400
+        assertThat(kept.indexOf(assistant) + 1).isEqualTo(kept.indexOf(toolResult))
     }
 }

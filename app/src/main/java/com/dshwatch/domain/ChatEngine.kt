@@ -545,12 +545,18 @@ class ChatEngine(
             // 注意：这里**不能**再对结果做 takeLast —— 会把
             // [assistant(tool_calls), tool, ...] 这组从中间切断，服务端直接 400。
             // 条数上限通过 maxTurns 交给裁剪器按组处理。
+            //
+            // fullContext=true：上下文**不再主动裁剪**（用户明确要求
+            // 「不要截断上下文，即使导致设备卡顿也不要」—— 模型看不到
+            // 自己前面做过什么，长任务里就会原地打转）。只有估算量超出
+            // 模型真实窗口时，trimToBudget 内部才退化为按预算装填兜底。
             val trimmed = TokenEstimator.trimToBudget(
                 systemTokens = TokenEstimator.estimate(roundPrompt),
                 history = turns,
                 contextWindow = provider.contextWindow,
                 maxOutputTokens = provider.maxTokens,
-                maxTurns = perf.requestHistoryLimit,
+                maxTurns = Int.MAX_VALUE,
+                fullContext = true,
             )
 
             val request = ChatRequest(
@@ -962,10 +968,11 @@ class ChatEngine(
                 }
             val rec = call.copy(
                 status = if (result.ok) ToolStatus.SUCCESS else ToolStatus.FAILED,
-                // 大结果整份落盘到 notes/tool-output/，上下文只留头尾与路径。
-                // 这样单次工具调用的上下文成本是常数级，模型也不会因为「中间被砍掉」
-                // 而反复重读同一个文件（真机上出现过连读两次仍看不到目标段的情况）。
-                result = ToolResultCompactor.compact(tool.name, result.content, toolCtx).text,
+                // 工具结果**完整**回灌，不再落盘压缩。v1.6 曾把超长结果换成
+                // 「头尾 + 路径」的摘要，结果模型到后面忘了自己做过什么，
+                // 长任务里原地打转。用户明确选择：宁可上下文变大、设备卡顿，
+                // 也要让模型看得见每一次操作的完整结果。
+                result = result.content,
                 summary = summary,
                 startedAt = startedAt,
                 elapsedMs = System.currentTimeMillis() - startedAt,
@@ -1174,8 +1181,8 @@ class ChatEngine(
             三种语言是彼此独立的执行路径。`language=shell` + `python main.py` 一定失败，
             要跑 Python 就传 language=python、把源码放在 code 里（或先 write_file 再用 python 读它）。
             跑之前先想清楚脚本会输出什么，一次跑对；不要靠反复试错烧用户的时间。
-            超长输出会**整份落盘**到 `notes/tool-output/`，回灌给你的只有头尾与路径；
-            要看中间内容，用 grep 或 `read_file offset=...` 读那个文件，**不要重跑命令**。
+            你每次调用的完整输出（包括很长的）都会回灌给你，前面做过什么都在上下文里 ——
+            不要重跑已经执行过的命令；要定位长输出里的特定内容，用 grep 或 `read_file offset=...`。
 
             【本机真做不了的，交给云端 cloud_build】
             手表上没有 JDK/Kotlin 编译器/Android SDK，编 apk、跑 gradle、用 gcc 这类需求
@@ -1318,8 +1325,10 @@ class ChatEngine(
         /**
          * 单个工具结果回灌给模型的**目标**长度。
          *
-         * 实际保护由 [ToolResultCompactor] 完成：超过这个长度的结果会整份落盘，
-         * 回灌的是「头 + 尾 + 路径」的常数级摘要（约 3KB），而不是把中间直接丢掉。
+         * 已停用（2026-10-19）：v1.6 曾把超长结果整份落盘、回灌「头 + 尾 + 路径」
+         * 摘要，但模型因此忘了自己做过什么，长任务里原地打转。用户明确要求
+         * 「不要截断上下文，即使导致设备卡顿也不要」，现在工具结果全文回灌。
+         * 落盘能力保留在 [ToolResultCompactor]，供插件与工作空间翻查使用。
          */
         const val MAX_TOOL_RESULT_CHARS = ToolResultCompactor.THRESHOLD
     }

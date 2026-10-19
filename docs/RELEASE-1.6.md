@@ -16,6 +16,13 @@
 
 ## 1. 上下文截断：全文落盘 + 摘要回灌
 
+> **2026-10-19 更新：本章方案已整体停用。** 落盘摘要上线后发现，模型到后面
+> 「不知道自己前面做过什么」，长任务里原地打转 —— 正是它要解决的问题没解决，
+> 反而换了个形式出现。用户明确要求「不要截断上下文，即使导致设备卡顿也不要」。
+> 现在：工具结果**全文回灌**（§7），历史**不主动裁剪**（`trimToBudget(fullContext = true)`）。
+> 本章作为设计过程记录保留，`ToolResultCompactor` 的落盘能力仍在，供插件与
+> 工作空间翻查使用。
+
 ### 1.1 问题
 
 改动前，单个工具结果超过 4000 字会被 `TextClip.headTail()` 砍成「头 + 尾」，**中间直接丢弃**。真机上的表现：
@@ -236,13 +243,72 @@ Agent 干完一轮活，回答上方会堆成一摞：每个工具一张卡片�
 
 ---
 
-## 6. 验证
+## 6. 完整上下文：不裁剪、不压缩（2026-10-19 追加）
+
+### 6.1 为什么推翻 §1
+
+§1 的落盘摘要上线后，真机上的新症状：
+
+```
+模型：第 12 步 —— 重新读第 3 步已经读过的同一个文件
+模型：第 15 步 —— 重新执行第 7 步已经跑过的同一条命令
+用户：它明明自己刚做过，为什么又在原地打转？
+```
+
+根因：回灌给模型的不是「它做过什么」，而是「一段 3KB 的摘要 + 一个文件路径」。
+模型对中间内容没有可见性，判断不了「这步是否重复」，只能靠猜。历史裁剪
+（`trimToBudget` + `perf.requestHistoryLimit`）叠加同样的病：从后往前装，
+装不下的整组丢掉，模型对早段过程同样失明。
+
+用户的原话：「模型在完成任务之前的所有操作和思考都放在一个工作流程里。
+不要截断上下文，即使导致设备卡顿也不要！」—— 前半句是 UI（§5 已做到：
+执行中默认展开），后半句是模型侧，就是本章。
+
+### 6.2 做法
+
+两处改动，都在 `ChatEngine`：
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `executeTools` 工具结果 | `result = result.content` —— 不再过 `ToolResultCompactor.compact()`，完整输出直接回灌 |
+| 2 | 请求历史 | `trimToBudget(fullContext = true)`，且 `maxTurns = Int.MAX_VALUE` —— 不再按条数/预算裁历史 |
+
+`TokenEstimator.trimToBudget` 新增 `fullContext` 参数：
+
+```kotlin
+if (fullContext) {
+    val limit = contextWindow - maxOutputTokens
+    val total = groups.sumOf { g -> g.sumOf { estimateTurn(it) } } + systemTokens
+    if (limit > 0 && total <= limit) return groups.flatten()
+    return packFromEnd(groups, limit, keepFirstUserTurn)   // 超窗口才兜底
+}
+```
+
+**唯一的例外**是估算量超出模型真实窗口 —— 那不是体验问题，是请求必然被服务端
+400 拒绝。此时仍退化为按预算装填（原子组完整、保留首条任务），保住「功能可用」
+这条底线。除此之外，一条不裁。
+
+### 6.3 代价与边界
+
+- 上下文体积随任务步数线性增长，长任务的请求体会明显变大：手表上组包更慢、
+  服务端计费更高、极端情况下触发模型的单请求长度上限（此时表现为 API 报错，
+  由 §6.2 的兜底接住）；
+- 工具输出本身仍受各工具自己的上限约束（如 `run_script` 的 stdout 上限、
+  工作空间单文件 256KB）—— 那是**执行侧**的保护，与上下文策略无关；
+- `ToolResultCompactor` 与 `notes/tool-output/` 落盘能力保留，引擎不再调用它
+  做回灌压缩，插件与用户翻查工作空间时仍可用；
+- 系统提示同步改口径：删掉「超长输出会落盘、回灌只有头尾」，改为「完整输出都会
+  回灌给你，不要重跑已执行过的命令」。
+
+---
+
+## 7. 验证
 
 | 项 | 结果 |
 |---|---|
-| 单元测试 | 551 个，0 失败（新增 29 条） |
-| UI 改动 | `AgentWorkBlock` 为纯 Compose 渲染逻辑，无单测覆盖；编译通过、双包构建通过，交互效果需真机验收（默认折叠 / 状态行 / 完成后收回 / 产物常显） |
-| 新增测试 | `ToolResultCompactorTest`（4）、`ToolResultCompactorIoTest`（4）、`ApprovalPolicyTest`（12）、`CustomHeadersTest`（7）、`TokenEstimatorTest` 追加（2） |
+| 单元测试 | 554 个，0 失败（v1.6 初始 29 条 + 完整上下文 3 条） |
+| UI 改动 | `AgentWorkBlock` 为纯 Compose 渲染逻辑，无单测覆盖；编译通过、双包构建通过，交互效果需真机验收（执行中展开 / 完成后收回 / 状态行 / 产物常显） |
+| 新增测试 | `ToolResultCompactorTest`（4）、`ToolResultCompactorIoTest`（4）、`ApprovalPolicyTest`（12）、`CustomHeadersTest`（7）、`TokenEstimatorTest` 追加（5：保首条 2 + fullContext 3） |
 | 构建 | lite 与 full 均 `BUILD SUCCESSFUL` |
 | 包校验 | 两包 `versionCode=14 / versionName=1.6`，签名 `70437a7f…bf31f94`；lite 内 `libpython` 命中 0、full 命中 26 |
 
@@ -250,14 +316,14 @@ Agent 干完一轮活，回答上方会堆成一摞：每个工具一张卡片�
 
 ---
 
-## 7. 已知限制与后续
+## 8. 已知限制与后续
 
 | 限制 | 说明 |
 |---|---|
 | 搜索仍是 DuckDuckGo lite 页面解析 | 页面结构变了会解析不出结果；若要接 DeepSeek `/v1/tools/search` 或自建 SearXNG，现在的 `headers` 已能带 `Authorization`，缺的是后端可配置项 |
-| 落盘文件没有清理机制 | `notes/tool-output/` 会随使用增长，目前靠工作空间容量上限（256KB/文件）兜底 |
+| 完整上下文下长任务请求体持续变大 | 用户明确接受「宁可卡顿」；超出模型真实窗口时 `fullContext` 会退化为按预算装填兜底，但介于「装得下」与「必然 400」之间的区间，计费与延迟都会上升 |
 | 「本会话允许」只按 `工具:语言` 粒度 | 不区分具体命令；想更细可以改成按命令前缀匹配 |
-| 落盘阈值固定 4000 字 | 与上下文窗口大小无关；小窗口模型（如 16K）可能希望更激进 |
+| `notes/tool-output/` 没有清理机制 | 落盘能力已不用于回灌压缩（§6），该目录只在使用旧版会话数据或插件主动落盘时才会增长 |
 
 ---
 
@@ -278,3 +344,6 @@ Agent 干完一轮活，回答上方会堆成一摞：每个工具一张卡片�
 | 文档规则 | `ChatEngine.kt` 系统提示「【干活要留文档】」 |
 | 工作流程块 | `ui/screens/chat/ChatScreen.kt:AgentWorkBlock`（含 `LaunchedEffect(message.id, live == null)` 完成后收回） |
 | 工作流程文案 | `AppStrings.workflowTitle/Now/Done/Failed/Expand/Collapse` |
+| 完整上下文 | `ChatEngine.kt`：`result = result.content`（工具结果全文回灌）、`trimToBudget(fullContext = true)` |
+| fullContext 实现 | `TokenEstimator.kt:trimToBudget(fullContext)`，内部 `groupsOf` / `packFromEnd` |
+| 系统提示口径 | `ChatEngine.kt`「完整输出都会回灌」段（替换原落盘说明） |

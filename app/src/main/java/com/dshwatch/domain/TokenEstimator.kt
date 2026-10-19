@@ -64,7 +64,6 @@ object TokenEstimator {
             (c in 0x3000..0x303F)         // CJK 符号与标点
     }
 
-    /** 依据上下文窗口裁剪历史：保留 system + 最近若干条，且不超过预算 */
     /**
      * 按上下文预算裁剪历史。
      *
@@ -79,6 +78,11 @@ object TokenEstimator {
      *
      * 另外，孤立的 tool 消息（前面的 assistant 已经被丢掉）必须**直接剔除**，
      * 否则同样是非法序列。
+     *
+     * @param fullContext 完整上下文模式：窗口装得下就**全量**发送，一条不裁；
+     *   只有估算量超出模型真实窗口（服务端必然 400）时才退化为按预算装填。
+     *   这是用户明确要的行为 ——「不要截断上下文，即使导致设备卡顿也不要」：
+     *   模型看不到自己前面做过什么，长任务里就会原地打转。
      */
     fun trimToBudget(
         systemTokens: Int,
@@ -88,14 +92,35 @@ object TokenEstimator {
         reserveRatio: Double = 0.75,
         maxTurns: Int = Int.MAX_VALUE,
         keepFirstUserTurn: Boolean = true,
+        fullContext: Boolean = false,
     ): List<com.dshwatch.domain.model.ChatTurn> {
+        val groups = groupsOf(history)
+
+        if (fullContext) {
+            // 唯一允许的「裁剪」是超出模型真实窗口 —— 那已经不是体验问题，
+            // 而是请求必然失败。此时退化为按预算装填，保住基本可用。
+            val limit = contextWindow - maxOutputTokens
+            val total = groups.sumOf { g -> g.sumOf { estimateTurn(it) } } + systemTokens
+            if (limit > 0 && total <= limit) return groups.flatten()
+            return packFromEnd(groups, limit, keepFirstUserTurn)
+        }
+
         val budget = (contextWindow * reserveRatio).toInt() - maxOutputTokens - systemTokens
         if (budget <= 0) {
             // 预算为负时至少给一条最近的合法内容，避免发出空 messages
             return sanitize(history.takeLast(2))
         }
+        return packFromEnd(groups, budget, keepFirstUserTurn, maxTurns)
+    }
 
-        // 1) 切成原子组
+    /**
+     * 把历史切成原子组：
+     *  - `assistant(tool_calls)` 连同后面紧跟的所有 `role=tool` 消息为一组；
+     *  - 孤立的 tool 消息（前面的 assistant 不在）直接剔除。
+     */
+    private fun groupsOf(
+        history: List<com.dshwatch.domain.model.ChatTurn>,
+    ): List<List<com.dshwatch.domain.model.ChatTurn>> {
         val groups = ArrayList<List<com.dshwatch.domain.model.ChatTurn>>()
         var index = 0
         while (index < history.size) {
@@ -124,8 +149,16 @@ object TokenEstimator {
                 }
             }
         }
+        return groups
+    }
 
-        // 2) 从最后一组往前装
+    /** 从最后一组往前装，装不下为止；可保留首条用户消息 */
+    private fun packFromEnd(
+        groups: List<List<com.dshwatch.domain.model.ChatTurn>>,
+        budget: Int,
+        keepFirstUserTurn: Boolean,
+        maxTurns: Int = Int.MAX_VALUE,
+    ): List<com.dshwatch.domain.model.ChatTurn> {
         val kept = ArrayList<com.dshwatch.domain.model.ChatTurn>()
         var used = 0
         var keptGroups = 0
@@ -142,15 +175,15 @@ object TokenEstimator {
             cursor--
         }
 
-        // 3) 保底：把**最初的任务描述**留住。
+        // 保底：把**最初的任务描述**留住。
         //
         // 长任务里最危险的不是「忘了刚才那步」，而是「忘了要干什么」——
         // 从后往前装会把第一条用户消息最先丢掉，模型随后就会开始瞎补目标。
         // 第一条消息通常只有几十个字，留在最前面几乎不占预算。
         if (keepFirstUserTurn) {
-            val firstUser = history.firstOrNull {
-                it.role == "user" && it.toolCallId.isBlank() && it.toolCalls.isEmpty()
-            }
+            val firstUser = groups.firstOrNull {
+                it.size == 1 && it[0].role == "user" && it[0].toolCallId.isBlank() && it[0].toolCalls.isEmpty()
+            }?.firstOrNull()
             if (firstUser != null && kept.none { it === firstUser }) {
                 val cost = estimateTurn(firstUser)
                 if (used + cost <= budget || kept.isEmpty()) {
@@ -165,31 +198,5 @@ object TokenEstimator {
     /** 兜底清洗：保证返回的历史本身是合法的协议序列 */
     private fun sanitize(
         history: List<com.dshwatch.domain.model.ChatTurn>,
-    ): List<com.dshwatch.domain.model.ChatTurn> {
-        val out = ArrayList<com.dshwatch.domain.model.ChatTurn>(history.size)
-        var i = 0
-        while (i < history.size) {
-            val turn = history[i]
-            when {
-                turn.toolCalls.isNotEmpty() -> {
-                    val group = ArrayList<com.dshwatch.domain.model.ChatTurn>(4)
-                    group.add(turn)
-                    var j = i + 1
-                    while (j < history.size && history[j].toolCallId.isNotBlank()) {
-                        group.add(history[j])
-                        j++
-                    }
-                    out.addAll(group)
-                    i = j
-                }
-
-                turn.toolCallId.isNotBlank() -> i++
-                else -> {
-                    out.add(turn)
-                    i++
-                }
-            }
-        }
-        return out
-    }
+    ): List<com.dshwatch.domain.model.ChatTurn> = groupsOf(history).flatten()
 }

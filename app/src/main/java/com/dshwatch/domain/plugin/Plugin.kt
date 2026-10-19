@@ -52,9 +52,9 @@ interface RoutingPlugin : Plugin {
 /**
  * 工具结果的上下文。
  *
- * [content] 是经过长度保护后的文本（见 `ChatEngine.MAX_TOOL_RESULT_CHARS`），
- * 不是原始全量输出 —— 手表上不可能把几十 MB 的输出留在内存里等插件处理。
- * 插件要做"原文可还原"，落盘的是它拿到的这一份。
+ * [content] 是工具执行的完整输出（不再做长度保护后的摘要 —— 见
+ * `ChatEngine.MAX_TOOL_RESULT_CHARS` 的停用说明）。手表上不可能把几十 MB
+ * 的输出留在内存里等插件处理，插件要自己注意 [content] 可能很大。
  */
 data class ToolResultInput(
     val toolName: String,
