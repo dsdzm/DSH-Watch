@@ -6,15 +6,16 @@ import com.dshwatch.data.store.ConversationStore
 import com.dshwatch.data.store.StoredConversation
 import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.agent.AgentTool
+import com.dshwatch.domain.agent.ApprovalPolicy
 import com.dshwatch.domain.agent.ProgressTracker
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.plugin.PromptContext
-import com.dshwatch.domain.plugin.TextClip
 import com.dshwatch.domain.plugin.ToolResultInput
 import com.dshwatch.domain.plugin.TurnContext
 import com.dshwatch.domain.agent.ToolArgs
 import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.agent.ToolResult
+import com.dshwatch.domain.agent.ToolResultCompactor
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.exec.PythonBridge
 import com.dshwatch.domain.model.AgentMode
@@ -68,9 +69,26 @@ data class PendingApproval(
     val summary: String,
     val arguments: String,
     val safety: ToolSafety,
+    /**
+     * 是否支持「本会话允许」。
+     *
+     * 只有 shell 是 true：它每次都要问，但同一个任务里连着跑几条命令时，
+     * 每条都点一次太折磨人。js/python 与云端仍走「总是允许 / 允许一次」。
+     */
+    val sessionScoped: Boolean = false,
 )
 
-enum class ApprovalDecision { ALLOW_ONCE, ALLOW_ALWAYS, DENY }
+enum class ApprovalDecision {
+    ALLOW_ONCE,
+
+    /** 写入设置，永久放行（仅非 sessionScoped 的工具） */
+    ALLOW_ALWAYS,
+
+    /** 本会话内放行（仅 shell） */
+    ALLOW_SESSION,
+
+    DENY,
+}
 
 /**
  * 对话引擎（应用级单例）。
@@ -126,6 +144,14 @@ class ChatEngine(
 
     @Volatile
     private var questionDeferred: CompletableDeferred<String?>? = null
+
+    /**
+     * 本会话内已放行的 shell 执行。
+     *
+     * 只在内存里，换会话/重启即失效 —— 用户点的是「本会话允许」，不是「永久放行」。
+     * 永久放行对 shell 来说风险不对等：一条 `rm -rf` 就能把工作空间清空。
+     */
+    private val sessionApproved = mutableSetOf<String>()
 
     init {
         // 工具集先于引擎构造（AppContainer 里的顺序相反），所以这里做后置注册
@@ -183,6 +209,8 @@ class ChatEngine(
         _messages.value = emptyList()
         _live.value = LiveDelta()
         _banner.value = null
+        // 新会话不继承上一个会话的 shell 放行
+        sessionApproved.clear()
         return conv
     }
 
@@ -894,12 +922,12 @@ class ChatEngine(
                 continue
             }
 
-            if (needsApproval(settings, tool)) {
+            if (needsApproval(settings, tool, args)) {
                 updateToolCall(
                     messageId,
                     call.copy(status = ToolStatus.AWAITING_APPROVAL, summary = summary),
                 )
-                when (awaitApproval(call, tool, summary)) {
+                when (awaitApproval(call, tool, summary, args)) {
                     ApprovalDecision.DENY -> {
                         deniedTools += tool.name
                         val rec = call.copy(
@@ -916,6 +944,10 @@ class ChatEngine(
                         st.copy(autoApprovedTools = st.autoApprovedTools + tool.name)
                     }
 
+                    ApprovalDecision.ALLOW_SESSION -> {
+                        ApprovalPolicy.sessionKey(tool.name, args)?.let { sessionApproved += it }
+                    }
+
                     ApprovalDecision.ALLOW_ONCE -> Unit
                 }
             }
@@ -930,8 +962,10 @@ class ChatEngine(
                 }
             val rec = call.copy(
                 status = if (result.ok) ToolStatus.SUCCESS else ToolStatus.FAILED,
-                // 头尾双留：报错永远在最后几行，只留头部等于把最有用的信息扔掉
-                result = TextClip.headTail(result.content, MAX_TOOL_RESULT_CHARS),
+                // 大结果整份落盘到 notes/tool-output/，上下文只留头尾与路径。
+                // 这样单次工具调用的上下文成本是常数级，模型也不会因为「中间被砍掉」
+                // 而反复重读同一个文件（真机上出现过连读两次仍看不到目标段的情况）。
+                result = ToolResultCompactor.compact(tool.name, result.content, toolCtx).text,
                 summary = summary,
                 startedAt = startedAt,
                 elapsedMs = System.currentTimeMillis() - startedAt,
@@ -947,6 +981,7 @@ class ChatEngine(
         call: ToolCallRecord,
         tool: AgentTool,
         summary: String,
+        args: JsonObject,
     ): ApprovalDecision {
         val deferred = CompletableDeferred<ApprovalDecision>()
         approvalDeferred = deferred
@@ -956,6 +991,7 @@ class ChatEngine(
             summary = summary,
             arguments = call.arguments,
             safety = tool.safety,
+            sessionScoped = ApprovalPolicy.isSessionScoped(tool.name, args),
         )
         return try {
             deferred.await()
@@ -965,19 +1001,14 @@ class ChatEngine(
         }
     }
 
-    private fun needsApproval(settings: AppSettings, tool: AgentTool): Boolean {
-        // 危险工具：**无视「总是允许」和「全自动」**，每次都要用户点确认。
-        // 这几个工具能执行任意代码、能把代码发到外部、能动别人的仓库 ——
-        // 用户点过一次"总是允许"就永久放行，风险不对等。
-        if (tool.name in ALWAYS_CONFIRM_TOOLS) return true
-
-        if (tool.name in settings.autoApprovedTools) return false
-        return when (settings.agentMode) {
-            AgentMode.OFF, AgentMode.AUTO_ALL -> false
-            AgentMode.ASK_EVERY_STEP -> true
-            AgentMode.AUTO_READONLY -> tool.safety != ToolSafety.READ_ONLY
-        }
-    }
+    private fun needsApproval(settings: AppSettings, tool: AgentTool, args: JsonObject): Boolean =
+        ApprovalPolicy.needsApproval(
+            settings = settings,
+            toolName = tool.name,
+            safety = tool.safety,
+            args = args,
+            sessionApproved = sessionApproved,
+        )
 
     /** 把某条助手消息里的工具记录替换成最新状态，并落盘 */
     private suspend fun updateToolCall(messageId: String, record: ToolCallRecord) {
@@ -1118,6 +1149,14 @@ class ChatEngine(
             这既是给你自己看的（长对话里上下文会被工具输出挤占，容易忘记原本要做什么），
             也让用户能实时看到进度。
 
+            【干活要留文档】
+            只要这次是「做事」而不是一两句问答（写代码、改配置、成篇查资料、排查问题），
+            收尾时用 write_file 在工作目录写一份 md 说明，建议 `notes/<主题>.md`，写清五件事：
+            目标、结论、改了哪些文件、怎么验证、还没做什么。
+            预计超过 3 步的任务，从开始就维护 `notes/task.md`（目标 / 当前进度 / 下一步），
+            每完成一步更新它 —— 上下文会被裁剪，这份文档是你跨步骤唯一可靠的记忆。
+            纯聊天、单次查询、一句话能答完的事**不要**硬写文档，那是浪费用户的时间。
+
             【写完代码必须校验】
             写完代码后调一次 build_project。它会按语言做静态检查（括号与字符串闭合、
             Python 缩进与冒号、HTML/XML 标签配对、JSON/YAML 语法等）并给出「文件:行号」。
@@ -1135,7 +1174,8 @@ class ChatEngine(
             三种语言是彼此独立的执行路径。`language=shell` + `python main.py` 一定失败，
             要跑 Python 就传 language=python、把源码放在 code 里（或先 write_file 再用 python 读它）。
             跑之前先想清楚脚本会输出什么，一次跑对；不要靠反复试错烧用户的时间。
-            输出会截断保留头尾，别指望它替你打印整个大文件。
+            超长输出会**整份落盘**到 `notes/tool-output/`，回灌给你的只有头尾与路径；
+            要看中间内容，用 grep 或 `read_file offset=...` 读那个文件，**不要重跑命令**。
 
             【本机真做不了的，交给云端 cloud_build】
             手表上没有 JDK/Kotlin 编译器/Android SDK，编 apk、跑 gradle、用 gcc 这类需求
@@ -1264,19 +1304,23 @@ class ChatEngine(
         private const val HARD_STEP_CEILING = 200
 
         /**
-         * 每次都必须确认的工具。
+         * 每次都必须确认的工具（已迁到 [ApprovalPolicy.ALWAYS_CONFIRM]）。
          *
-         * 这几个的后果不是"改错一个文件"级别的：
-         * 执行任意代码（run_script）、把源码发到外部并消耗额度（cloud_build / cloud_job）。
-         * 用户点过一次「总是允许」就永久放行，风险不对等 —— 所以这里刻意不给"记住"的机会。
+         * shell 也仍然每次确认，但多了「本会话允许」；js/python 不再强制拦。
+         * 具体规则见 [ApprovalPolicy]，那里可以单测。
          */
-        val ALWAYS_CONFIRM_TOOLS = setOf("run_script", "cloud_build", "cloud_job")
+        val ALWAYS_CONFIRM_TOOLS = ApprovalPolicy.ALWAYS_CONFIRM
         private const val TAG = "ChatEngine"
 
         /** 等用户回答 ask_user 的最长时间；超时后交给模型自行收尾 */
         private const val QUESTION_TIMEOUT_MS = 5 * 60 * 1000L
 
-        /** 单个工具结果回灌给模型的最大长度，避免一次请求把上下文撑爆 */
-        const val MAX_TOOL_RESULT_CHARS = 4_000
+        /**
+         * 单个工具结果回灌给模型的**目标**长度。
+         *
+         * 实际保护由 [ToolResultCompactor] 完成：超过这个长度的结果会整份落盘，
+         * 回灌的是「头 + 尾 + 路径」的常数级摘要（约 3KB），而不是把中间直接丢掉。
+         */
+        const val MAX_TOOL_RESULT_CHARS = ToolResultCompactor.THRESHOLD
     }
 }

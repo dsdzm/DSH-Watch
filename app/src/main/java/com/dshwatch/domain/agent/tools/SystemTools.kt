@@ -17,8 +17,10 @@ import com.dshwatch.domain.agent.ToolContext
 import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.intOf
+import com.dshwatch.domain.agent.stringMapOf
 import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.agent.stringListOf
+import com.dshwatch.net.CustomHeaders
 import com.dshwatch.net.Http
 import com.dshwatch.service.AlarmReceiver
 import com.dshwatch.util.Fmt
@@ -405,12 +407,19 @@ object SystemTools {
         override val name = "web_search"
         override val description =
             "联网搜索关键词，返回标题 + 链接 + 摘要的列表。用于获取你不知道或可能已过时的信息。" +
+                "query 支持常见搜索语法：site:github.com 限定站点、-site:example.com 排除、" +
+                "\"精确短语\"、after:2025-01-01 / before:2026 限定时间。多个条件用空格组合。" +
+                "需要自定义请求头（UA、Referer、API Key）时传 headers 键值对。" +
                 "需要精确抓取某个已知网页的内容时，直接用 http_fetch 更可靠。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(
-                "query" to Schema.str("搜索关键词"),
+                "query" to Schema.str("搜索关键词，支持 site: / -site: / \"短语\" / after: / before: 语法"),
                 "max_results" to Schema.int("最多返回多少条，默认 6", 1, 10),
+                "headers" to Schema.strMap(
+                    "自定义请求头（键值对，值必须是字符串）。可覆盖默认的 User-Agent / Accept；" +
+                        "部分搜索源会按 Referer 或 Cookie 返回不同结果"
+                ),
             ),
             required = listOf("query"),
         )
@@ -419,22 +428,22 @@ object SystemTools {
             val query = args.strOf("query") ?: return ToolResult.fail("缺少 query 参数")
             val limit = (args.intOf("max_results") ?: 6).coerceIn(1, 10)
             val url = "https://lite.duckduckgo.com/lite/?q=" + java.net.URLEncoder.encode(query, "UTF-8")
+            val custom = CustomHeaders.sanitize(args.stringMapOf("headers"))
 
             // 用「异常 → 局部变量」而不是让 withContext 同时返回 String 和 ToolResult：
             // 后者的公共父类型是 Any，拿回来还得强转，既啰嗦又容易漏判。
             var failure: ToolResult? = null
             val html = withContext(Dispatchers.IO) {
                 runCatching {
-                    val req = Request.Builder()
+                    val builder = Request.Builder()
                         .url(url)
                         .header(
                             "User-Agent",
                             "Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36",
                         )
                         .header("Accept", "text/html")
-                        .get()
-                        .build()
-                    Http.client.newCall(req).execute().use { resp ->
+                    CustomHeaders.apply(builder, custom.values)
+                    Http.client.newCall(builder.get().build()).execute().use { resp ->
                         if (!resp.isSuccessful) {
                             failure = ToolResult.fail("搜索失败：HTTP ${resp.code}（可能被网络环境拦截）")
                             ""
@@ -459,6 +468,9 @@ object SystemTools {
             }
             return ToolResult.ok(
                 buildString {
+                    if (custom.rejected.isNotEmpty()) {
+                        append(CustomHeaders.rejectedNote(custom.rejected)).append('\n')
+                    }
                     append("搜索「").append(query).append("」的结果：\n")
                     hits.forEachIndexed { i, h ->
                         append(i + 1).append(". ").append(h.title).append('\n')

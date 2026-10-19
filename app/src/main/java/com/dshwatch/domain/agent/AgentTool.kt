@@ -191,6 +191,19 @@ object Schema {
         put("description", desc)
     }
 
+    /**
+     * 任意键值对（值都是字符串）。
+     *
+     * 用于「表头」这类键名不固定的参数。注意 [obj] 会把外层对象的
+     * `additionalProperties` 置为 false，所以这里必须单独给这个属性
+     * 声明 `additionalProperties: {"type":"string"}`，否则模型传什么键都会被判非法。
+     */
+    fun strMap(desc: String): JsonObject = buildJsonObject {
+        put("type", "object")
+        put("description", desc)
+        putJsonObject("additionalProperties") { put("type", "string") }
+    }
+
     @Suppress("unused")
     fun arr(desc: String, itemType: String = "string"): JsonObject = buildJsonObject {
         put("type", "array")
@@ -248,4 +261,32 @@ fun JsonObject.stringListOf(key: String): List<String> {
     // 退化成用换行/分号分隔的纯文本，也比直接丢掉强
     return trimmed.split('\n', ';', '|').map { it.trim().trimStart('-', '*', ' ') }
         .filter { it.isNotBlank() }
+}
+
+/**
+ * 读一个「键值对」参数（如自定义请求头）。
+ *
+ * 和 [stringListOf] 一样，模型有时把对象写成字符串里裹着的 JSON，
+ * 两种形态都要认；值不是字符串的条目直接忽略（请求头只能是字符串）。
+ */
+fun JsonObject.stringMapOf(key: String): Map<String, String> {
+    val element = this[key] ?: return emptyMap()
+    val obj = when (element) {
+        is JsonObject -> element
+        is kotlinx.serialization.json.JsonPrimitive -> {
+            val raw = element.contentOrNull?.trim().orEmpty()
+            if (!raw.startsWith("{")) return emptyMap()
+            runCatching {
+                kotlinx.serialization.json.Json.parseToJsonElement(raw) as? JsonObject
+            }.getOrNull()
+        }
+        else -> null
+    } ?: return emptyMap()
+
+    val out = LinkedHashMap<String, String>()
+    obj.forEach { (k, v) ->
+        val value = (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+        if (!k.isBlank() && value != null) out[k] = value
+    }
+    return out
 }

@@ -87,6 +87,7 @@ object TokenEstimator {
         maxOutputTokens: Int,
         reserveRatio: Double = 0.75,
         maxTurns: Int = Int.MAX_VALUE,
+        keepFirstUserTurn: Boolean = true,
     ): List<com.dshwatch.domain.model.ChatTurn> {
         val budget = (contextWindow * reserveRatio).toInt() - maxOutputTokens - systemTokens
         if (budget <= 0) {
@@ -139,6 +140,24 @@ object TokenEstimator {
             kept.addAll(0, group)
             keptGroups++
             cursor--
+        }
+
+        // 3) 保底：把**最初的任务描述**留住。
+        //
+        // 长任务里最危险的不是「忘了刚才那步」，而是「忘了要干什么」——
+        // 从后往前装会把第一条用户消息最先丢掉，模型随后就会开始瞎补目标。
+        // 第一条消息通常只有几十个字，留在最前面几乎不占预算。
+        if (keepFirstUserTurn) {
+            val firstUser = history.firstOrNull {
+                it.role == "user" && it.toolCallId.isBlank() && it.toolCalls.isEmpty()
+            }
+            if (firstUser != null && kept.none { it === firstUser }) {
+                val cost = estimateTurn(firstUser)
+                if (used + cost <= budget || kept.isEmpty()) {
+                    kept.add(0, firstUser)
+                    used += cost
+                }
+            }
         }
         return kept
     }

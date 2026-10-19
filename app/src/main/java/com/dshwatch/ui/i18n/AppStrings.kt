@@ -293,6 +293,7 @@ interface AppStrings {
     val toolStatusSkipped: String
     val approveOnce: String
     val approveAlways: String
+    val approveSession: String
     val deny: String
     val stepLabel: String
     val toolArgs: String
@@ -639,6 +640,7 @@ object Zh : AppStrings {
     override val toolStatusSkipped = "已跳过"
     override val approveOnce = "允许一次"
     override val approveAlways = "总是允许"
+    override val approveSession = "本会话允许"
     override val deny = "拒绝"
     override val stepLabel = "步"
     override val toolArgs = "参数"
@@ -1045,6 +1047,7 @@ object En : AppStrings {
     override val toolStatusSkipped = "Skipped"
     override val approveOnce = "Allow once"
     override val approveAlways = "Always allow"
+    override val approveSession = "Allow this session"
     override val deny = "Deny"
     override val stepLabel = "step"
     override val toolArgs = "Args"

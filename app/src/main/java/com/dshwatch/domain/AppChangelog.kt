@@ -18,6 +18,21 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.6",
+            date = "2026-10-19",
+            highlights = listOf(
+                "长任务不再「读到一半被砍」：超长工具输出会整份存到工作空间 notes/tool-output/，" +
+                    "上下文只留头尾和路径，需要中间内容时按位置或关键词精确查",
+                "执行确认不再烦人：js / python 直接跑，shell 仍每次确认但可以选「本会话允许」，" +
+                    "之后的命令不再逐条弹窗；云端编译保留确认",
+                "联网工具可以自定义请求头：需要 Referer、Authorization 或特定 User-Agent 的站点，" +
+                    "现在能通过 headers 参数正常访问",
+                "Agent 干完活会在工作空间留下 md 说明（目标 / 改动 / 验证 / 待办），" +
+                    "长任务维护 notes/task.md，下一次接手不用重新摸一遍",
+                "上下文裁剪时会保留最初的任务描述，长对话不会跑着跑着忘了目标",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.5",
             date = "2026-10-17",
             highlights = listOf(

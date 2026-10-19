@@ -375,8 +375,16 @@ fun ToolApprovalDialog(
         },
         confirmButton = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ApprovalButton(s.approveAlways, primary = true) {
-                    onDecision(ApprovalDecision.ALLOW_ALWAYS)
+                // shell 不给「总是允许」：它的风险与 cloud 不同，永久放行等于把
+                // 设备上的任意文件交给模型。改为「本会话允许」，换会话即失效。
+                if (pending.sessionScoped) {
+                    ApprovalButton(s.approveSession, primary = true) {
+                        onDecision(ApprovalDecision.ALLOW_SESSION)
+                    }
+                } else {
+                    ApprovalButton(s.approveAlways, primary = true) {
+                        onDecision(ApprovalDecision.ALLOW_ALWAYS)
+                    }
                 }
                 ApprovalButton(s.approveOnce) { onDecision(ApprovalDecision.ALLOW_ONCE) }
                 ApprovalButton(s.deny, danger = true) { onDecision(ApprovalDecision.DENY) }

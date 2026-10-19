@@ -94,12 +94,15 @@ object WorkspaceTools {
     object ReadFileTool : AgentTool {
         override val name = "read_file"
         override val description =
-            "读取当前工作目录里某个文件的文本内容（最多 24000 字，超出会截断）。" +
+            "读取当前工作目录里某个文件的文本内容（单次最多 24000 字，超出会截断）。" +
+                "大文件可以配合 offset 分段读：offset 是起始字符位置，例如先读 0，再读 8000。" +
+                "「工具输出已落盘」的文件通常在 notes/tool-output/ 下，用 offset 或 grep 取中间内容。" +
                 "改文件之前先用它看清原文，再把要改的片段原样复制到 edit_file 的 old_string 里。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
             properties = mapOf(
                 "path" to Schema.str("文件的相对路径，例如 index.html 或 src/app.js"),
+                "offset" to Schema.int("从第几个字符开始读，默认 0。读长文件的中段时用", 0, 400_000),
                 "max_chars" to Schema.int("最多返回多少字符，默认 24000", 100, 24000),
             ),
             required = listOf("path"),
@@ -110,8 +113,11 @@ object WorkspaceTools {
             val scoped = ctx.scope(path) ?: return badWorkspacePath(path)
             val max = (args.intOf("max_chars") ?: WorkspaceStore.MAX_READ_CHARS)
                 .coerceIn(100, WorkspaceStore.MAX_READ_CHARS)
-            val content = ctx.workspace.read(scoped, max)
-            if (content == null) {
+            val offset = (args.intOf("offset") ?: 0).coerceIn(0, 400_000)
+            // WorkspaceStore.read 只支持「从头读 n 个字符」，这里多读 offset 个再切掉前缀。
+            // 单文件上限 256KB，多读这一点内存可以接受，也比新增一套 range API 简单。
+            val raw = ctx.workspace.read(scoped, (offset + max).coerceAtMost(400_000 + WorkspaceStore.MAX_READ_CHARS))
+            if (raw == null) {
                 // 路径不合法和「文件不存在」是两回事，必须分开说，否则模型会一直重试同一个错路径
                 val why = ctx.workspace.describeIssue(scoped)
                 return ToolResult.fail(
@@ -122,7 +128,7 @@ object WorkspaceTools {
                     }
                 )
             }
-            return ToolResult.ok(content)
+            return ToolResult.ok(if (offset <= 0) raw else raw.drop(offset))
         }
 
         override fun summarize(args: JsonObject) = args.strOf("path") ?: "—"

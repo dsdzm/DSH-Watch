@@ -14,7 +14,9 @@ import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.rawStrOf
+import com.dshwatch.domain.agent.stringMapOf
 import com.dshwatch.domain.agent.strOf
+import com.dshwatch.net.CustomHeaders
 import com.dshwatch.net.HtmlText
 import com.dshwatch.net.Http
 import com.dshwatch.service.AlarmReceiver
@@ -241,6 +243,8 @@ object BuiltinTools {
             "抓取一个 URL 的内容。返回网页时会**自动转成纯文本**（去掉标签/脚本/样式），" +
                 "所以很适合读文章、查文档、调返回 JSON 的公开 API。" +
                 "支持 GET 与 POST（POST 可带 body）。只支持 http/https。" +
+                "需要登录态、Referer、特定 User-Agent 或 API Key 时，用 headers 传自定义请求头" +
+                "（键值对，例如 {\"Authorization\":\"Bearer xxx\",\"Referer\":\"https://example.com\"}）。" +
                 "要搜索（不知道具体网址）请用 web_search。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
@@ -249,6 +253,10 @@ object BuiltinTools {
                 "method" to Schema.str("GET 或 POST，默认 GET", listOf("GET", "POST")),
                 "body" to Schema.str("POST 的请求体，通常是 JSON 字符串"),
                 "content_type" to Schema.str("POST 的 Content-Type，默认 application/json"),
+                "headers" to Schema.strMap(
+                    "自定义请求头（键值对，值必须是字符串）。可覆盖默认的 User-Agent / Accept；" +
+                        "Host、Content-Length、Connection 等由传输层管理的头会被忽略"
+                ),
                 "max_chars" to Schema.int("最多返回多少字符，默认 4000，上限 16000", 200, 16000),
                 "format" to Schema.str(
                     "auto=网页转纯文本、JSON 原样（默认）；raw=原样返回不转换",
@@ -267,6 +275,7 @@ object BuiltinTools {
                 val method = args.strOf("method")?.uppercase() ?: "GET"
                 val max = (args.intOf("max_chars") ?: 4000).coerceIn(200, 16000)
                 val raw = args.strOf("format") == "raw"
+                val custom = CustomHeaders.sanitize(args.stringMapOf("headers"))
 
                 val request = runCatching {
                     val builder = Request.Builder()
@@ -276,6 +285,9 @@ object BuiltinTools {
                             "User-Agent",
                             "Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36",
                         )
+                    // 自定义头放在默认头之后：同名会替换默认值（removeHeader + header），
+                    // 所以模型可以改 UA / Accept / Referer / Authorization。
+                    CustomHeaders.apply(builder, custom.values)
                     if (method == "POST") {
                         val payload = args.rawStrOf("body").orEmpty()
                         if (payload.isBlank()) {
@@ -301,6 +313,9 @@ object BuiltinTools {
 
                         val text = buildString {
                             append("HTTP ").append(resp.code).append('\n')
+                            if (custom.rejected.isNotEmpty()) {
+                                append(CustomHeaders.rejectedNote(custom.rejected)).append('\n')
+                            }
                             if (ctype.isNotBlank()) append("Content-Type: ").append(ctype).append('\n')
                             if (looksHtml) {
                                 append("已把 HTML 转为纯文本（原 ")
