@@ -64,6 +64,7 @@ import com.dshwatch.domain.model.Role
 import com.dshwatch.domain.model.ToolStatus
 import android.widget.Toast
 import com.dshwatch.ui.components.AgentModeDialog
+import com.dshwatch.ui.components.ArtifactCard
 import com.dshwatch.ui.components.AskUserDialog
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.ConfirmDialog
@@ -561,21 +562,18 @@ private fun MessageItem(
 
         Spacer(Modifier.height(3.dp))
 
-        // Agent 模式下这一轮发起的工具调用
-        if (message.toolCalls.isNotEmpty()) {
-            message.toolCalls.forEach { call ->
-                ToolCallCard(
-                    call = call,
-                    sizeBytes = if (call.artifact.isNotBlank()) sizeOf(call.artifact) else 0L,
-                    onOpenArtifact = onOpenArtifact,
-                    onExportArtifact = onExportArtifact,
-                )
-                Spacer(Modifier.height(4.dp))
-            }
-        }
-
-        if (settings.showReasoning && reasoning.isNotBlank() && !isUser) {
-            ReasoningPanel(reasoning = reasoning, streaming = isStreaming)
+        // 思考与工具调用收进同一个「工作块」：默认折叠只显示当前进度，
+        // 想看过程再点开。两者都没有就不渲染。
+        if (!isUser && (message.toolCalls.isNotEmpty() || (settings.showReasoning && reasoning.isNotBlank()))) {
+            AgentWorkBlock(
+                message = message,
+                live = live,
+                reasoning = reasoning,
+                showReasoning = settings.showReasoning,
+                sizeOf = sizeOf,
+                onOpenArtifact = onOpenArtifact,
+                onExportArtifact = onExportArtifact,
+            )
             Spacer(Modifier.height(4.dp))
         }
 
@@ -618,6 +616,154 @@ private fun MessageItem(
                 if (!isUser) {
                     MsgAction(text = s.regenerate) { onRegenerate() }
                     MsgAction(text = s.delete) { onDelete() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Agent 的「工作块」—— 一轮回答里全部思考与工具调用的统一容器。
+ *
+ * 设计约定：
+ *  1. **一个块装全部** —— 思考与工具调用不再各自成卡、在回答上方堆成一摞，
+ *     一轮 Agent 工作收进同一个可折叠区域；
+ *  2. **默认折叠** —— 手表屏幕窄，用户要看的是结论不是过程；折叠态的一行
+ *     状态实时回答「AI 现在在做什么」：跑工具时是「正在：<工具> <摘要>」，
+ *     纯思考时是「思考中」；
+ *  3. **完成后只留摘要** —— 全部步骤落定后折叠成「N 步 · 已完成/有失败」，
+ *     想回看流程点标题栏即可展开；
+ *  4. **产物不藏折叠** —— 构建产物是这一轮的交付物，折叠态下也常显在块尾，
+ *     点开即预览、右侧导出，不用先展开工作流。
+ */
+@Composable
+private fun AgentWorkBlock(
+    message: ChatMessage,
+    live: LiveDelta?,
+    reasoning: String,
+    showReasoning: Boolean,
+    sizeOf: (String) -> Long,
+    onOpenArtifact: (String) -> Unit,
+    onExportArtifact: (String) -> Unit,
+) {
+    val s = LocalStrings.current
+    // 每条消息各自记住展开态：重新生成会新建消息，自然回到默认折叠
+    var expanded by remember(message.id) { mutableStateOf(false) }
+    // 任务完成后收回折叠：流式期间可以展开盯过程，落定后回到摘要态，
+    // 想看完整流程用户自己点开 —— 折叠的一行摘要已经说了「几步 · 成没成」
+    LaunchedEffect(message.id, live == null) {
+        if (live == null) expanded = false
+    }
+    val calls = message.toolCalls
+    val isStreaming = live != null
+    val running = calls.firstOrNull { !it.isSettled }
+    val failedCount = calls.count { it.status == ToolStatus.FAILED || it.status == ToolStatus.DENIED }
+    val title = if (calls.isEmpty()) s.reasoning else s.workflowTitle
+
+    // 折叠态的一行状态：跑的时候说「正在做什么」，跑完了说「几步 · 成没成」
+    val statusLine = when {
+        isStreaming && running != null -> buildString {
+            append(s.workflowNow)
+            append("：")
+            append(s.toolTitle(running.name))
+            if (running.summary.isNotBlank()) {
+                append(" · ")
+                append(running.summary)
+            }
+        }
+        isStreaming -> s.thinking
+        calls.isEmpty() -> ""
+        failedCount > 0 -> "${calls.size} ${s.stepLabel} · ${s.workflowFailed}"
+        else -> "${calls.size} ${s.stepLabel} · ${s.workflowDone}"
+    }
+    val dotColor = when {
+        isStreaming && running != null -> MaterialTheme.colorScheme.primary
+        isStreaming -> MaterialTheme.colorScheme.tertiary
+        failedCount > 0 -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.secondary
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f))
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .tap(onClick = withHaptic { expanded = !expanded }),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 状态点：跑 = 主色、想 = 第三色、成 = 次色、败 = 错误色
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(dotColor),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = if (expanded) s.workflowCollapse else s.workflowExpand,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Filled.KeyboardArrowUp
+                } else {
+                    Icons.Filled.KeyboardArrowDown
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        if (statusLine.isNotBlank()) {
+            Text(
+                text = statusLine,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 12.dp, top = 2.dp),
+            )
+        }
+
+        if (expanded) {
+            // 展开 = 完整流程：思维链（若开启）+ 每一步工具卡片，顺序即执行顺序
+            if (showReasoning && reasoning.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                ReasoningPanel(reasoning = reasoning, streaming = isStreaming)
+            }
+            calls.forEach { call ->
+                Spacer(Modifier.height(4.dp))
+                ToolCallCard(
+                    call = call,
+                    sizeBytes = if (call.artifact.isNotBlank()) sizeOf(call.artifact) else 0L,
+                    onOpenArtifact = onOpenArtifact,
+                    onExportArtifact = onExportArtifact,
+                )
+            }
+        } else {
+            // 折叠态常显产物卡片：交付物不该藏在「先展开工作流」后面
+            calls.forEach { call ->
+                if (call.status == ToolStatus.SUCCESS && call.artifact.isNotBlank()) {
+                    Spacer(Modifier.height(5.dp))
+                    ArtifactCard(
+                        path = call.artifact,
+                        sizeBytes = sizeOf(call.artifact),
+                        onOpen = onOpenArtifact,
+                        onExport = onExportArtifact,
+                    )
                 }
             }
         }

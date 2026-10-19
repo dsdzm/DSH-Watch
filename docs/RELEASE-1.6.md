@@ -190,11 +190,58 @@ object CustomHeaders {
 
 ---
 
-## 5. 验证
+## 5. 对话页「工作流程」块
+
+### 5.1 原来的问题
+
+Agent 干完一轮活，回答上方会堆成一摞：每个工具一张卡片（`ToolCallCard`），外加一块思维链面板（`ReasoningPanel`）。手表屏幕窄，用户真正想看的结论被这摞卡片推到很下面；而过程中想看「AI 现在干嘛」时，又要在多张卡之间找状态不是 SUCCESS 的那张。
+
+### 5.2 现在的结构
+
+思考与工具调用收进同一个可折叠容器 `AgentWorkBlock`（`ui/screens/chat/ChatScreen.kt`）：
+
+```
+┌───────────────────────────────────────┐
+│ ● 工作流程              展开工作流程 ⌄ │  ← 标题栏，点击展开/收起
+│   正在：写文件 · notes/task.md        │  ← 折叠态唯一的一行状态
+├───────────────────────────────────────┤
+│ [展开后才显示]                          │
+│  思维链面板（若设置里开启）              │
+│  工具卡片 × N（每张仍可各自展开看参数/结果）│
+└───────────────────────────────────────┘
+```
+
+四条规则：
+
+1. **默认折叠** —— 折叠态的一行状态实时回答「AI 现在在做什么」：有工具在跑时显示「正在：<工具中文名> <参数摘要>」，纯思考时显示「思考中」；
+2. **完成后自动收回** —— 全部步骤落定（流式结束）时折叠成「N 步 · 已完成 / 有失败」摘要；流式期间用户手动展开盯过程，结束后自动回到摘要态（`LaunchedEffect(message.id, live == null)`）；
+3. **展开 = 完整流程** —— 思维链 + 每步工具卡片，顺序即执行顺序；
+4. **产物不藏折叠** —— 折叠态下，本轮成功的构建产物（`ToolCallRecord.artifact`）仍常显在块尾，点开即预览、右侧导出，不用先展开工作流。
+
+### 5.3 状态与配色
+
+| 状态 | 状态点颜色 | 状态行 |
+|---|---|---|
+| 流式中 · 有工具在跑 | 主色 | 正在：<工具> <摘要> |
+| 流式中 · 纯思考 | 第三色 | 思考中 |
+| 完成 · 全部成功 | 次色 | N 步 · 已完成 |
+| 完成 · 有失败/拒绝 | 错误色 | N 步 · 有失败 |
+
+### 5.4 交互细节
+
+- 展开态按**消息 id** 记忆（`remember(message.id)`）：重新生成会新建消息，自然回到默认折叠，不会残留上一轮的展开状态；
+- 无工具调用的消息（纯思维链回答）块标题退化为「思维链」，行为与旧版一致；
+- 工具卡片自身的展开/收起（看参数与原始输出）保持不变，与工作块的两级折叠互不干扰；
+- 新增文案集中在 `AppStrings`：`workflowTitle` / `workflowNow` / `workflowDone` / `workflowFailed` / `workflowExpand` / `workflowCollapse`，中英双语齐全。
+
+---
+
+## 6. 验证
 
 | 项 | 结果 |
 |---|---|
 | 单元测试 | 551 个，0 失败（新增 29 条） |
+| UI 改动 | `AgentWorkBlock` 为纯 Compose 渲染逻辑，无单测覆盖；编译通过、双包构建通过，交互效果需真机验收（默认折叠 / 状态行 / 完成后收回 / 产物常显） |
 | 新增测试 | `ToolResultCompactorTest`（4）、`ToolResultCompactorIoTest`（4）、`ApprovalPolicyTest`（12）、`CustomHeadersTest`（7）、`TokenEstimatorTest` 追加（2） |
 | 构建 | lite 与 full 均 `BUILD SUCCESSFUL` |
 | 包校验 | 两包 `versionCode=14 / versionName=1.6`，签名 `70437a7f…bf31f94`；lite 内 `libpython` 命中 0、full 命中 26 |
@@ -203,7 +250,7 @@ object CustomHeaders {
 
 ---
 
-## 6. 已知限制与后续
+## 7. 已知限制与后续
 
 | 限制 | 说明 |
 |---|---|
@@ -229,3 +276,5 @@ object CustomHeaders {
 | 工具接入 | `BuiltinTools.HttpFetchTool`、`SystemTools.WebSearchTool` |
 | `read_file` 偏移 | `domain/agent/tools/WorkspaceTools.kt:ReadFileTool` |
 | 文档规则 | `ChatEngine.kt` 系统提示「【干活要留文档】」 |
+| 工作流程块 | `ui/screens/chat/ChatScreen.kt:AgentWorkBlock`（含 `LaunchedEffect(message.id, live == null)` 完成后收回） |
+| 工作流程文案 | `AppStrings.workflowTitle/Now/Done/Failed/Expand/Collapse` |

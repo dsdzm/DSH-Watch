@@ -56,6 +56,12 @@ interface AppStrings {
     val reasoning: String
     val expandReasoning: String
     val collapseReasoning: String
+    val workflowTitle: String
+    val workflowNow: String
+    val workflowDone: String
+    val workflowFailed: String
+    val workflowExpand: String
+    val workflowCollapse: String
     val regenerate: String
     val copyMessage: String
     val deleteMessage: String
@@ -420,6 +426,12 @@ object Zh : AppStrings {
     override val reasoning = "思维链"
     override val expandReasoning = "展开思维链"
     override val collapseReasoning = "收起"
+    override val workflowTitle = "工作流程"
+    override val workflowNow = "正在"
+    override val workflowDone = "已完成"
+    override val workflowFailed = "有失败"
+    override val workflowExpand = "展开工作流程"
+    override val workflowCollapse = "收起"
     override val regenerate = "重新生成"
     override val copyMessage = "复制内容"
     override val deleteMessage = "删除这条"
@@ -826,6 +838,12 @@ object En : AppStrings {
     override val reasoning = "Reasoning"
     override val expandReasoning = "Show reasoning"
     override val collapseReasoning = "Collapse"
+    override val workflowTitle = "Workflow"
+    override val workflowNow = "Now"
+    override val workflowDone = "done"
+    override val workflowFailed = "has failures"
+    override val workflowExpand = "Show workflow"
+    override val workflowCollapse = "Collapse"
     override val regenerate = "Regenerate"
     override val copyMessage = "Copy text"
     override val deleteMessage = "Delete message"
