@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -192,13 +194,15 @@ fun ChatScreen(
 
     WatchScaffold(
         title = conversation?.displayTitle ?: s.appName,
-        onBack = null,
+        // 根是主页，对话页是二级：返回即回主页
+        onBack = { nav.pop() },
         actions = {
-            IconTap(Icons.Filled.List, s.navSessions) { nav.push(Screen.Sessions) }
-            IconTap(Icons.Filled.Add, s.newChat) {
+            // 首页已经承载了设置入口，这里只留聊天时最常用的两个动作：
+            // 切会话、开新会话 —— 手表顶栏宽度经不起四个图标
+            IconTap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
+            IconTap(Icons.Outlined.Add, s.newChat) {
                 scope.launch { engine.newConversation(settings) }
             }
-            IconTap(Icons.Filled.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         bottom = {
             ChatBottomBar(

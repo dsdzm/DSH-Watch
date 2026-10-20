@@ -18,6 +18,18 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.7",
+            date = "2026-10-20",
+            highlights = listOf(
+                "界面整体重做：Jetpack Compose for Wear OS + Material 3，纯黑底、大圆角胶囊条目、" +
+                    "线性图标，和系统手表应用的观感一致",
+                "新的主页：三页胶囊菜单（常用 / 模型 / 其他），左右滑动切换，底部三个指示点定位；" +
+                    "「继续对话」一眼回到上次的任务",
+                "对话、会话、设置、关于等页面统一成同一套胶囊卡片与极简顶栏，手表上更好点也更好看",
+                "设置主页改为独立胶囊入口，一眼看到每一项的当前状态",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.6",
             date = "2026-10-19",
             highlights = listOf(

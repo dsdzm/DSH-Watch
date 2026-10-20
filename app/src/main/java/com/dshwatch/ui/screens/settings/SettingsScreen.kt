@@ -1,5 +1,6 @@
 package com.dshwatch.ui.screens.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +21,7 @@ import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.components.SettingCard
+import com.dshwatch.ui.components.SettingPill
 import com.dshwatch.ui.components.SettingRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.AppStrings
@@ -54,13 +56,12 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 10.dp),
         ) {
-            SettingCard {
-                SettingsGroups.all.forEachIndexed { index, id ->
-                    SettingRow(
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsGroups.all.forEach { id ->
+                    SettingPill(
                         title = SettingsGroups.title(id, s),
                         subtitle = summaryOf(id, settings, s),
                         trailing = "›",
-                        showDivider = index != SettingsGroups.all.lastIndex,
                         onClick = { nav.push(Screen.SettingsGroup(id)) },
                     )
                 }

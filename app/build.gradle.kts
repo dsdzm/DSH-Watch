@@ -52,8 +52,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.6"
+        versionCode = 15
+        versionName = "1.7"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -178,6 +178,11 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
+    // 线性图标集：截图风格的描边图标（R8 会裁掉未使用的部分）
+    implementation(libs.androidx.compose.material.icons.extended)
+    // Wear Material3：Chip / Card / ScalingLazyColumn / PositionIndicator 等手表组件
+    implementation(libs.androidx.wear.compose.material3)
+    implementation(libs.androidx.wear.compose.foundation)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.compose.ui.tooling.preview)
 

@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -111,9 +112,7 @@ fun WatchTopBar(
             .fillMaxWidth()
             .heightIn(min = WatchDimens.topBarHeight)
             .cornerSafe()
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -204,10 +203,63 @@ fun SettingCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         content = content,
     )
+}
+
+/**
+ * 独立胶囊设置项（截图风格）。
+ *
+ * 与 [SettingCard] 包多个 [SettingRow] 不同：每项自己是一块大圆角胶囊，
+ * 用于「入口列表」这类一眼扫过的页面（设置主页、关于页）。
+ */
+@Composable
+fun SettingPill(
+    title: String,
+    subtitle: String? = null,
+    trailing: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Spacer(Modifier.height(1.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = trailing,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 @Composable
@@ -222,9 +274,9 @@ fun SettingRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 38.dp)
+                .heightIn(min = 42.dp)
                 .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
-                .padding(vertical = 5.dp),
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -435,7 +487,7 @@ fun Chip(
     Box(
         modifier = Modifier
             .height(WatchDimens.chipHeight)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(CircleShape)
             .background(
                 if (selected) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surfaceContainerHigh
@@ -468,8 +520,8 @@ fun PrimaryButton(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(14.dp))
+            .height(WatchDimens.buttonHeight + 6.dp)
+            .clip(CircleShape)
             .background(
                 if (enabled) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainerHighest
@@ -514,9 +566,9 @@ fun GhostButton(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(14.dp))
-            .border(1.dp, tint.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+            .height(WatchDimens.buttonHeight + 6.dp)
+            .clip(CircleShape)
+            .border(1.dp, tint.copy(alpha = 0.5f), CircleShape)
             .tap(onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
     ) {

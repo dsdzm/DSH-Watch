@@ -93,8 +93,8 @@ fun SessionsScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(conversations, key = { it.id }) { conv ->
                 ConversationRow(
@@ -239,10 +239,10 @@ private fun ConversationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clip(RoundedCornerShape(26.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .tap(onClick = withHaptic(onClick))
-            .padding(start = 8.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
+            .padding(start = 14.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {

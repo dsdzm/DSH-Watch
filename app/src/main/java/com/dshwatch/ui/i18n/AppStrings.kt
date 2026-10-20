@@ -40,6 +40,7 @@ interface AppStrings {
 
     // 导航
     val navChat: String
+    val homeContinue: String
     val navSessions: String
     val navSettings: String
     val backToBottom: String
@@ -411,6 +412,7 @@ object Zh : AppStrings {
     override val no = "否"
 
     override val navChat = "对话"
+    override val homeContinue = "继续对话"
     override val navSessions = "会话"
     override val navSettings = "设置"
     override val backToBottom = "回到最新"
@@ -823,6 +825,7 @@ object En : AppStrings {
     override val no = "No"
 
     override val navChat = "Chat"
+    override val homeContinue = "Continue"
     override val navSessions = "Chats"
     override val navSettings = "Settings"
     override val backToBottom = "Jump to latest"
