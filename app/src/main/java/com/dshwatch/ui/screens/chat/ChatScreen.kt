@@ -61,6 +61,8 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.MessageStatus
 import com.dshwatch.domain.model.Role
+import com.dshwatch.domain.model.TokenUsage
+import com.dshwatch.domain.model.ToolCallRecord
 import com.dshwatch.domain.model.ToolStatus
 import android.widget.Toast
 import com.dshwatch.ui.components.AgentModeDialog
@@ -140,6 +142,17 @@ fun ChatScreen(
 
     val provider = settings.activeProvider
 
+    // 渲染分组：把同一个 Agent 回合里连续的助手消息（步 1、步 2…）视作**一条** DSH 回合，
+    // 前端因此只出现「用户消息 + 一条总的工作流程卡片」，而不是每步各来一张卡。
+    val visible = remember(messages, perf.maxRenderedMessages) {
+        if (messages.size > perf.maxRenderedMessages) {
+            messages.takeLast(perf.maxRenderedMessages)
+        } else {
+            messages
+        }
+    }
+    val turns = remember(visible) { groupMessages(visible) }
+
     // 首次进入：自动打开最近一个会话
     LaunchedEffect(Unit) {
         if (engine.conversation.value == null) {
@@ -156,11 +169,11 @@ fun ChatScreen(
     }
 
     // 流式刷新节流后仍会频繁触发，这里用 scrollToItem（无动画）避免低端机掉帧
-    LaunchedEffect(messages.size, live.text.length, streaming) {
+    LaunchedEffect(turns.size, live.text.length, streaming) {
         if (!settings.autoScroll) return@LaunchedEffect
         if (!atBottom) return@LaunchedEffect
-        if (messages.isNotEmpty()) {
-            runCatching { listState.scrollToItem(messages.lastIndex) }
+        if (turns.isNotEmpty()) {
+            runCatching { listState.scrollToItem(turns.lastIndex) }
         }
     }
     // 生成期间保持亮屏（可选）。手表抬手看进度时不用反复抬腕。
@@ -309,47 +322,73 @@ fun ChatScreen(
                 contentPadding = PaddingValues(vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                val visible = if (messages.size > perf.maxRenderedMessages) {
-                    messages.takeLast(perf.maxRenderedMessages)
-                } else {
-                    messages
-                }
                 items(
-                    items = visible,
-                    key = { it.id },
-                    contentType = { it.role },
-                ) { message ->
-                    val isLive = live.messageId == message.id
-                    MessageItem(
-                        message = message,
-                        live = if (isLive) live else null,
-                        settings = settings,
-                        onCopy = { text ->
-                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
-                        },
-                        onRegenerate = { engine.regenerate(message.id) },
-                        onDelete = { pendingDelete = message },
-                        sizeOf = { path -> artifactSizeOf(container, path) },
-                        onOpenArtifact = { path -> nav.push(Screen.WorkspacePreview(path)) },
-                        onExportArtifact = { path ->
-                            // 导出要么成功（系统弹出分享面板，本身就是反馈），
-                            // 要么失败 —— 失败必须说出来。以前这里是一句 runCatching 吞掉，
-                            // 用户点了半天「没反应」，根本不知道发生了什么。
-                            val result = shareFile(context, container.workspaceStore.resolveForUi(path))
-                            if (result is ShareResult.Fail) {
-                                Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                    )
+                    items = turns,
+                    key = { it.key },
+                    contentType = { it.messages.first().role },
+                ) { turn ->
+                    val msgs = turn.messages
+                    val sizeOf: (String) -> Long = { path -> artifactSizeOf(container, path) }
+                    val openArtifact: (String) -> Unit = { path -> nav.push(Screen.WorkspacePreview(path)) }
+                    val exportArtifact: (String) -> Unit = { path ->
+                        // 导出要么成功（系统弹出分享面板，本身就是反馈），
+                        // 要么失败 —— 失败必须说出来。以前这里是一句 runCatching 吞掉，
+                        // 用户点了半天「没反应」，根本不知道发生了什么。
+                        val result = shareFile(context, container.workspaceStore.resolveForUi(path))
+                        if (result is ShareResult.Fail) {
+                            Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    val copyText: (String) -> Unit = { text ->
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                    }
 
-                    if (settings.showTokenBadge && message.role == Role.ASSISTANT && message.usage != null) {
-                        TokenBadgeBar(message)
+                    if (msgs.size == 1) {
+                        val message = msgs.first()
+                        val isLive = live.messageId == message.id
+                        MessageItem(
+                            message = message,
+                            live = if (isLive) live else null,
+                            settings = settings,
+                            onCopy = copyText,
+                            onRegenerate = { engine.regenerate(message.id) },
+                            onDelete = { pendingDelete = message },
+                            sizeOf = sizeOf,
+                            onOpenArtifact = openArtifact,
+                            onExportArtifact = exportArtifact,
+                        )
+                    } else {
+                        // 多步 Agent 回合：连续助手消息合成一条，只显示一条工作流程卡片
+                        val isLive = live.messageId == msgs.last().id
+                        AgentTurnItem(
+                            messages = msgs,
+                            live = if (isLive) live else null,
+                            settings = settings,
+                            onCopy = copyText,
+                            onRegenerate = { engine.regenerate(msgs.last().id) },
+                            onDelete = { pendingDelete = msgs.last() },
+                            sizeOf = sizeOf,
+                            onOpenArtifact = openArtifact,
+                            onExportArtifact = exportArtifact,
+                        )
+                    }
+
+                    if (settings.showTokenBadge) {
+                        val usage = msgs.mapNotNull { it.usage }
+                            .fold(TokenUsage.ZERO) { acc, u -> acc + u }
+                        if (!usage.isEmpty) {
+                            TokenBadgeBar(
+                                usage = usage,
+                                at = msgs.last().createdAt,
+                                estimated = msgs.any { it.status == MessageStatus.STOPPED },
+                            )
+                        }
                     }
                 }
                 item(key = "__tail__") { Spacer(Modifier.height(6.dp)) }
             }
 
-            if (!atBottom && messages.isNotEmpty()) {
+            if (!atBottom && turns.isNotEmpty()) {
                 // 带底色的圆形按钮：纯图标直接浮在消息上会看不清
                 Box(
                     modifier = Modifier
@@ -364,7 +403,7 @@ fun ChatScreen(
                         tint = MaterialTheme.colorScheme.primary,
                     ) {
                         scope.launch {
-                            runCatching { listState.animateScrollToItem(messages.lastIndex) }
+                            runCatching { listState.animateScrollToItem(turns.lastIndex) }
                         }
                     }
                 }
@@ -425,17 +464,17 @@ fun ChatScreen(
 }
 
 @Composable
-private fun TokenBadgeBar(message: ChatMessage) {
+private fun TokenBadgeBar(usage: TokenUsage, at: Long, estimated: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 2.dp, top = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TokenBadge(usage = message.usage!!, estimated = message.status == MessageStatus.STOPPED)
+        TokenBadge(usage = usage, estimated = estimated)
         Spacer(Modifier.weight(1f))
         Text(
-            text = Fmt.clock(message.createdAt),
+            text = Fmt.clock(at),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
@@ -566,9 +605,10 @@ private fun MessageItem(
         // 想看过程再点开。两者都没有就不渲染。
         if (!isUser && (message.toolCalls.isNotEmpty() || (settings.showReasoning && reasoning.isNotBlank()))) {
             AgentWorkBlock(
-                message = message,
-                live = live,
+                blockKey = message.id,
+                calls = message.toolCalls,
                 reasoning = reasoning,
+                isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = sizeOf,
                 onOpenArtifact = onOpenArtifact,
@@ -623,11 +663,165 @@ private fun MessageItem(
 }
 
 /**
+ * 多步 Agent 回合 —— 把同一个回合里连续的助手消息（步 1、步 2…）合并成**一条**
+ * DSH 回合渲染。
+ *
+ * 用户要求：交付产物之前，前端只显示「用户的消息 + 一条总的工作流程卡片」。
+ * 所以这里把各步的工具调用与思考链合并后交给一个 [AgentWorkBlock]，标题恒为
+ * 「工作流程」，不再每一步各来一张卡；只有当终态那条消息给出了正文（交付物）
+ * 时，才在卡片下面渲染回答正文。
+ */
+@Composable
+private fun AgentTurnItem(
+    messages: List<ChatMessage>,
+    live: LiveDelta?,
+    settings: AppSettings,
+    onCopy: (String) -> Unit,
+    onRegenerate: () -> Unit,
+    onDelete: () -> Unit,
+    sizeOf: (String) -> Long,
+    onOpenArtifact: (String) -> Unit,
+    onExportArtifact: (String) -> Unit,
+) {
+    val s = LocalStrings.current
+    val last = messages.last()
+    val isStreaming = live != null
+    // 合并各步：顺序即执行顺序
+    val calls = messages.flatMap { it.toolCalls }
+    val reasoning = messages
+        .mapNotNull { it.reasoning.takeIf { r -> r.isNotBlank() } }
+        .joinToString("\n\n")
+    // 交付物 = 终态（已落定、无待执行工具调用）那条消息的正文。
+    // 进行中的中间步骤正文不显示 —— 交付前前端只留工作流程卡片。
+    val answer = messages.lastOrNull {
+        it.toolCalls.isEmpty() && it.content.isNotBlank() &&
+            it.status != MessageStatus.STREAMING && it.status != MessageStatus.PENDING
+    }?.content.orEmpty()
+    val hasError = last.status == MessageStatus.ERROR
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (settings.showMascot) {
+                Image(
+                    painter = painterResource(R.drawable.mascot_avatar),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape),
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text = "DSH",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (isStreaming) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (reasoning.isNotBlank() && answer.isBlank()) s.thinking else s.generating,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (hasError) {
+                Text(
+                    text = s.sendFailed,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (last.status == MessageStatus.STOPPED) {
+                Text(
+                    text = s.stopped,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(3.dp))
+
+        AgentWorkBlock(
+            blockKey = messages.first().id,
+            calls = calls,
+            reasoning = reasoning,
+            isStreaming = isStreaming,
+            showReasoning = settings.showReasoning,
+            sizeOf = sizeOf,
+            onOpenArtifact = onOpenArtifact,
+            onExportArtifact = onExportArtifact,
+        )
+
+        if (answer.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            MarkdownText(text = answer)
+        }
+
+        if (hasError && last.error.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = last.error,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        if (!isStreaming && answer.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MsgAction(text = s.copy) { onCopy(answer) }
+                MsgAction(text = s.regenerate) { onRegenerate() }
+                MsgAction(text = s.delete) { onDelete() }
+            }
+        }
+    }
+}
+
+/**
+ * 把消息按「回合」分组：连续的助手消息（Agent 的多步）归为一组，
+ * 其余（用户消息、单条助手消息）各自成组。这样 LazyColumn 里每个条目
+ * 就是前端意义上的「一条消息」，多步 Agent 只会出现一条工作流程卡片。
+ */
+private fun groupMessages(msgs: List<ChatMessage>): List<MessageGroup> {
+    val out = ArrayList<MessageGroup>()
+    var i = 0
+    while (i < msgs.size) {
+        if (msgs[i].role != Role.ASSISTANT) {
+            out.add(MessageGroup("s_${msgs[i].id}", listOf(msgs[i])))
+            i++
+            continue
+        }
+        val run = ArrayList<ChatMessage>()
+        while (i < msgs.size && msgs[i].role == Role.ASSISTANT) {
+            run.add(msgs[i])
+            i++
+        }
+        out.add(MessageGroup("t_${run.first().id}", run))
+    }
+    return out
+}
+
+/** LazyColumn 的渲染单元：一个 key 对应「一条」前端可见的消息回合 */
+private data class MessageGroup(val key: String, val messages: List<ChatMessage>)
+
+/**
  * Agent 的「工作块」—— 一轮回答里全部思考与工具调用的统一容器。
  *
  * 设计约定：
  *  1. **一个块装全部** —— 思考与工具调用不再各自成卡、在回答上方堆成一摞，
- *     一轮 Agent 工作收进同一个可折叠区域；
+ *     一轮 Agent 工作收进同一个可折叠区域（多步时由 [AgentTurnItem] 把各步的
+ *     调用合并后一并交给它，前端只出现一条工作流程卡片）；
  *  2. **执行中展开、完成后折叠** —— 任务进行中默认展开，这一轮的所有操作与
  *     思考都在同一个工作流程里看得见；全部步骤落定后自动折叠成一行摘要
  *     「N 步 · 已完成/有失败」，想回看流程点标题栏即可展开。流式中折叠态
@@ -639,9 +833,10 @@ private fun MessageItem(
  */
 @Composable
 private fun AgentWorkBlock(
-    message: ChatMessage,
-    live: LiveDelta?,
+    blockKey: Any,
+    calls: List<ToolCallRecord>,
     reasoning: String,
+    isStreaming: Boolean,
     showReasoning: Boolean,
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
@@ -651,14 +846,12 @@ private fun AgentWorkBlock(
     // 任务完成前默认**展开**：这一轮的所有操作与思考都要能在同一个工作流程里
     // 看到（用户明确要求「模型在完成任务之前的所有操作和思考都放在一个工作流程里」）。
     // 完成后由下面的 LaunchedEffect 收回折叠，只留摘要。
-    var expanded by remember(message.id) { mutableStateOf(live != null) }
+    var expanded by remember(blockKey) { mutableStateOf(isStreaming) }
     // 任务完成后收回折叠：流式期间可以展开盯过程，落定后回到摘要态，
     // 想看完整流程用户自己点开 —— 折叠的一行摘要已经说了「几步 · 成没成」
-    LaunchedEffect(message.id, live == null) {
-        if (live == null) expanded = false
+    LaunchedEffect(blockKey, isStreaming) {
+        if (!isStreaming) expanded = false
     }
-    val calls = message.toolCalls
-    val isStreaming = live != null
     val running = calls.firstOrNull { !it.isSettled }
     val failedCount = calls.count { it.status == ToolStatus.FAILED || it.status == ToolStatus.DENIED }
     val title = if (calls.isEmpty()) s.reasoning else s.workflowTitle
