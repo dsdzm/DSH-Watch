@@ -10,6 +10,21 @@
 
 ### 重构
 
+- **界面迁移到 Jetpack Compose for Wear OS**：`androidx.wear.compose:compose-material3`
+  1.5.6 + Compose BOM 2025.06.01 + `material-icons-extended` 线性图标（R8 裁剪后 lite 约 +170KB）
+- **主界面改成两页横向结构**：对话页是根，**左滑进设置、右滑回对话**，底部两点指示位置；
+  不再有独立的菜单首页（手表上多一层菜单 = 每次聊天多一次点击）
+- **对话气泡重做**：角色名（我 / DSH）独立在气泡上方；用户气泡蓝灰 `#4A5670`、
+  助手气泡中性深灰 `#2A2A2A`，圆角 26dp、内边距 14/12dp、消息间距 10dp
+- **设置页重做**：居中标题 + 一张张独立大卡片（线性图标 + 分组名 + 当前状态摘要 + `›`，
+  圆角 24dp），列表可滚动，底部指示点
+- **视觉统一**：深色配色改中性灰阶（纯黑底 / `#2A2A2A` 卡片 / `#F2F2F2` 文字）；
+  顶栏去卡片化；主按钮、幽灵按钮、Chip 全圆角；会话条目圆角 12 → 26dp
+
+
+
+### 重构
+
 - **界面整体迁移到 Jetpack Compose for Wear OS**：引入 `androidx.wear.compose:compose-material3`
   （1.5.6，Compose BOM 同步升到 2025.06.01），补上 `material-icons-extended` 的线性图标集
   （R8 裁剪后 lite 包只涨约 170KB）

@@ -2,43 +2,57 @@ package com.dshwatch.ui.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Hub
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.DeviceProfile
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
-import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.ThemeMode
-import com.dshwatch.ui.components.SettingCard
-import com.dshwatch.ui.components.SettingPill
-import com.dshwatch.ui.components.SettingRow
-import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.domain.plugin.PluginRegistry
+import com.dshwatch.ui.components.WearCardRow
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 
 /**
- * 设置主页（一级）。
+ * 设置页（横滑的第二页）。
  *
- * ## 为什么要分二级
+ * 视觉对齐参考图：居中标题 + 一张张独立大卡片（左侧线性图标、中间标题与
+ * 当前状态摘要、右侧进入箭头），列表可上下滚动，底部有分页指示点。
+ *
+ * ## 为什么分二级
  *
  * 三十多项设置挤在一页时，「分组标题」只是视觉分隔 —— 用户仍然要靠滚动找东西。
- * 一级页把七组压成七个入口，每个入口带一句**当前状态摘要**：
+ * 一级页把九组压成九个入口，每个入口带一句**当前状态摘要**：
  * 「主题」那行直接写"深色"，就不用点进去确认。
- *
- * 找设置的动作从「滚一遍」变成「看一眼 → 点进去」。
  */
 @Composable
 fun SettingsScreen(
@@ -49,41 +63,50 @@ fun SettingsScreen(
 ) {
     val s = LocalStrings.current
 
-    WatchScaffold(title = s.settingsTitle, onBack = { nav.pop() }) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 10.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SettingsGroups.all.forEach { id ->
-                    SettingPill(
-                        title = SettingsGroups.title(id, s),
-                        subtitle = summaryOf(id, settings, s),
-                        trailing = "›",
-                        onClick = { nav.push(Screen.SettingsGroup(id)) },
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
             Text(
-                text = "点任意一组进去调整。这里显示的是每一项当前的状态。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(horizontal = 4.dp),
+                text = s.navSettings,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 6.dp),
+            )
+        }
+        items(SettingsGroups.all) { id ->
+            WearCardRow(
+                icon = groupIcon(id),
+                title = SettingsGroups.title(id, s),
+                subtitle = summaryOf(id, settings, s),
+                trailing = "›",
+                onClick = { nav.push(Screen.SettingsGroup(id)) },
             )
         }
     }
 }
 
-/**
- * 每个分组入口右侧的摘要。
- *
- * 只放**最能代表当前状态的一个值**，不是把组内所有设置罗列一遍 ——
- * 摘要的作用是"不用点进去也知道现在是什么样"，太长反而没人看。
- */
+/** 每组一个线性图标：与参考图一致，靠图形先认出「这是哪一类」 */
+private fun groupIcon(id: String): ImageVector = when (id) {
+    SettingsGroups.MODEL -> Icons.Outlined.Cloud
+    SettingsGroups.ABILITY -> Icons.Outlined.AutoAwesome
+    SettingsGroups.PLUGINS -> Icons.Outlined.Extension
+    SettingsGroups.MCP -> Icons.Outlined.Hub
+    SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
+    SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
+    SettingsGroups.FILES -> Icons.Outlined.FolderOpen
+    SettingsGroups.RUNTIME -> Icons.Outlined.Memory
+    else -> Icons.Outlined.Wifi
+}
+
 private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String = when (id) {
     SettingsGroups.MODEL -> settings.activeProvider?.name ?: s.entryProviderUnset
 

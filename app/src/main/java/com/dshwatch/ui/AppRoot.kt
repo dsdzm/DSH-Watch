@@ -9,7 +9,6 @@ import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.about.AboutScreen
 import com.dshwatch.ui.screens.chat.ChatScreen
 import com.dshwatch.ui.screens.diagnostics.DiagnosticsScreen
-import com.dshwatch.ui.screens.home.HomeScreen
 import com.dshwatch.ui.screens.input.InputScreen
 import com.dshwatch.ui.screens.pair.PairScreen
 import com.dshwatch.ui.screens.provider.ProviderEditScreen
@@ -33,8 +32,16 @@ fun AppRoot(
     // 屏幕圆角安全边距由 MainActivity 注入的 DeviceProfile 决定
     val profile = com.dshwatch.ui.theme.LocalDeviceProfile.current
 
-    when (val screen = nav.current) {
-        Screen.Home -> HomeScreen(container = container, settings = settings, nav = nav)
+    // 对话页与设置页是同一层的两页（横滑切换），共用同一个 Pager 容器 ——
+    // 这样滑动过程中的动画、指示点、页面状态都不会因为导航而重建
+    if (nav.current == Screen.Chat || nav.current == Screen.Settings) {
+        MainPager(
+            container = container,
+            settings = settings,
+            profile = profile,
+            nav = nav,
+        )
+    } else when (val screen = nav.current) {
         Screen.Chat -> ChatScreen(container = container, settings = settings, nav = nav)
         Screen.Sessions -> SessionsScreen(container = container, nav = nav)
         Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)

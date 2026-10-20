@@ -1,34 +1,132 @@
-# v1.7 界面重构：Compose for Wear OS + Material 3
+# v1.7 界面重构：Compose for Wear OS + 两页横向结构
 
-> 目标：把界面从「手机 M3 挤进手表」改成**表盘原生**的观感 ——
-> 纯黑底、大圆角胶囊条目、线性图标、极简顶栏，对齐参考图
-> （深灰胶囊菜单 + 底部页面指示点）。
-
----
-
-## 1. 为什么换 UI 框架
-
-改前的界面用的是**手机版** `androidx.compose.material3`，所有手表适配都是手搓的：
-固定尺寸常量、`cornerSafe()` 自己算 R 角内收、按钮高度按手指估。这带来两个问题：
-
-1. **组件不是为圆屏设计的**：卡片、按钮、对话框都是矩形语义，边角在圆屏上要么被裁、
-   要么得靠 padding 硬躲；
-2. **缺少手表专属的交互件**：分页指示、滚动缩放、边缘水波纹、旋转表冠支持都没有。
-
-Wear Compose（`androidx.wear.compose:compose-material3`）正好补这两块：组件尺寸、
-点击热区、Typography（Wear 的 body1 是 16sp 起）、圆屏内收都是按表盘调的。
-
-> 注：这一版**没有**全量替换成 Wear 的 `Chip`/`Card`/`ScalingLazyColumn`。
-> 现有页面的信息密度（Markdown、工具卡片、多行设置）用 Wear 组件反而更挤；
-> 采取的是「Wear 主题 + 自绘胶囊组件」的混合方案，见 §3。
+> 目标：对齐两张参考图 ——
+> **图 1**：对话页（角色名在气泡上方，用户蓝灰气泡、助手深灰气泡）；
+> **图 2**：设置页（居中标题 + 独立大卡片 + 底部两点指示）。
+> 并且**打开就是对话**，左滑进设置、右滑回对话。
 
 ---
 
-## 2. 依赖与版本
+## 1. 结构：一屏两页，对话为主
+
+```
+┌─────────────────────────┐   ┌─────────────────────────┐
+│                         │   │         设置            │
+│  我                     │   │  ┌───────────────────┐  │
+│  ┌───────────────────┐  │   │  │ ☁ 模型服务   ›    │  │
+│  │ 调研三家竞品的…    │  │   │  │   当前：DeepSeek  │  │
+│  └───────────────────┘  │   │  └───────────────────┘  │
+│  DSH                    │   │  ┌───────────────────┐  │
+│  ┌───────────────────┐  │   │  │ ✦ AI 能力    ›    │  │
+│  │ 好的，我来处理…    │  │ ← │  │   5 个工具已启用   │  │
+│  └───────────────────┘  │   │  └───────────────────┘  │
+│                         │   │           ● ○           │
+└─────────────────────────┘   └─────────────────────────┘
+        对话（根）                      设置（横滑）
+```
+
+实现（`ui/MainPager.kt`）：
+
+```kotlin
+val pager = rememberPagerState(initialPage = if (nav.current == Settings) 1 else 0) { 2 }
+HorizontalPager(state = pager) { page ->
+    when (page) { 0 -> ChatScreen(...); 1 -> SettingsScreen(...) }
+}
+LaunchedEffect(pager.currentPage) {
+    val target = if (pager.currentPage == 0) Screen.Chat else Screen.Settings
+    if (nav.current != target) nav.replaceTop(target)
+}
+```
+
+三个设计决定：
+
+| 决定 | 原因 |
+|---|---|
+| 不设独立菜单首页 | 手表上多一层菜单 = 每次聊天多一次点击；设置是低频操作，横滑一步就到 |
+| 两页共用同一个 Pager 容器 | 滑动时页面状态不重建；从二级页返回也停在原来那一页 |
+| 滑动后 `replaceTop` 同步导航栈 | 在设置页点进二级页再返回，能回到设置页而不是对话页 |
+| 指示点只在设置页出现 | 对话页底部是输入栏，叠一层点会打架；参考图里也只在列表页有 |
+
+---
+
+## 2. 对话气泡（`BubbleScaffold`）
+
+参考图的关键不是「左右对齐」，而是**角色标签独立在气泡上方**：
+
+```kotlin
+Column {
+    Row(padding(start = 4.dp, bottom = 5.dp)) {   // 标签行
+        if (!isUser && showMascot) Image(mascot, 16.dp)
+        Text(if (isUser) "我" else "DSH", 11sp, outline)
+        // 步数 / 生成中 / 失败 / 已停止 等状态也在这行
+    }
+    Column(                                      // 气泡
+        Modifier
+            .fillMaxWidth(if (isUser) 0.94f else 1f)
+            .clip(RoundedCornerShape(26.dp))
+            .background(if (isUser) Color(0xFF4A5670) else surfaceContainerHigh)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) { 工作块 / 正文 / 操作行 }
+}
+```
+
+| 项 | 值 |
+|---|---|
+| 用户气泡 | `#4A5670`（低饱和蓝灰，对应参考图的蓝紫灰） |
+| 助手气泡 | `#2A2A2A`（中性深灰） |
+| 圆角 | 26dp（接近全圆，但保留一点矩形感） |
+| 内边距 | 水平 14dp / 垂直 12dp |
+| 用户气泡宽度 | 94%（右侧留一点呼吸） |
+| 助手气泡宽度 | 100%（Markdown 表格/代码需要宽度） |
+| 消息间距 | LazyColumn 10dp |
+| 角色文字 | 11sp / `outline`（#7A7A7A） |
+
+气泡内用 `CompositionLocalProvider(LocalContentColor)` 把默认文字色统一成气泡前景色，
+这样 Markdown 渲染、操作按钮的文字颜色不需要逐个改。
+
+---
+
+## 3. 设置页（`WearCardRow`）
+
+```
+        设置                  ← 18sp SemiBold，居中
+┌───────────────────────────┐
+│ ☁   模型服务          ›   │  ← 24dp 圆角卡片
+│     当前：DeepSeek        │
+└───────────────────────────┘
+```
+
+- 卡片：`fillMaxWidth` + 24dp 圆角 + `surfaceContainerHigh` + 16/12dp 内边距；
+- 左侧 20dp 线性图标（`outline` 色）；
+- 中间标题 15sp Medium + 副标题 11sp（当前状态摘要，最多两行）；
+- 右侧 `›`（`labelMedium`，`onSurfaceVariant`）；
+- 列表间距 10dp，`contentPadding` 左右 14dp、底部 20dp（给指示点留位）；
+- 九个分组各配一个线性图标：云（模型）、星芒（能力）、拼图（插件）、Hub（MCP）、
+  对话（聊天）、调色板（外观）、文件夹（文件）、内存（运行）、WiFi（连接）。
+
+---
+
+## 4. 配色与形状
+
+| 语义 | 值 | 用途 |
+|---|---|---|
+| `background` / `surface` | `#000000` | 纯黑底（OLED 省电） |
+| `surfaceContainerHigh` | `#2A2A2A` | 气泡、卡片 |
+| `surfaceContainerHighest` | `#343434` | 工作流程块、次级按钮 |
+| `onSurface` | `#F2F2F2` | 正文 |
+| `onSurfaceVariant` | `#C4C4C4` | 副标题、图标 |
+| `outline` | `#7A7A7A` | 角色名、时间 |
+| `primary` | `#D6E3FF` | 强调（低饱和浅蓝） |
+
+形状：气泡 26dp、卡片 24dp、按钮/Chip 全圆角；顶栏去掉卡片背景，只留返回箭头 + 标题。
+
+---
+
+## 5. 依赖
 
 ```toml
-composeBom  = "2025.06.01"      # 2024.10.01 → 2025.06.01（Compose 1.7.4 → 1.8.x）
-wearCompose = "1.5.6"           # Wear Material 3（依赖 Compose 1.8.2）
+composeBom  = "2025.06.01"
+wearCompose = "1.5.6"
 ```
 
 ```kotlin
@@ -37,139 +135,28 @@ implementation(libs.androidx.wear.compose.foundation)
 implementation(libs.androidx.compose.material.icons.extended)
 ```
 
-三个决定：
-
-| 决定 | 原因 |
-|---|---|
-| 升 BOM 而不是压 Wear 版本 | Wear M3 稳定版只有 1.5.x 起，全部依赖 Compose 1.8.x；压不下来 |
-| 引 `icons-extended` | 参考图的图标是线性风格（History / CloudDownload / Settings / Info），核心图标集里没有；R8 会裁掉未引用图标，lite 包实测只涨 170KB |
-| 不替换现有页面组件 | 12 个页面的信息结构差异大，全量换 Wear 组件的回归风险高于收益；先统一视觉语言，后续按页面逐步迁移 |
-
-编译验证：Compose 1.8 与 Kotlin 2.0.21 / AGP 8.7.3 兼容，现有代码零改动通过编译
-（仅新增 `LocalClipboardManager` 等 deprecation 警告）。
+Wear M3 稳定版只有 1.5.x 起，全部依赖 Compose 1.8.x，因此 BOM 从 2024.10.01 升到
+2025.06.01。Kotlin 2.0.21 / AGP 8.7.3 兼容，业务代码无需改动。
 
 ---
 
-## 3. 新组件（`ui/components/WearKit.kt`）
-
-### 3.1 `PillItem` —— 胶囊条目
-
-参考图的核心元素。尺寸取自截图（410×502 ≈ 2x 表盘）：
-
-| 项 | 值 | 说明 |
-|---|---|---|
-| 高度 | ≥48dp | 手指热区，不追截图里的 44dp |
-| 圆角 | 全圆（`CircleShape`） | 截图是高胶囊，短文字时接近圆 |
-| 左右内边距 | 20dp | 图标离边远一点，和参考图一致 |
-| 图标 | 18dp，`onSurfaceVariant` | 线性图标，不用主色（截图里图标是灰的） |
-| 图标-文字间距 | 14dp | |
-| 文字 | 14sp / Medium / `onSurface` | |
-| 宽度 | **随内容**（`widthIn(min = 132.dp)`） | 长短不一的胶囊是这种菜单的呼吸感来源，不做满宽 |
-| 禁用态 | `alpha 0.42` | 「继续对话」没有历史会话时 |
-
-### 3.2 `PageDots` —— 底部页面指示点
-
-当前页 7dp 白色实心，其余 5dp `#4A4A4A`。与参考图一致（当前点更大更亮）。
-
-### 3.3 `PillMenuPage` —— 一页菜单容器
-
-内容垂直居中、条目左对齐、间距 12dp。左对齐 + 宽度随内容，是参考图最显眼的结构特征。
-
-### 3.4 `SettingPill` —— 独立胶囊设置项
-
-设置主页原来是「一张 `SettingCard` 装 8 个分组行 + 分割线」。改成每项一个 24dp 圆角胶囊，
-副标题保留（显示该项当前状态），右侧 `›`。
-
----
-
-## 4. 新主页（`ui/screens/home/HomeScreen.kt`）
-
-### 4.1 结构
-
-```
-┌────────────────────────────┐
-│                            │
-│   ( 新对话              )   │  ← 胶囊宽度随文字
-│   ( 继续对话            )   │
-│   ( 历史记录            )   │
-│                            │
-│           ● ○ ○            │  ← 底部指示点
-└────────────────────────────┘
-```
-
-- `HorizontalPager` 三页，左右滑动；
-- 每页 3 项，按使用频率分组：
-
-| 页 | 内容 | 分组逻辑 |
-|---|---|---|
-| 1 | 新对话 / 继续对话 / 历史记录 | 每天都会点的 |
-| 2 | 工作空间 / 供应商 / 用量 | 配置与成本 |
-| 3 | 设置 / 关于 / 连接诊断 | 低频 |
-
-- **继续对话**：`LaunchedEffect` 读 `conversationStore.index().firstOrNull()`，
-  有历史时直接 `engine.open(id)` 进对话页；没有历史时置灰。
-
-### 4.2 导航变化
-
-| 项 | 改前 | 改后 |
-|---|---|---|
-| 根页面 | `Chat` | `Home` |
-| 对话页 | 根，返回即退出 | 二级，返回回主页 |
-| `toChat()` | `popToRoot()` | `popToRoot()` 后确保栈是 `[Home, Chat]` |
-| 启动 | 直接进对话 | 进主页 |
-
-好处：聊天时左上角返回不会误退出应用；坏处：多一步才能继续聊天 —— 用「继续对话」第一项抵消。
-
----
-
-## 5. 配色与形状
-
-深色方案改为参考图的灰阶（`ui/theme/Color.kt`）：
-
-| 语义 | 改前 | 改后 |
-|---|---|---|
-| `background` / `surface` | `#000000` / `#0B0F14` | `#000000` / `#000000`（纯黑，OLED 省电） |
-| `surfaceContainerHigh`（胶囊底） | `#262E3A`（偏蓝） | `#2A2A2A`（中性灰，对齐截图） |
-| `onSurface` | `#E2E6EF`（冷白） | `#F2F2F2`（中性白） |
-| `onSurfaceVariant` | `#B9C2CF`（偏蓝） | `#C4C4C4`（图标/次要文字） |
-| `primary` | `#B0C2FF`（饱和蓝） | `#D6E3FF`（低饱和浅蓝，仅用于强调） |
-
-形状：主按钮 / 幽灵按钮 / Chip 全部改 `CircleShape`；`WatchTopBar` 去掉卡片背景，
-只剩返回箭头 + 标题（标题 `titleSmall`，`onSurface`）。
-
----
-
-## 6. 页面改造清单
-
-| 页面 | 改动 |
-|---|---|
-| `HomeScreen`（新增） | 三页胶囊菜单 + 指示点 |
-| `ChatScreen` | 顶栏去掉设置入口（返回 + 历史 + 新建）；消息区沿用原有结构，卡片圆角随主题 |
-| `SessionsScreen` | 会话条目 12dp → 26dp 圆角，左右内边距加大，条目间距 4 → 8dp |
-| `SettingsScreen` | 分组入口改为 `SettingPill` 独立胶囊 |
-| `AboutScreen` / `WorkspaceScreen` / `UsageScreen` / `ProvidersScreen` 等 | 随主题与 `SettingCard` 自动获得新视觉（卡片圆角不变、底色变深灰） |
-| `WatchTopBar` | 去背景、去卡片、内边距收敛 |
-| `WatchScaffold` | 背景色跟随纯黑主题 |
-
----
-
-## 7. 验证
+## 6. 验证
 
 | 项 | 结果 |
 |---|---|
 | 编译 | `compileDebugKotlin` / `assembleRelease` 通过 |
 | 单元测试 | 554 个，0 失败 |
-| 双包 | lite 6.87MB（+170KB）/ full 28.06MB |
+| 双包 | lite 6.87MB / full 28.06MB |
 | 版本 | `versionCode 15 / versionName 1.7`，签名 `70437a7f…bf31f94` |
-| 真机验收项 | 主页滑动与指示点、胶囊点击热区、返回路径、深色可读性 |
+| 真机验收项 | 横滑切换与指示点、气泡对比度、设置卡片点击热区、长标题截断 |
 
 ---
 
-## 8. 已知限制
+## 7. 已知限制
 
 | 限制 | 说明 |
 |---|---|
-| 未使用 `ScalingLazyColumn` | 列表页仍是普通 `LazyColumn`，没有边缘缩放/透明度效果；后续可在会话列表试点 |
-| 主页不显示标题 | 对齐参考图；代价是首屏没有「你在哪」的文字提示，靠指示点与内容区分 |
-| 中文标题在胶囊里换行 | `maxLines = 1` + 省略号；极长标题（如会话名）会截断，靠副标题补信息 |
-| 明色主题未重做 | 仍用旧浅色方案；手表场景以深色为主，暂不投入 |
+| 未使用 `ScalingLazyColumn` | 列表仍是普通 `LazyColumn`，没有 Wear 的边缘缩放效果；后续可在设置页试点 |
+| 横滑与系统返回手势 | 部分表盘从边缘右滑会触发系统返回，可能与 Pager 冲突；真机如冲突可改为「仅从内容区滑动」 |
+| 明色主题未重做 | 仍用旧浅色方案；手表以深色为主，暂不投入 |
+| 设置页无返回按钮 | 它是与对话并列的一页，靠右滑返回；二级页仍有返回箭头 |

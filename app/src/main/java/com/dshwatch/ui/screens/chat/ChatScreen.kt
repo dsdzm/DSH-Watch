@@ -5,8 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,10 +35,12 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -48,10 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.R
 import com.dshwatch.core.AppContainer
@@ -194,8 +200,8 @@ fun ChatScreen(
 
     WatchScaffold(
         title = conversation?.displayTitle ?: s.appName,
-        // 根是主页，对话页是二级：返回即回主页
-        onBack = { nav.pop() },
+        // 对话页是根：没有返回，靠右滑去设置
+        onBack = null,
         actions = {
             // 首页已经承载了设置入口，这里只留聊天时最常用的两个动作：
             // 切会话、开新会话 —— 手表顶栏宽度经不起四个图标
@@ -512,6 +518,61 @@ private fun BannerCard(text: String, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * 消息气泡的公共骨架：角色标签在**气泡上方**，气泡本身只装内容。
+ *
+ * 参考图的结构：`我` / `DSH` 是独立的一行小字，气泡是纯粹的圆角容器。
+ * 用户气泡略窄、偏蓝灰；助手气泡满宽、中性深灰 —— 这两种颜色已经足够
+ * 区分说话人，不需要左右对齐（手表屏幕经不起左右留白）。
+ */
+@Composable
+private fun BubbleScaffold(
+    isUser: Boolean,
+    label: String,
+    showMascot: Boolean,
+    headerTrailing: @Composable RowScope.() -> Unit = {},
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    // 用户气泡的蓝灰：比助手的中性灰多一点点倾向，但仍是低饱和
+    val bubbleColor = if (isUser) Color(0xFF4A5670) else MaterialTheme.colorScheme.surfaceContainerHigh
+    val textColor = if (isUser) Color(0xFFF2F2F2) else MaterialTheme.colorScheme.onSurface
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(start = 4.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (!isUser && showMascot) {
+                Image(
+                    painter = painterResource(R.drawable.mascot_avatar),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(CircleShape),
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                color = MaterialTheme.colorScheme.outline,
+            )
+            headerTrailing()
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(if (isUser) 0.94f else 1f)
+                .clip(RoundedCornerShape(26.dp))
+                .background(bubbleColor)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            CompositionLocalProvider(LocalContentColor provides textColor) {
+                content()
+            }
+        }
+    }
+}
+
 @Composable
 private fun MessageItem(
     message: ChatMessage,
@@ -530,59 +591,24 @@ private fun MessageItem(
     val isUser = message.role == Role.USER
     val isStreaming = live != null
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // 用户消息用主色容器、助手消息用中性容器 —— 不用左对齐/右对齐也能一眼分开，
-            // 而且不浪费本来就窄的横向空间
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                if (isUser) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainer
-                }
-            )
-            .padding(horizontal = 8.dp, vertical = 7.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // 头像比三个字母更容易一眼认出「这是谁在说话」，同时不占多少横向空间
-            if (!isUser && settings.showMascot) {
-                Image(
-                    painter = painterResource(R.drawable.mascot_avatar),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape),
-                )
-                Spacer(Modifier.width(5.dp))
-            }
-            Text(
-                text = if (isUser) "我" else "DSH",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isUser) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-            )
+    BubbleScaffold(
+        isUser = isUser,
+        label = if (isUser) "我" else "DSH",
+        showMascot = settings.showMascot,
+        headerTrailing = {
             if (message.stepIndex > 0) {
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = "${s.stepLabel} ${message.stepIndex}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isUser) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                    color = MaterialTheme.colorScheme.outline,
                 )
             }
             if (isStreaming) {
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = if (reasoning.isNotBlank() && body.isBlank()) s.thinking else s.generating,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
@@ -590,23 +616,20 @@ private fun MessageItem(
             if (!isUser && message.status == MessageStatus.ERROR) {
                 Text(
                     text = s.sendFailed,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
             if (!isUser && message.status == MessageStatus.STOPPED) {
                 Text(
                     text = s.stopped,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
-        }
-
-        Spacer(Modifier.height(3.dp))
-
-        // 思考与工具调用收进同一个「工作块」：默认折叠只显示当前进度，
-        // 想看过程再点开。两者都没有就不渲染。
+        },
+    ) {
+        // 思考与工具调用收进同一个「工作块」：执行中展开、完成后折叠成摘要
         if (!isUser && (message.toolCalls.isNotEmpty() || (settings.showReasoning && reasoning.isNotBlank()))) {
             AgentWorkBlock(
                 blockKey = message.id,
@@ -618,7 +641,7 @@ private fun MessageItem(
                 onOpenArtifact = onOpenArtifact,
                 onExportArtifact = onExportArtifact,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
         }
 
         if (body.isNotBlank()) {
@@ -626,7 +649,7 @@ private fun MessageItem(
                 Text(
                     text = body,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             } else {
                 MarkdownText(text = body)
@@ -648,10 +671,9 @@ private fun MessageItem(
             )
         }
 
-        // 操作行常显：复制 / 重试 / 删除不该藏在「先点一下消息」后面 ——
-        // 那个交互既难发现、又很容易误触。只在生成结束后出现，避免流式期间每帧重排。
+        // 操作行常显：复制 / 重试 / 删除不该藏在「先点一下消息」后面
         if (!isStreaming && body.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -666,15 +688,6 @@ private fun MessageItem(
     }
 }
 
-/**
- * 多步 Agent 回合 —— 把同一个回合里连续的助手消息（步 1、步 2…）合并成**一条**
- * DSH 回合渲染。
- *
- * 用户要求：交付产物之前，前端只显示「用户的消息 + 一条总的工作流程卡片」。
- * 所以这里把各步的工具调用与思考链合并后交给一个 [AgentWorkBlock]，标题恒为
- * 「工作流程」，不再每一步各来一张卡；只有当终态那条消息给出了正文（交付物）
- * 时，才在卡片下面渲染回答正文。
- */
 @Composable
 private fun AgentTurnItem(
     messages: List<ChatMessage>,
@@ -703,34 +716,16 @@ private fun AgentTurnItem(
     }?.content.orEmpty()
     val hasError = last.status == MessageStatus.ERROR
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (settings.showMascot) {
-                Image(
-                    painter = painterResource(R.drawable.mascot_avatar),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape),
-                )
-                Spacer(Modifier.width(5.dp))
-            }
-            Text(
-                text = "DSH",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+    BubbleScaffold(
+        isUser = false,
+        label = "DSH",
+        showMascot = settings.showMascot,
+        headerTrailing = {
             if (isStreaming) {
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = if (reasoning.isNotBlank() && answer.isBlank()) s.thinking else s.generating,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
@@ -738,21 +733,19 @@ private fun AgentTurnItem(
             if (hasError) {
                 Text(
                     text = s.sendFailed,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
             if (last.status == MessageStatus.STOPPED) {
                 Text(
                     text = s.stopped,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                     color = MaterialTheme.colorScheme.outline,
                 )
             }
-        }
-
-        Spacer(Modifier.height(3.dp))
-
+        },
+    ) {
         AgentWorkBlock(
             blockKey = messages.first().id,
             calls = calls,
@@ -765,7 +758,7 @@ private fun AgentTurnItem(
         )
 
         if (answer.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             MarkdownText(text = answer)
         }
 
@@ -779,7 +772,7 @@ private fun AgentTurnItem(
         }
 
         if (!isStreaming && answer.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
