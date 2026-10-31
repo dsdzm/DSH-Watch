@@ -144,6 +144,22 @@ interface AppStrings {
     val mcpToolsHint: String
     val mcpEmpty: String
 
+    // B站
+    val groupBili: String
+    val biliEnable: String
+    val biliEnableHint: String
+    val biliComment: String
+    val biliCommentHint: String
+    val biliQuota: String
+    val biliQuotaHint: String
+    val biliKeywords: String
+    val biliKeywordsHint: String
+    val biliCookie: String
+    val biliCookieHint: String
+    val biliCookieUnset: String
+    val biliOpenDigest: String
+    val biliHint: String
+
     fun pluginTitle(id: String): String
     fun pluginDesc(id: String): String
 
@@ -512,6 +528,23 @@ object Zh : AppStrings {
     override val mcpToolsTitle = "工具清单"
     override val mcpToolsHint = "这些描述会发给模型。不认识的项关掉即可，关掉的不会出现。"
     override val mcpEmpty = "还没有添加服务器"
+
+    override val groupBili = "刷 B站"
+    override val biliEnable = "启用 B站工具"
+    override val biliEnableHint = "搜索、读字幕、写日报；关掉后模型看不到 bili_* 工具"
+    override val biliComment = "允许发评论"
+    override val biliCommentHint = "默认关闭。关着的时候发评论只生成预览，不会真发"
+    override val biliQuota = "每日配额"
+    override val biliQuotaHint = "每天最多往日报里记几条，0 表示不限"
+    override val biliKeywords = "关注关键词"
+    override val biliKeywordsHint = "逗号分隔；留空则由模型按你当次说的话决定搜什么"
+    override val biliCookie = "登录 Cookie"
+    override val biliCookieHint = "只有发评论需要。粘贴浏览器里的 SESSDATA 与 bili_jct，加密存在本机"
+    override val biliCookieUnset = "未配置"
+    override val biliOpenDigest = "今日日报"
+    override val biliHint =
+        "刷B站 = 搜索 → 读字幕正文 → 判断值不值得看 → 写进日报。日报存在工作空间 bili/ 下，" +
+            "每条的「### BV号」就是配额计数单位，同一天不会重复记同一条。"
     override val pluginsHint = "插件改变模型看到或写出的内容。关掉就完全回到默认行为。"
 
     override fun pluginTitle(id: String): String = when (id) {
@@ -795,6 +828,13 @@ object Zh : AppStrings {
         "run_script" -> "运行脚本"
         "cloud_build" -> "云端编译"
         "cloud_job" -> "云端任务"
+        "bili_status" -> "B站状态"
+        "bili_search" -> "搜B站"
+        "bili_video" -> "视频详情"
+        "bili_subtitle" -> "读字幕"
+        "bili_comments" -> "看评论"
+        "bili_report" -> "写日报"
+        "bili_reply" -> "发评论"
         else -> tool
     }
 }
@@ -925,6 +965,23 @@ object En : AppStrings {
     override val mcpToolsTitle = "Tools"
     override val mcpToolsHint = "These descriptions go to the model. Turn off anything you do not recognise."
     override val mcpEmpty = "No servers yet"
+
+    override val groupBili = "Bilibili"
+    override val biliEnable = "Bilibili tools"
+    override val biliEnableHint = "Search, subtitles, daily digest. Off = the bili_* tools disappear"
+    override val biliComment = "Allow commenting"
+    override val biliCommentHint = "Off by default. When off, replies are previewed but never sent"
+    override val biliQuota = "Daily quota"
+    override val biliQuotaHint = "How many picks per day; 0 means unlimited"
+    override val biliKeywords = "Keywords"
+    override val biliKeywordsHint = "Comma separated; leave empty to let the model decide"
+    override val biliCookie = "Login cookie"
+    override val biliCookieHint = "Only needed for commenting. SESSDATA + bili_jct, encrypted on device"
+    override val biliCookieUnset = "Not set"
+    override val biliOpenDigest = "Today's digest"
+    override val biliHint =
+        "The loop is: search → read the actual subtitles → judge → write the digest. " +
+            "Digests live under bili/ in the workspace; each '### BV id' line counts toward the quota."
     override val pluginsHint =
         "Plugins change what the model sees or writes. Turning one off restores the default behaviour."
 
@@ -1211,6 +1268,13 @@ object En : AppStrings {
         "run_script" -> "Run script"
         "cloud_build" -> "Cloud build"
         "cloud_job" -> "Cloud job"
+        "bili_status" -> "Bilibili status"
+        "bili_search" -> "Search Bilibili"
+        "bili_video" -> "Video info"
+        "bili_subtitle" -> "Read subtitles"
+        "bili_comments" -> "Top comments"
+        "bili_report" -> "Write digest"
+        "bili_reply" -> "Post comment"
         else -> tool
     }
 }

@@ -18,6 +18,20 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.8",
+            date = "2026-10-31",
+            highlights = listOf(
+                "刷 B站：让模型自己搜视频、读字幕正文、判断值不值得看，把挑中的写进当天日报 —— " +
+                    "不用电脑、不用 MCP server，手表自己就能跑",
+                "七个 bili_* 工具：状态、搜索、视频信息、读字幕、看评论、写日报、发评论；" +
+                    "关掉开关它们就不再进入上下文，不占 token",
+                "日报落在工作空间 bili/ 下，每条的「### BV号」就是配额计数，同一条当天不会重复记",
+                "发评论默认干跑：只生成预览，要真发得先在设置里打开「允许发评论」并填 Cookie，" +
+                    "而且每次都会弹确认 —— 发出去的话收不回来",
+                "对话空态加了「刷一轮 B站」胶囊，手表上不用打字也能直接开工",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.7",
             date = "2026-10-20",
             highlights = listOf(

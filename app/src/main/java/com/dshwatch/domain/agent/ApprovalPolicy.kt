@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonObject
  * | `run_script` + `language=shell` | **无论什么模式都要确认**；用户可选「本会话允许」，之后本会话内不再问 |
  * | `run_script` + `js` / `python` | 按 Agent 模式（全自动直接跑） |
  * | `cloud_build` / `cloud_job` | **始终确认** —— 会把代码发到外部仓库，且一次构建要几分钟 |
+ * | `bili_reply` | **始终确认** —— 评论发出去就收不回来 |
  * | 其他 | 按模式与安全等级（只读自动模式下只读工具免问） |
  *
  * 为什么 shell 单独拎出来：它是唯一「一条命令就能把设备上的东西改掉/删掉」的入口，
@@ -28,7 +29,7 @@ import kotlinx.serialization.json.JsonObject
 object ApprovalPolicy {
 
     /** 无论模式与「总是允许」如何，都必须确认的工具 */
-    val ALWAYS_CONFIRM: Set<String> = setOf("cloud_build", "cloud_job")
+    val ALWAYS_CONFIRM: Set<String> = setOf("cloud_build", "cloud_job", "bili_reply")
 
     private const val RUN_SCRIPT = "run_script"
     private const val SHELL_KEY = "run_script:shell"

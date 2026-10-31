@@ -208,6 +208,29 @@ data class AppSettings(
      */
     val pluginsCustomized: Boolean = false,
 
+    // ---------------- B站（刷一刷）----------------
+    /**
+     * B站工具总开关，默认开启。
+     *
+     * 这一组工具只读公开接口 + 写本地日报，不碰账号数据；关掉之后
+     * 那七个 `bili_*` 的 schema 不再进入每一次请求（见 [AgentTool.enabled]）。
+     */
+    val biliEnabled: Boolean = true,
+
+    /** 关注关键词，逗号分隔。留空表示由模型按用户当次的要求决定搜什么 */
+    val biliKeywords: String = "",
+
+    /** 每天最多往日报里记几条。0 = 不限 */
+    val biliDailyQuota: Int = 5,
+
+    /**
+     * 是否允许**真发**评论，默认关闭。
+     *
+     * 发出去就收不回来，且 B站对高频互动有风控。关着的时候
+     * `bili_reply` 恒干跑：只生成预览，连请求都不发。
+     */
+    val biliCommentEnabled: Boolean = false,
+
     // ---------------- MCP ----------------
     /**
      * 远程 MCP server 列表。

@@ -109,6 +109,35 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         runCatching { prefs.edit().remove(k("$MCP_SCOPE:$serverId", FIELD_MCP_TOKEN)).apply() }
     }
 
+    /**
+     * B站登录 Cookie（`SESSDATA=...; bili_jct=...`）。
+     *
+     * 和 API Key 同一套加密存储：SESSDATA 等价于账号密码，
+     * 泄露即等于别人能拿你的号发评论。所以它只存在本机加密区，
+     * 不进日志、不进导出、也不给脚本。
+     */
+    fun getBiliCookie(): String? = get(k(BILI_SCOPE, FIELD_BILI_COOKIE))
+
+    fun putBiliCookie(value: String?) = put(k(BILI_SCOPE, FIELD_BILI_COOKIE), value)
+
+    fun clearBiliCookie() {
+        runCatching { prefs.edit().remove(k(BILI_SCOPE, FIELD_BILI_COOKIE)).apply() }
+    }
+
+    /** 只回显长度与首键，够用来确认「填对了没有」，又不会把凭证显示在屏幕上 */
+    fun maskedBiliCookie(): String {
+        val raw = getBiliCookie()?.trim().orEmpty()
+        if (raw.isEmpty()) return ""
+        val hasJct = raw.contains("bili_jct=")
+        val hasSess = raw.contains("SESSDATA=")
+        return buildString {
+            append(if (hasSess) "SESSDATA ✓" else "SESSDATA ✗")
+            append(" · ")
+            append(if (hasJct) "bili_jct ✓" else "bili_jct ✗")
+            append(" · ").append(raw.length).append(" 字符")
+        }
+    }
+
     fun clear(providerId: String) {
         runCatching {
             prefs.edit()
@@ -183,6 +212,10 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         /** GitHub 令牌不属于任何 provider，用一个合成作用域复用同一套存储 */
         private const val CLOUD_SCOPE = "cloud"
         private const val FIELD_GITHUB_TOKEN = "githubToken"
+
+        /** B站 Cookie 同样是一个合成作用域 */
+        private const val BILI_SCOPE = "bili"
+        private const val FIELD_BILI_COOKIE = "biliCookie"
         private const val FIELD_MCP_TOKEN = "mcpToken"
         private const val MCP_SCOPE = "mcp"
         private const val PROBE_KEY = "__probe__"

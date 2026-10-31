@@ -91,6 +91,13 @@ class ToolContext(
     val cloudRuns: com.dshwatch.domain.agent.cloud.CloudRunStore? = null,
     /** GitHub API 入口（token 由 AppContainer 从加密存储里取），未配置时为 null */
     val github: com.dshwatch.domain.agent.cloud.GitHubApi? = null,
+    /**
+     * B站登录 Cookie（`SESSDATA=...; bili_jct=...`）。
+     *
+     * 同样是现取的 lambda：用户在设置里刚粘贴完 Cookie 就该能发评论，
+     * 而 [ToolContext] 是构造时快照的。匿名时返回空串。
+     */
+    val biliCookie: () -> String = { "" },
 ) {
     fun requireContext(): Context =
         appContext ?: error("该工具需要 Android Context，当前运行环境没有提供")
@@ -118,6 +125,7 @@ class ToolContext(
         settings = settings,
         cloudRuns = cloudRuns,
         github = github,
+        biliCookie = biliCookie,
     )
 
     /** 模型给的路径 → 工作空间内的全局相对路径（落在本会话目录之下）。null = 路径非法 */
@@ -142,6 +150,18 @@ interface AgentTool {
     val name: String
     val description: String
     val safety: ToolSafety
+
+    /**
+     * 当前设置下这个工具**是否存在**。
+     *
+     * 用途只有一个：把「成组的能力」（比如 B站整套工具）关掉时，
+     * 它的 schema 不再进入每一次请求 —— 七个工具的描述常年挂在上下文里
+     * 是实打实的 token，用户关掉这个功能之后不应该还在为它付费。
+     *
+     * 默认恒真；写在接口里而不是给 ToolRegistry 加白名单，
+     * 是因为「这个工具要不要出现」本来就是工具自己的属性。
+     */
+    val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean get() = { true }
 
     /** JSON Schema（type: object） */
     val parameters: JsonObject

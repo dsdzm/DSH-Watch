@@ -319,6 +319,20 @@ fun ChatScreen(
                     Spacer(Modifier.height(10.dp))
                 }
                 EmptyState(title = s.chatEmptyTitle, hint = s.chatEmptyHint)
+                // 手表上打字是最贵的一步操作。刷 B站 是个固定流程，
+                // 给它一个一句话就能触发的入口，比让用户敲「帮我刷一遍B站」现实得多。
+                if (settings.biliEnabled) {
+                    Spacer(Modifier.height(10.dp))
+                    Chip(
+                        text = "刷一轮 B站",
+                        onClick = {
+                            engine.send(
+                                "刷一轮 B站：按我关注的关键词挑几条真正值得看的，读字幕判断，" +
+                                    "把挑中的写进今天的日报"
+                            )
+                        },
+                    )
+                }
             }
             return@WatchScaffold
         }

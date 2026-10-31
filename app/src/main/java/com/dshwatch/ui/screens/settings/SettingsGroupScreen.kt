@@ -2,13 +2,16 @@ package com.dshwatch.ui.screens.settings
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +37,7 @@ import com.dshwatch.ui.components.SettingCard
 import com.dshwatch.ui.components.SettingRow
 import com.dshwatch.ui.components.StepperRow
 import com.dshwatch.ui.components.SwitchRow
+import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
@@ -61,9 +65,10 @@ internal object SettingsGroups {
     const val CONNECTION = "connection"
     const val PLUGINS = "plugins"
     const val MCP = "mcp"
+    const val BILI = "bili"
 
-    /** 顺序即一级页的显示顺序。插件与 MCP 紧跟「AI 能力」—— 它们扩展的都是能力 */
-    val all = listOf(MODEL, ABILITY, PLUGINS, MCP, CHAT, APPEARANCE, FILES, RUNTIME, CONNECTION)
+    /** 顺序即一级页的显示顺序。插件、MCP、B站 紧跟「AI 能力」—— 它们扩展的都是能力 */
+    val all = listOf(MODEL, ABILITY, PLUGINS, MCP, BILI, CHAT, APPEARANCE, FILES, RUNTIME, CONNECTION)
 
     fun title(id: String, s: AppStrings): String = when (id) {
         MODEL -> s.groupModel
@@ -74,6 +79,7 @@ internal object SettingsGroups {
         RUNTIME -> s.groupRuntime
         PLUGINS -> s.groupPlugins
         MCP -> s.groupMcp
+        BILI -> s.groupBili
         else -> s.groupConnection
     }
 }
@@ -125,6 +131,7 @@ fun SettingsGroupScreen(
                 SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
                 SettingsGroups.PLUGINS -> PluginsGroup(settings, update, s)
                 SettingsGroups.MCP -> McpGroup(settings, update, container, s)
+                SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
                 else -> ConnectionGroup(settings, nav, s)
             }
         }
@@ -674,6 +681,180 @@ private fun ConnectionGroup(settings: AppSettings, nav: WatchNavigator, s: AppSt
         modifier = Modifier.padding(horizontal = 4.dp),
     )
 }
+
+// ---------------------------------------------------------------------------
+// 9. 刷 B站
+// ---------------------------------------------------------------------------
+
+/**
+ * 刷 B站的分组页。
+ *
+ * 这一页只放四件事：总开关、发评论开关、配额、凭证。
+ * 「怎么刷」不进设置 —— 那是模型的事（见 `BiliTools.StatusTool` 返回的流程），
+ * 用户在这里只需要决定「给不给它这些能力」。
+ */
+@Composable
+private fun BiliGroup(
+    settings: AppSettings,
+    update: Update,
+    container: AppContainer,
+    nav: WatchNavigator,
+    s: AppStrings,
+) {
+    var editingKeywords by remember { mutableStateOf(false) }
+    var editingCookie by remember { mutableStateOf(false) }
+    var keywordDraft by remember { mutableStateOf("") }
+    var cookieDraft by remember { mutableStateOf("") }
+    var cookieStamp by remember { mutableStateOf(0) }
+    var todayCount by remember { mutableStateOf(-1) }
+
+    // 日报是按天落的文件，条数直接数「### BV」行 —— 和工具里的配额口径必须一致，
+    // 否则会出现「设置页说还有 2 条、模型却说配额用完了」这种对不上的情况。
+    LaunchedEffect(settings.biliEnabled) {
+        todayCount = withContext(Dispatchers.IO) {
+            val f = File(container.workspaceStore.rootDir(), "bili/" + todayKey() + ".md")
+            if (!f.exists()) 0 else f.readLines().count { it.startsWith("### BV") }
+        }
+    }
+    val cookieMask = remember(cookieStamp) { container.keyStore.maskedBiliCookie() }
+
+    SettingCard {
+        SwitchRow(
+            title = s.biliEnable,
+            subtitle = s.biliEnableHint,
+            checked = settings.biliEnabled,
+            onCheckedChange = { v -> update { it.copy(biliEnabled = v) } },
+        )
+        SwitchRow(
+            title = s.biliComment,
+            subtitle = s.biliCommentHint,
+            checked = settings.biliCommentEnabled,
+            onCheckedChange = { v -> update { it.copy(biliCommentEnabled = v) } },
+        )
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        StepperRow(
+            title = s.biliQuota,
+            subtitle = s.biliQuotaHint,
+            value = if (settings.biliDailyQuota <= 0) "∞" else "${settings.biliDailyQuota} 条",
+            onDecrease = {
+                update { it.copy(biliDailyQuota = (it.biliDailyQuota - 1).coerceIn(0, 20)) }
+            },
+            onIncrease = {
+                update { it.copy(biliDailyQuota = (it.biliDailyQuota + 1).coerceIn(0, 20)) }
+            },
+        )
+        SettingRow(
+            title = s.biliKeywords,
+            subtitle = settings.biliKeywords.ifBlank { s.biliKeywordsHint },
+            trailing = "✎",
+            showDivider = true,
+            onClick = {
+                keywordDraft = settings.biliKeywords
+                editingKeywords = true
+            },
+        )
+        SettingRow(
+            title = s.biliCookie,
+            subtitle = cookieMask.ifBlank { s.biliCookieUnset },
+            trailing = "✎",
+            onClick = {
+                cookieDraft = container.keyStore.getBiliCookie().orEmpty()
+                editingCookie = true
+            },
+        )
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        SettingRow(
+            title = s.biliOpenDigest,
+            subtitle = when {
+                todayCount < 0 -> "…"
+                settings.biliDailyQuota <= 0 -> "今天已记 $todayCount 条（不限量）"
+                else -> "今天已记 $todayCount / ${settings.biliDailyQuota} 条"
+            },
+            trailing = "›",
+            onClick = { nav.push(Screen.Workspace) },
+        )
+    }
+
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = s.biliHint,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+
+    if (editingKeywords) {
+        SimpleEditDialog(
+            title = s.biliKeywords,
+            value = keywordDraft,
+            placeholder = "DeepSeek, 机械键盘",
+            onChange = { keywordDraft = it },
+            onConfirm = {
+                update { it.copy(biliKeywords = keywordDraft.trim()) }
+                editingKeywords = false
+            },
+            onDismiss = { editingKeywords = false },
+        )
+    }
+
+    if (editingCookie) {
+        SimpleEditDialog(
+            title = s.biliCookie,
+            value = cookieDraft,
+            placeholder = "SESSDATA=...; bili_jct=...",
+            onChange = { cookieDraft = it },
+            onConfirm = {
+                container.keyStore.putBiliCookie(cookieDraft.trim())
+                cookieStamp++
+                editingCookie = false
+            },
+            onDismiss = { editingCookie = false },
+        )
+    }
+}
+
+/** 手表上唯一的多行输入场景（关键词 / Cookie），做成一个弹窗就够 */
+@Composable
+private fun SimpleEditDialog(
+    title: String,
+    value: String,
+    placeholder: String,
+    onChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val s = LocalStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = title, style = MaterialTheme.typography.titleSmall) },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                TextRow(
+                    label = title,
+                    value = value,
+                    onValueChange = onChange,
+                    placeholder = placeholder,
+                    singleLine = false,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(s.save) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(s.cancel) }
+        },
+    )
+}
+
+private fun todayKey(): String =
+    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
 
 private fun humanSize(dir: File): String {
     if (!dir.exists()) return "0 KB"

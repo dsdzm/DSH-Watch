@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -74,6 +76,15 @@ object ToolVisuals {
         "grep" -> Icons.Filled.LocationOn
 
         "build_project" -> Icons.Filled.PlayArrow
+
+        // B站
+        "bili_status" -> Icons.Filled.Info
+        "bili_search" -> Icons.Filled.Search
+        "bili_video" -> Icons.Filled.PlayArrow
+        "bili_subtitle" -> Icons.Filled.List
+        "bili_comments" -> Icons.Filled.ThumbUp
+        "bili_report" -> Icons.Filled.Create
+        "bili_reply" -> Icons.Filled.Send
 
         // 执行与云端
         "run_script" -> Icons.Filled.PlayArrow

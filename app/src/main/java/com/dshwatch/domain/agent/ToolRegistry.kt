@@ -18,13 +18,28 @@ class ToolRegistry(
     tools: List<AgentTool> = BuiltinTools.all(),
 ) {
 
-    val tools: List<AgentTool> = tools
+    private val allTools: List<AgentTool> = tools
 
     private val byName: Map<String, AgentTool> = tools.associateBy { it.name }
 
+    /**
+     * 当前设置下真正可用的工具。
+     *
+     * 每次读都按 [AgentTool.enabled] 现算，而不是构造时筛一次 ——
+     * 用户在设置里关掉「B站工具」之后，下一次请求就该少七个 schema，
+     * 不该等到 App 重启或 MCP 重连才生效。
+     */
+    val tools: List<AgentTool>
+        get() {
+            val s = context.settings()
+            return allTools.filter { it.enabled(s) }
+        }
+
     val toolContext: ToolContext get() = context
 
-    fun get(name: String): AgentTool? = byName[name]
+    /** 只返回**当前可用**的工具：关掉的能力即使模型幻觉出工具名也执行不了 */
+    fun get(name: String): AgentTool? =
+        byName[name]?.takeIf { it.enabled(context.settings()) }
 
     fun isKnown(name: String): Boolean = byName.containsKey(name)
 

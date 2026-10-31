@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -100,6 +101,7 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.ABILITY -> Icons.Outlined.AutoAwesome
     SettingsGroups.PLUGINS -> Icons.Outlined.Extension
     SettingsGroups.MCP -> Icons.Outlined.Hub
+    SettingsGroups.BILI -> Icons.Outlined.Videocam
     SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
@@ -129,6 +131,12 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
         val servers = settings.mcpServers
         val on = servers.count { it.enabled && it.confirmed }
         if (servers.isEmpty()) s.mcpEmpty else "$on/${servers.size} 已启用"
+    }
+
+    SettingsGroups.BILI -> when {
+        !settings.biliEnabled -> "已关闭"
+        settings.biliDailyQuota <= 0 -> "已开启 · 不限量"
+        else -> "已开启 · 每天 ${settings.biliDailyQuota} 条"
     }
 
     SettingsGroups.CHAT -> buildList {
