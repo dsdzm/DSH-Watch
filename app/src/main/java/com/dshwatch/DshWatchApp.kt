@@ -3,7 +3,11 @@ package com.dshwatch
 import android.app.Application
 import com.dshwatch.core.AppContainer
 import com.dshwatch.core.Logx
+import com.dshwatch.domain.bili.BiliSchedule
 import com.dshwatch.service.StreamingService
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class DshWatchApp : Application() {
 
@@ -34,6 +38,15 @@ class DshWatchApp : Application() {
             if (container.settings.value.foregroundService) {
                 StreamingService.update(this, text)
             }
+        }
+
+        // 定时刷 B站：启动时对齐一次，之后只在「开关 / 时间」变化时重排。
+        // 订阅整个 settings 会让改个关键词也重排闹钟，没必要。
+        container.appScope.launch {
+            container.settings
+                .map { Triple(it.biliEnabled, it.biliAutoRun, it.biliAutoHour to it.biliAutoMinute) }
+                .distinctUntilChanged()
+                .collect { BiliSchedule.sync(this@DshWatchApp, container.settings.value) }
         }
     }
 }

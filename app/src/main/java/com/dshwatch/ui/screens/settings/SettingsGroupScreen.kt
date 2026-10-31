@@ -1,5 +1,7 @@
 package com.dshwatch.ui.screens.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,12 +26,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.DeviceProfile
 import com.dshwatch.domain.DeviceTier
 import com.dshwatch.domain.PerfProfiles
+import com.dshwatch.domain.bili.BiliClock
+import com.dshwatch.domain.bili.BiliImages
+import com.dshwatch.domain.bili.BiliMode
+import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTones
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.AppSettings
@@ -715,6 +722,26 @@ private fun BiliGroup(
     var toneDraft by remember { mutableStateOf("") }
     var cookieStamp by remember { mutableStateOf(0) }
     var todayCount by remember { mutableStateOf(-1) }
+    var editingMode by remember { mutableStateOf(false) }
+    var editingAt by remember { mutableStateOf(false) }
+    var editingImage by remember { mutableStateOf(false) }
+    var editingTime by remember { mutableStateOf(false) }
+    var atDraft by remember { mutableStateOf("") }
+    var imageNote by remember { mutableStateOf("") }
+    var editingImageText by remember { mutableStateOf(false) }
+    var imageTextDraft by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 选相册图：GetContent 比 PhotoPicker 兼容性更好 —— Wear 上不一定有 PhotoPicker，
+    // 但几乎都有 DocumentsUI，实在没有会回 null，我们提示一句就好。
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { BiliImages.saveLocal(context, uri) }
+            imageNote = if (ok) "" else s.biliImagePickFailed
+        }
+    }
 
     // 日报是按天落的文件，条数直接数「### BV」行 —— 和工具里的配额口径必须一致，
     // 否则会出现「设置页说还有 2 条、模型却说配额用完了」这种对不上的情况。
@@ -736,11 +763,16 @@ private fun BiliGroup(
             checked = settings.biliEnabled,
             onCheckedChange = { v -> update { it.copy(biliEnabled = v) } },
         )
-        SwitchRow(
-            title = s.biliComment,
-            subtitle = s.biliCommentHint,
-            checked = settings.biliCommentEnabled,
-            onCheckedChange = { v -> update { it.copy(biliCommentEnabled = v) } },
+        SettingRow(
+            title = s.biliMode,
+            subtitle = when (BiliModes.of(settings)) {
+                BiliMode.SUMMARY -> s.biliModeSummaryHint
+                BiliMode.COMMENT -> s.biliModeCommentHint
+                BiliMode.DM -> s.biliModeDmHint
+            },
+            trailing = "›",
+            showDivider = true,
+            onClick = { editingMode = true },
         )
         SwitchRow(
             title = s.biliNotifyDone,
@@ -807,6 +839,72 @@ private fun BiliGroup(
 
     Spacer(Modifier.height(6.dp))
     SettingCard {
+        StepperRow(
+            title = s.biliCommentQuota,
+            subtitle = s.biliCommentQuotaHint,
+            value = if (settings.biliCommentQuota <= 0) "∞" else "${settings.biliCommentQuota} 条",
+            onDecrease = {
+                update { it.copy(biliCommentQuota = (it.biliCommentQuota - 1).coerceIn(0, 20)) }
+            },
+            onIncrease = {
+                update { it.copy(biliCommentQuota = (it.biliCommentQuota + 1).coerceIn(0, 20)) }
+            },
+        )
+        SettingRow(
+            title = s.biliAtUid,
+            subtitle = settings.biliAtUid.ifBlank { s.biliAtUidHint },
+            trailing = "✎",
+            showDivider = true,
+            onClick = {
+                atDraft = settings.biliAtUid
+                editingAt = true
+            },
+        )
+        SettingRow(
+            // 配图选择放在这里而不是单独一页：只有三档，进去看一眼就知道选哪个
+            title = s.biliImage,
+            subtitle = when (settings.biliImage) {
+                "card" -> s.biliImageCard + settings.biliImageText.takeIf { it.isNotBlank() }
+                    ?.let { "「$it」" }.orEmpty()
+                "local" -> s.biliImageLocal
+                else -> s.biliImageNone
+            } + if (imageNote.isNotBlank()) " · $imageNote" else "",
+            trailing = "›",
+            showDivider = settings.biliImage == "card",
+            onClick = { editingImage = true },
+        )
+        if (settings.biliImage == "card") {
+            SettingRow(
+                title = s.biliImageText,
+                subtitle = settings.biliImageText.ifBlank { s.biliImageTextHint },
+                trailing = "✎",
+                onClick = {
+                    imageTextDraft = settings.biliImageText
+                    editingImageText = true
+                },
+            )
+        }
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        SwitchRow(
+            title = s.biliAutoRun,
+            subtitle = s.biliAutoRunHint,
+            checked = settings.biliAutoRun,
+            onCheckedChange = { v -> update { it.copy(biliAutoRun = v) } },
+        )
+        SettingRow(
+            title = s.biliAutoTime,
+            subtitle = s.biliAutoTimeHint,
+            trailing = BiliClock.hhmm(settings.biliAutoHour, settings.biliAutoMinute),
+            showDivider = true,
+            onClick = { editingTime = true },
+        )
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
         SettingRow(
             title = s.biliOpenDigest,
             subtitle = when {
@@ -856,9 +954,216 @@ private fun BiliGroup(
         )
     }
 
+    if (editingMode) {
+        val options = listOf(
+            Triple(BiliMode.SUMMARY.id, s.biliModeSummary, s.biliModeSummaryHint),
+            Triple(BiliMode.COMMENT.id, s.biliModeComment, s.biliModeCommentHint),
+            Triple(BiliMode.DM.id, s.biliModeDm, s.biliModeDmHint),
+        )
+        val current = BiliModes.of(settings).id
+        AlertDialog(
+            onDismissRequest = { editingMode = false },
+            title = { Text(text = s.biliMode, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    options.forEach { (id, label, hint) ->
+                        val picked = current == id
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    // 同时写一个新字段与旧字段：旧字段留着是为了让
+                                    // 「降级回 1.9」时行为不至于反过来（开着变没开）
+                                    update {
+                                        it.copy(
+                                            biliMode = id,
+                                            biliCommentEnabled = id == BiliMode.COMMENT.id,
+                                        )
+                                    }
+                                    editingMode = false
+                                }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = if (picked) "●" else "○",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (picked) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline,
+                                )
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            Text(
+                                text = hint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.padding(start = 18.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingMode = false }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    if (editingImage) {
+        val options = listOf(
+            Triple("none", s.biliImageNone, s.biliImageNoneHint),
+            Triple("card", s.biliImageCard, s.biliImageCardHint),
+            Triple("local", s.biliImageLocal, s.biliImageLocalHint),
+        )
+        AlertDialog(
+            onDismissRequest = { editingImage = false },
+            title = { Text(text = s.biliImage, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    options.forEach { (id, label, hint) ->
+                        val picked = settings.biliImage == id
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    update { it.copy(biliImage = id) }
+                                    editingImage = false
+                                    // 有些手表 ROM 没装 DocumentsUI，launch 会直接抛异常；
+                                    // 那种情况下退回「摸鱼卡」，而不是让设置页崩掉
+                                    if (id == "local") {
+                                        runCatching { picker.launch("image/*") }
+                                            .onFailure {
+                                                update { st -> st.copy(biliImage = "card") }
+                                                imageNote = s.biliImagePickFailed
+                                            }
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = if (picked) "●" else "○",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (picked) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline,
+                                )
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            Text(
+                                text = hint,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.padding(start = 18.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingImage = false }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    if (editingTime) {
+        var hour by remember { mutableStateOf(settings.biliAutoHour) }
+        var minute by remember { mutableStateOf(settings.biliAutoMinute) }
+        AlertDialog(
+            onDismissRequest = { editingTime = false },
+            title = { Text(text = s.biliAutoTime, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = BiliClock.hhmm(hour, minute),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        TextButton(onClick = { hour = (hour + 23) % 24 }) { Text("−") }
+                        Text(text = "${hour} 点", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { hour = (hour + 1) % 24 }) { Text("+") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf(0, 15, 30, 45).forEach { m ->
+                            val picked = minute == m
+                            TextButton(onClick = { minute = m }) {
+                                Text(
+                                    text = "%02d".format(m),
+                                    color = if (picked) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = s.biliAutoTimeTip,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    update { it.copy(biliAutoHour = hour, biliAutoMinute = minute) }
+                    editingTime = false
+                }) { Text(s.save) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingTime = false }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    if (editingImageText) {
+        SimpleEditDialog(
+            title = s.biliImageText,
+            value = imageTextDraft,
+            placeholder = "今天也在白吃白喝",
+            onChange = { imageTextDraft = it },
+            onConfirm = {
+                update { it.copy(biliImageText = imageTextDraft.trim()) }
+                editingImageText = false
+            },
+            onDismiss = { editingImageText = false },
+        )
+    }
+
+    if (editingAt) {
+        SimpleEditDialog(
+            title = s.biliAtUid,
+            value = atDraft,
+            placeholder = "例如 12345678",
+            onChange = { atDraft = it.filter { ch -> ch.isDigit() } },
+            onConfirm = {
+                update { it.copy(biliAtUid = atDraft.trim()) }
+                editingAt = false
+            },
+            onDismiss = { editingAt = false },
+        )
+    }
+
     if (editingTone) {
         val options = listOf(
             "fish" to s.biliToneFish,
+            "naughty" to s.biliToneNaughty,
             "serious" to s.biliToneSerious,
             "deadpan" to s.biliToneDeadpan,
             "custom" to s.biliToneCustom,

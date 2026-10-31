@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 定时刷 B站想准点就得要精确闹钟；拿不到会退化成普通闹钟，不会崩 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <!-- 手表特性声明为可选：同一份 APK 既能装在手表，也能装在手机上调试 -->
     <uses-feature
@@ -73,6 +76,18 @@
             android:enabled="true">
             <intent-filter>
                 <action android:name="com.dshwatch.action.ALARM_FIRE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 每日定时刷 B站：到点起一轮，并在开机后重排（AlarmManager 的闹钟不跨重启） -->
+        <receiver
+            android:name=".service.BiliDailyReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="com.dshwatch.action.BILI_DAILY" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

@@ -176,6 +176,33 @@ interface AppStrings {
     val biliToneCustomHint: String
     val biliNotifyDone: String
     val biliNotifyDoneHint: String
+    val biliMode: String
+    val biliModeSummary: String
+    val biliModeSummaryHint: String
+    val biliModeComment: String
+    val biliModeCommentHint: String
+    val biliModeDm: String
+    val biliModeDmHint: String
+    val biliAtUid: String
+    val biliAtUidHint: String
+    val biliImage: String
+    val biliImageNone: String
+    val biliImageNoneHint: String
+    val biliImageCard: String
+    val biliImageCardHint: String
+    val biliImageLocal: String
+    val biliImageLocalHint: String
+    val biliImageText: String
+    val biliImageTextHint: String
+    val biliImagePickFailed: String
+    val biliCommentQuota: String
+    val biliCommentQuotaHint: String
+    val biliAutoRun: String
+    val biliAutoRunHint: String
+    val biliAutoTime: String
+    val biliAutoTimeHint: String
+    val biliAutoTimeTip: String
+    val biliToneNaughty: String
 
     fun pluginTitle(id: String): String
     fun pluginDesc(id: String): String
@@ -579,6 +606,33 @@ object Zh : AppStrings {
     override val biliToneCustomHint = "用一段话描述「像谁在说话」，会原样交给模型"
     override val biliNotifyDone = "跑完通知我"
     override val biliNotifyDoneHint = "后台跑完弹一条通知，不用反复抬腕看"
+    override val biliMode = "刷完做什么"
+    override val biliModeSummary = "只总结"
+    override val biliModeSummaryHint = "只写日报，不对外发任何东西"
+    override val biliModeComment = "发评论"
+    override val biliModeCommentHint = "在视频下评论，也能接别人的话"
+    override val biliModeDm = "发私信"
+    override val biliModeDmHint = "给 UP 主发私信（不可撤回）"
+    override val biliAtUid = "@ 的人"
+    override val biliAtUidHint = "填 UID，评论会自动 @ 他（一般填你自己）"
+    override val biliImage = "评论配图"
+    override val biliImageNone = "不带图"
+    override val biliImageNoneHint = "纯文字评论"
+    override val biliImageCard = "摸鱼卡"
+    override val biliImageCardHint = "自动画一张黑底卡片，字可以自己写"
+    override val biliImageLocal = "相册图"
+    override val biliImageLocalHint = "从设备里挑一张，之后每次都带它"
+    override val biliImageText = "卡上写什么"
+    override val biliImageTextHint = "留空则按日期轮换默认文案"
+    override val biliImagePickFailed = "这张图读不出来，换一张试试"
+    override val biliCommentQuota = "每日发言上限"
+    override val biliCommentQuotaHint = "评论 + 私信合计；超出就停，防刷屏封号"
+    override val biliAutoRun = "每日自动刷一轮"
+    override val biliAutoRunHint = "到点自动跑，跑完按上面选的方式处理"
+    override val biliAutoTime = "自动时间"
+    override val biliAutoTimeHint = "默认凌晨 3:30，谷时几乎不影响人"
+    override val biliAutoTimeTip = "手表进入省电模式时可能晚几分钟，不会不跑"
+    override val biliToneNaughty = "调皮模式（抽象/罢工/倒反天罡）"
     override val pluginsHint = "插件改变模型看到或写出的内容。关掉就完全回到默认行为。"
 
     override fun pluginTitle(id: String): String = when (id) {
@@ -871,6 +925,7 @@ object Zh : AppStrings {
         "bili_thread" -> "看评论楼"
         "bili_report" -> "写日报"
         "bili_reply" -> "发评论"
+        "bili_dm" -> "发私信"
         else -> tool
     }
 }
@@ -1035,6 +1090,33 @@ object En : AppStrings {
     override val biliToneCustomHint = "Describe who it should sound like; passed to the model as-is"
     override val biliNotifyDone = "Notify when done"
     override val biliNotifyDoneHint = "Ping me when a background run finishes"
+    override val biliMode = "After a run"
+    override val biliModeSummary = "Digest only"
+    override val biliModeSummaryHint = "Write the digest, post nothing"
+    override val biliModeComment = "Comment"
+    override val biliModeCommentHint = "Comment on videos and reply to people"
+    override val biliModeDm = "Direct message"
+    override val biliModeDmHint = "DM the uploader (cannot be recalled)"
+    override val biliAtUid = "Mention UID"
+    override val biliAtUidHint = "Comments will @ this user (usually yourself)"
+    override val biliImage = "Comment image"
+    override val biliImageNone = "None"
+    override val biliImageNoneHint = "Text only"
+    override val biliImageCard = "Fish card"
+    override val biliImageCardHint = "Auto-drawn dark card with your own line"
+    override val biliImageLocal = "From gallery"
+    override val biliImageLocalHint = "Pick one image and reuse it every time"
+    override val biliImageText = "Card text"
+    override val biliImageTextHint = "Empty = rotates daily"
+    override val biliImagePickFailed = "Couldn't read that image, try another"
+    override val biliCommentQuota = "Daily post limit"
+    override val biliCommentQuotaHint = "Comments + DMs combined; stops before spam detection"
+    override val biliAutoRun = "Run daily"
+    override val biliAutoRunHint = "Fires on schedule and handles it as selected above"
+    override val biliAutoTime = "Run at"
+    override val biliAutoTimeHint = "Defaults to 03:30, off-peak"
+    override val biliAutoTimeTip = "May slip a few minutes in power-saving mode"
+    override val biliToneNaughty = "Naughty (absurd / on strike)"
     override val pluginsHint =
         "Plugins change what the model sees or writes. Turning one off restores the default behaviour."
 
@@ -1330,6 +1412,7 @@ object En : AppStrings {
         "bili_thread" -> "Comment thread"
         "bili_report" -> "Write digest"
         "bili_reply" -> "Post comment"
+        "bili_dm" -> "Send DM"
         else -> tool
     }
 }

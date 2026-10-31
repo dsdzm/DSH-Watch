@@ -11,8 +11,12 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * B站网页接口的最小封装。
@@ -145,6 +149,7 @@ class BiliApi(private val cookie: () -> String) {
             cid = data.long("cid"),
             title = data.str("title"),
             owner = owner?.str("name").orEmpty(),
+            ownerMid = owner?.long("mid") ?: 0L,
             desc = data.str("desc"),
             durationSec = data.int("duration"),
             view = stat?.long("view") ?: 0,
@@ -273,6 +278,8 @@ class BiliApi(private val cookie: () -> String) {
         message: String,
         root: Long = 0L,
         parent: Long = 0L,
+        at: BiliUser? = null,
+        pictures: List<UploadedImage> = emptyList(),
     ): String {
         ensureBuvid()
         val raw = cookie().trim()
@@ -285,14 +292,52 @@ class BiliApi(private val cookie: () -> String) {
         // 只填 parent 不填 root，B站会把回复挂到评论区顶层而不是对方那条下面 ——
         // 表现就是「明明回复了，对方收不到通知」。
         if (parent > 0 && root <= 0) throw BiliException("回复某条评论时 root 不能为 0")
-        val form = okhttp3.FormBody.Builder()
+
+        // @ 人和带图都必须同时给「正文里的 @昵称」和「`at_name_to_mid` 映射」：
+        // 只给映射正文里看不到，只给正文不会通知到对方。两个都给了才算真 @。
+        val text = if (at != null && at.name.isNotBlank() && !message.contains("@${at.name}")) {
+            "$message @${at.name}"
+        } else {
+            message
+        }
+
+        val builder = okhttp3.FormBody.Builder()
             .add("oid", detail.aid.toString())
             .add("type", "1")
-            .add("message", message)
+            .add("message", text)
             .add("csrf", csrf)
             .add("root", root.coerceAtLeast(0L).toString())
             .add("parent", parent.coerceAtLeast(0L).toString())
-            .build()
+
+        if (at != null && at.name.isNotBlank()) {
+            // 昵称里可能有引号，交给 JSON 编码器，别自己拼字符串
+            val map = kotlinx.serialization.json.buildJsonObject {
+                put(at.name, JsonPrimitive(at.mid))
+            }
+            builder.add("at_name_to_mid", map.toString())
+        }
+        if (pictures.isNotEmpty()) {
+            val arr = kotlinx.serialization.json.buildJsonArray {
+                pictures.forEach { pic ->
+                    add(
+                        kotlinx.serialization.json.buildJsonObject {
+                            put("img_src", JsonPrimitive(pic.url))
+                            put("img_width", JsonPrimitive(pic.width))
+                            put("img_height", JsonPrimitive(pic.height))
+                            put("img_size", JsonPrimitive(pic.size))
+                        }
+                    )
+                }
+            }
+            builder.add("pictures", arr.toString())
+        }
+        if (at != null || pictures.isNotEmpty()) {
+            // web 端带图/带 at 的评论都带这几个标记；缺了会被当成旧版客户端
+            builder.add("plat", "1")
+            builder.add("gaia_source", "main_web")
+            builder.add("has_vote_option", "true")
+        }
+        val form = builder.build()
         val request = req("$API/x/v2/reply/add")
             .header("Referer", "https://www.bilibili.com/video/$bvid")
             .header("Cookie", cookieHeader(raw))
@@ -310,6 +355,132 @@ class BiliApi(private val cookie: () -> String) {
             throw BiliException("B站拒绝了这条评论：${code} ${obj.str("message")}（${friendlyCode(code)}）")
         }
         return "已发布"
+    }
+
+    // ------------------------------------------------------------------
+    // 账号信息 / 图片 / 私信
+    // ------------------------------------------------------------------
+
+    /** 当前登录账号的 mid。取不到说明 Cookie 里没有 DedeUserID，也就发不了私信 */
+    fun selfMid(): Long = cookieValue(cookie().trim(), "DedeUserID")?.toLongOrNull() ?: 0L
+
+    /**
+     * 查一个人的昵称。
+     *
+     * 评论 @ 人需要「昵称 → mid」的映射，光有 UID 拼不出能点开的 @。
+     * 这个接口匿名可用（实测 mid=2 直接回 code 0），所以不要求登录。
+     */
+    suspend fun userCard(mid: Long): BiliUser? {
+        if (mid <= 0) return null
+        val obj = runCatching {
+            call("$API/x/web-interface/card", mapOf("mid" to mid.toString()), signed = false)
+        }.getOrNull() ?: return null
+        val card = obj["card"] as? JsonObject ?: return null
+        val name = card.str("name")
+        if (name.isBlank()) return null
+        return BiliUser(mid = mid, name = name, face = card.str("face"))
+    }
+
+    /**
+     * 上传一张图到 B站图床，返回评论 `pictures` 字段要用的结构。
+     *
+     * 走的是动态用的 `upload_bfs`：评论与动态共用同一个图床，参数 `biz=new_dyn`
+     * 就是「按动态图存」。实测未登录会回 `-101`，所以必须先有 Cookie。
+     */
+    suspend fun uploadImage(bytes: ByteArray, fileName: String = "dsh.jpg"): UploadedImage {
+        ensureBuvid()
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法上传图片")
+        val csrf = cookieValue(raw, "bili_jct")
+            ?: throw BiliException("Cookie 里缺少 bili_jct，无法上传图片")
+        if (bytes.isEmpty()) throw BiliException("图片是空的")
+
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("csrf", csrf)
+            .addFormDataPart("category", "daily")
+            .addFormDataPart("biz", "new_dyn")
+            .addFormDataPart("file_up", fileName, bytes.toRequestBody("image/jpeg".toMediaType()))
+            .build()
+
+        val request = req("$API/x/dynamic/feed/draw/upload_bfs")
+            .header("Referer", "https://www.bilibili.com/")
+            .post(body)
+            .build()
+
+        val text = withContext(Dispatchers.IO) {
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrElse { throw BiliException("上传图片失败：${it.message.orEmpty().take(120)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(text) as JsonObject }.getOrNull()
+            ?: throw BiliException("上传图片返回不是 JSON：${text.take(120)}")
+        val code = obj.int("code")
+        if (code != 0) {
+            throw BiliException("上传图片被拒：$code ${obj.str("message")}（${friendlyCode(code)}）")
+        }
+        val data = obj["data"] as? JsonObject ?: throw BiliException("上传图片没有返回 data")
+        val url = data.str("image_url").ifBlank { data.str("img_src") }
+        if (url.isBlank()) throw BiliException("上传图片没有返回地址")
+        return UploadedImage(
+            url = url,
+            width = data.int("image_width").takeIf { it > 0 } ?: 720,
+            height = data.int("image_height").takeIf { it > 0 } ?: 720,
+            size = data.int("img_size").takeIf { it > 0 } ?: bytes.size,
+        )
+    }
+
+    /**
+     * 发一条私信。
+     *
+     * 走的是 IM 的 `send_msg`（不是评论接口），因此**不可撤回、对方一定会看到**。
+     * 需要的 `msg[sender_uid]` 从 Cookie 的 DedeUserID 取 —— 少了就直接报错，
+     * 而不是猜一个 mid 发出去。
+     */
+    suspend fun dm(receiver: Long, text: String): String {
+        ensureBuvid()
+        if (receiver <= 0) throw BiliException("收件人 UID 不合法")
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法发私信")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct")
+        val self = selfMid()
+        if (self <= 0) throw BiliException("Cookie 里没有 DedeUserID，无法确定发送者；请重新扫码登录")
+
+        // dev_id 用已有的 buvid3：同一个设备反复换 dev_id 更容易被判定成脚本
+        val devId = buvid.ifBlank { UUID.randomUUID().toString().uppercase() }
+        val content = kotlinx.serialization.json.buildJsonObject {
+            put("content", JsonPrimitive(text))
+        }.toString()
+
+        val form = okhttp3.FormBody.Builder()
+            .add("msg[sender_uid]", self.toString())
+            .add("msg[receiver_id]", receiver.toString())
+            .add("msg[receiver_type]", "1")
+            .add("msg[msg_type]", "1")
+            .add("msg[msg_status]", "0")
+            .add("msg[content]", content)
+            .add("msg[dev_id]", devId)
+            .add("msg[timestamp]", (System.currentTimeMillis() / 1000).toString())
+            .add("msg[new_face_version]", "1")
+            .add("csrf", csrf)
+            .build()
+
+        val request = req(VC_SEND_MSG)
+            .header("Referer", "https://message.bilibili.com/")
+            .header("Origin", "https://message.bilibili.com")
+            .post(form)
+            .build()
+
+        val body = withContext(Dispatchers.IO) {
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrElse { throw BiliException("发送私信失败：${it.message.orEmpty().take(120)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
+            ?: throw BiliException("私信接口返回不是 JSON：${body.take(120)}")
+        val code = obj.int("code")
+        if (code != 0) {
+            throw BiliException("B站拒绝了这条私信：$code ${obj.str("message").ifBlank { obj.str("msg") }}")
+        }
+        return "已发送"
     }
 
     // ------------------------------------------------------------------
@@ -724,12 +895,21 @@ class BiliApi(private val cookie: () -> String) {
         62004 -> "稿件审核中"
         12061 -> "评论被折叠或需要验证"
         12015 -> "需要先完成手机号绑定才能评论"
+        12002 -> "评论区已关闭"
+        12003 -> "该视频禁止回复"
+        12016 -> "内容含敏感词，换一种说法"
+        12025 -> "评论字数超出限制"
+        12035 -> "被 UP 主拉黑，发不了评论"
+        12051 -> "重复评论，被判定刷屏"
         else -> "未知错误"
     }
 
     companion object {
         private const val API = "https://api.bilibili.com"
         private const val KEY_TTL_MS = 6 * 3600_000L
+
+        /** 私信走 IM 域名，不是 api.bilibili.com */
+        private const val VC_SEND_MSG = "https://api.vc.bilibili.com/web_im/v1/web_im/send_msg"
 
         private const val QR_GENERATE =
             "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
@@ -788,6 +968,8 @@ data class VideoDetail(
     val cid: Long,
     val title: String,
     val owner: String,
+    /** UP 主 mid。私信模式要发给它 */
+    val ownerMid: Long,
     val desc: String,
     val durationSec: Int,
     val view: Long,
@@ -814,6 +996,16 @@ data class Comment(
     val rootId: Long,
     val parentId: Long,
     val ctime: Long,
+)
+
+data class BiliUser(val mid: Long, val name: String, val face: String = "")
+
+/** 上传到 B站图床后的结果，字段名与评论接口的 `pictures` 一一对应 */
+data class UploadedImage(
+    val url: String,
+    val width: Int,
+    val height: Int,
+    val size: Int,
 )
 
 data class QrLogin(val key: String, val url: String)

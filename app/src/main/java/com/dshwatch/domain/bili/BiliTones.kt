@@ -22,6 +22,14 @@ enum class TonePreset(val id: String) {
     FISH("fish"),
     SERIOUS("serious"),
     DEADPAN("deadpan"),
+
+    /**
+     * 调皮模式：抽象、离谱、罢工、倒反天罡。
+     *
+     * 和 [DEADPAN] 的区别是「立场」：deadpan 只是语气平，NAUGHTY 是主动唱反调 ——
+     * 视频说 A 它偏说 B，一言不合宣布罢工。这是纯娱乐向的，所以底线写得更死。
+     */
+    NAUGHTY("naughty"),
     CUSTOM("custom");
 
     companion object {
@@ -84,12 +92,32 @@ object BiliTones {
         banned = listOf("家人们", "yyds", "一键三连", "干货满满", "懂的都懂"),
     )
 
+    private val NAUGHTY = BiliTone(
+        preset = TonePreset.NAUGHTY,
+        name = "调皮模式",
+        prompt = """
+            你是一条彻底躺平、开始倒反天罡的大肥鱼。说话抽象、离谱、爱唱反调：
+            视频说东你说西，讲得越正经你越想抬杠，动不动宣布罢工、要求加餐、
+            质疑「凭什么鱼要上班」。可以胡说八道，但**胡说仅限于态度与立场**，
+            不许编造事实、不许给人扣帽子。
+            句子短、跳脱，可以突然跑题、突然不想说了。
+            绝对不脏、不骂具体的人、不碰政治与地域、不引战、不刷梗墙。
+            通常 10–50 字。
+        """.trimIndent().replace("\n", ""),
+        // 调皮归调皮，骂人和脏字不进评论 —— 这类内容 B站 直接折叠，账号也跟着降权
+        banned = listOf(
+            "家人们", "yyds", "一键三连", "干货满满",
+            "傻逼", "妈的", "卧槽", "草泥马", "去死",
+        ),
+    )
+
     fun resolve(settings: AppSettings): BiliTone {
         val preset = TonePreset.of(settings.biliTone)
         return when (preset) {
             TonePreset.FISH -> FISH.copy(banned = AI_SMELL + FISH.banned)
             TonePreset.SERIOUS -> SERIOUS.copy(banned = AI_SMELL + SERIOUS.banned)
             TonePreset.DEADPAN -> DEADPAN.copy(banned = AI_SMELL + DEADPAN.banned)
+            TonePreset.NAUGHTY -> NAUGHTY.copy(banned = AI_SMELL + NAUGHTY.banned)
             TonePreset.CUSTOM -> {
                 val text = settings.biliToneCustom.trim()
                 if (text.isEmpty()) {

@@ -89,6 +89,7 @@ object ToolVisuals {
         "bili_thread" -> Icons.Filled.Forum
         "bili_report" -> Icons.Filled.Create
         "bili_reply" -> Icons.Filled.Send
+        "bili_dm" -> Icons.Filled.Email
 
         // 执行与云端
         "run_script" -> Icons.Filled.PlayArrow

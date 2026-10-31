@@ -10,9 +10,14 @@ import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.bili.BiliApi
 import com.dshwatch.domain.bili.BiliException
+import com.dshwatch.domain.bili.BiliImages
+import com.dshwatch.domain.bili.BiliMode
+import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTone
 import com.dshwatch.domain.bili.BiliTones
+import com.dshwatch.domain.bili.BiliUser
 import com.dshwatch.domain.bili.ReplyNotice
+import com.dshwatch.domain.bili.UploadedImage
 import com.dshwatch.domain.bili.VideoDetail
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.util.Fmt
@@ -56,6 +61,7 @@ object BiliTools {
         ThreadTool,
         ReportTool,
         ReplyTool,
+        DmTool,
     )
 
     /** 日报放在工作空间根的 `bili/` 下：跨会话共享，换会话不会丢配额与判重记录 */
@@ -93,6 +99,84 @@ object BiliTools {
         ctx.workspace.append("$DIR/replied.md", "$key\n")
     }
 
+    // ------------------------------------------------------------------
+    // 对外发言的三件套：配额、@ 目标、配图
+    // ------------------------------------------------------------------
+
+    /** 每天发过的话记在这里，一行一条：`HH:mm kind target` */
+    private fun sentPath(): String = "$DIR/sent/${today()}.md"
+
+    private suspend fun countSentToday(ctx: ToolContext): Int =
+        ctx.workspace.read(sentPath(), maxChars = 200_000).orEmpty()
+            .lineSequence()
+            .count { it.isNotBlank() }
+
+    private suspend fun markSent(ctx: ToolContext, kind: String, target: String) {
+        val line = SimpleDateFormat("HH:mm", Locale.US).format(Date()) + " $kind $target\n"
+        ctx.workspace.append(sentPath(), line)
+    }
+
+    /**
+     * 今天还能不能对外说话。
+     *
+     * `biliCommentQuota` 是评论与私信的**合计**上限：两者都是「以用户身份对外发言」，
+     * 分开计数等于把上限翻倍。0 表示不限，但那种情况下用户得自己盯着。
+     */
+    private suspend fun remainingQuota(ctx: ToolContext, quota: Int): Int {
+        if (quota <= 0) return Int.MAX_VALUE
+        return (quota - countSentToday(ctx)).coerceAtLeast(0)
+    }
+
+    /**
+     * 解析要 @ 的人。
+     *
+     * 拿不到昵称就返回 null 并把原因说清楚 —— 只发 `@123456` 这种纯数字，
+     * 在 B站 里既不会变色也不会通知，等于白写。
+     */
+    private suspend fun atTarget(ctx: ToolContext): Pair<BiliUser?, String> {
+        val uid = ctx.settings().biliAtUid.trim().toLongOrNull() ?: return null to ""
+        if (uid <= 0) return null to ""
+        val user = runCatching { api(ctx).userCard(uid) }.getOrNull()
+            ?: return null to "（想 @ UID $uid，但查不到这个人的昵称，这条先不 @）"
+        return user to ""
+    }
+
+    /**
+     * 按设置准备配图。
+     *
+     * 返回空列表 = 不带图。上传失败**不阻断**评论：一张配图不值得让整条评论发不出去，
+     * 但要把失败原因带回给模型，让它别再反复重试。
+     */
+    private suspend fun preparePictures(
+        ctx: ToolContext,
+        message: String,
+    ): Pair<List<UploadedImage>, String> {
+        val s = ctx.settings()
+        val kind = s.biliImage
+        if (kind == "none" || kind.isBlank()) return emptyList<UploadedImage>() to ""
+
+        val bytes = when (kind) {
+            "card" -> {
+                val text = s.biliImageText.trim()
+                    .ifBlank { BiliImages.pickFallback(today().hashCode()) }
+                val foot = if (s.biliUserName.isNotBlank()) s.biliUserName else "bilibili.com"
+                BiliImages.card(text, foot)
+            }
+            "local" -> {
+                val c = ctx.appContext ?: return emptyList<UploadedImage>() to "（没有 Android 上下文，跳过配图）"
+                BiliImages.loadLocal(c)
+                    ?: return emptyList<UploadedImage>() to
+                        "（设置里选了相册图，但还没选过。去设置 → 刷B站 → 评论配图 选一张）"
+            }
+            else -> return emptyList<UploadedImage>() to ""
+        }
+        return runCatching { listOf(api(ctx).uploadImage(bytes)) }
+            .fold(
+                onSuccess = { it to "" },
+                onFailure = { emptyList<UploadedImage>() to "（配图上传失败：${errText(it)}；评论照发）" },
+            )
+    }
+
     private fun durationText(sec: Int): String =
         if (sec <= 0) "?" else "%d:%02d".format(sec / 60, sec % 60)
 
@@ -126,8 +210,8 @@ object BiliTools {
     object StatusTool : AgentTool {
         override val name = "bili_status"
         override val description =
-            "刷B站 / 回评论前的第一步：返回今日配额、关注关键词、登录状态、评论风格，" +
-                "以及两条标准流程（看视频、回评论）。"
+            "刷B站 / 回评论前的第一步：返回今日配额、关注关键词、登录状态、当前模式" +
+                "（发评论 / 发私信 / 只总结）、@ 目标、配图设置、评论风格，以及本轮标准流程。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
         override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
@@ -137,6 +221,9 @@ object BiliTools {
             val used = countToday(ctx)
             val cookie = ctx.biliCookie().isNotBlank()
             val tone = BiliTones.resolve(s)
+            val mode = BiliModes.of(s)
+            val sent = countSentToday(ctx)
+            val quotaText = if (s.biliCommentQuota <= 0) "不限" else "${s.biliCommentQuota} 条"
             return ToolResult.ok(
                 buildString {
                     append("今日已记：").append(used)
@@ -146,14 +233,32 @@ object BiliTools {
                         .append('\n')
                     append("登录态：").append(
                         when {
-                            !cookie -> "匿名（能搜索/读字幕，不能发评论、看不到回复）"
+                            !cookie -> "匿名（能搜索/读字幕，不能发评论、私信、看不到回复）"
                             s.biliUserName.isNotBlank() -> "已登录（${s.biliUserName}）"
                             else -> "已配置 Cookie"
                         }
                     ).append('\n')
-                    append("发评论：").append(
-                        if (!s.biliCommentEnabled) "关闭（bili_reply 只会干跑）"
-                        else "已开启（仍需用户逐次确认）"
+
+                    append("模式【").append(
+                        when (mode) {
+                            BiliMode.SUMMARY -> "只总结 —— 只写日报，不对外发任何东西"
+                            BiliMode.COMMENT -> "发评论 —— 可以在视频下发评论 / 回复别人"
+                            BiliMode.DM -> "发私信 —— 给 UP 主或指定 UID 发一条私信"
+                        }
+                    ).append("】\n")
+                    if (mode != BiliMode.SUMMARY) {
+                        append("今日已对外发：").append(sent).append(" / ").append(quotaText).append('\n')
+                    }
+                    if (s.biliAtUid.isNotBlank()) {
+                        append("评论要 @ 的 UID：").append(s.biliAtUid.trim()).append('\n')
+                    }
+                    append("评论配图：").append(
+                        when (s.biliImage) {
+                            "card" -> "摸鱼卡（程序生成，卡上文字「" +
+                                s.biliImageText.ifBlank { "按日期轮换" } + "」）"
+                            "local" -> "用户自选的相册图"
+                            else -> "不带"
+                        }
                     ).append('\n')
                     append("评论风格【").append(tone.name).append("】：").append(tone.prompt).append('\n')
                     append("日报：").append(digestPath()).append('\n')
@@ -165,11 +270,26 @@ object BiliTools {
                     append("4. bili_report 把挑中的写进日报（自动扣配额、自动判重）\n")
                     append("5. 配额用完就停，把今天挑出来的列给用户\n")
 
-                    append("\n流程 B · 回评论：\n")
-                    append("1. bili_inbox 看谁回复了我（未登录时不可用）\n")
-                    append("2. 想弄清上下文就 bili_thread；不想就直接回\n")
-                    append("3. bili_reply 带上 root + parent 精准回复那个人（不带就是发顶层评论）\n")
-                    append("4. 只有用户明确要求「真发」才把 dry_run 设为 false，否则一律先给预览\n")
+                    when (mode) {
+                        BiliMode.COMMENT -> {
+                            append("\n流程 B · 发评论 / 接话：\n")
+                            append("1. bili_inbox 看谁回复了我（未登录时不可用）\n")
+                            append("2. 想弄清上下文就 bili_thread；不想就直接回\n")
+                            append("3. bili_reply 直接发（**不需要用户确认**）：带 root + parent 是楼中楼回复，\n")
+                            append("   不带就是顶层评论；配图与 @ 由设置自动处理，你不用手动传\n")
+                            append("4. 每日发言有上限，超了 bili_reply 会拒绝 —— 那时就停下，别再试\n")
+                        }
+                        BiliMode.DM -> {
+                            append("\n流程 B · 发私信：\n")
+                            append("1. 私信**不可撤回、对方一定看得到**，只在真有话说时用\n")
+                            append("2. bili_dm：给 bvid 的 UP 主发（不填 to_uid），或指定 to_uid\n")
+                            append("3. 内容仍然遵守上面的评论风格，但比评论更克制：不催更、不索要、不刷存在感\n")
+                        }
+                        BiliMode.SUMMARY -> {
+                            append("\n模式是「只总结」：**不要**调用 bili_reply / bili_dm，\n")
+                            append("把想说的话写进日报即可。用户要发评论得先去设置里换模式。\n")
+                        }
+                    }
 
                     append("\n字幕取不到时用 bili_comments 看评论区，仍取不到就跳过这条并说明原因。")
                 }
@@ -597,8 +717,9 @@ object BiliTools {
     object ReplyTool : AgentTool {
         override val name = "bili_reply"
         override val description =
-            "发评论，或回复某条评论。默认 dry_run=true 只生成预览不真发；" +
-                "真发需要用户在设置里打开「允许发评论」，而且每次都会弹确认。" +
+            "发评论，或回复某条评论。**直接发送，不需要用户确认** —— 但只有设置里模式为" +
+                "「发评论」时才能用，否则会被拒绝。" +
+                "配图（摸鱼卡 / 相册图）与 @ 用户由设置自动附加，你不用管。" +
                 "要回复某个人：传 root（这栋楼的根评论 rpid）+ parent（对方那条的 rpid），" +
                 "两个 id 由 bili_inbox / bili_comments 给出。" +
                 "语气必须遵守 bili_status 返回的「评论风格」。"
@@ -609,7 +730,7 @@ object BiliTools {
                 "message" to Schema.str("评论内容，5–200 字，要具体到视频或对方的话，不要写套话"),
                 "root" to Schema.str("可选。楼中楼回复时这栋楼的根评论 rpid；发顶层评论不填"),
                 "parent" to Schema.str("可选。楼中楼回复时对方那条评论的 rpid；发顶层评论不填"),
-                "dry_run" to Schema.bool("true=只预览不发（默认），false=真发"),
+                "dry_run" to Schema.bool("可选。true 只生成预览不发；默认 false 直接发"),
             ),
             required = listOf("bvid", "message"),
         )
@@ -621,7 +742,19 @@ object BiliTools {
             val s = ctx.settings()
             val tone = BiliTones.resolve(s)
 
-            var root = args.strOf("root")?.toLongOrNull() ?: 0L
+            if (!BiliModes.allowsComment(s)) {
+                return ToolResult.fail(
+                    "当前模式不是「发评论」（现在是「" + BiliModes.of(s).let {
+                        when (it) {
+                            BiliMode.SUMMARY -> "只总结"
+                            BiliMode.DM -> "发私信"
+                            BiliMode.COMMENT -> "发评论"
+                        }
+                    } + "」）。要发评论请让用户去 设置 → 刷B站 → 刷完做什么 里切换。"
+                )
+            }
+
+            val root = args.strOf("root")?.toLongOrNull() ?: 0L
             val parent = args.strOf("parent")?.toLongOrNull() ?: 0L
             // 只给了 parent 也当成楼中楼：root 退回 parent 会挂错楼，
             // 所以这里宁可直接判定为「顶层 + 回给这条」的非法组合并明确说清楚。
@@ -636,23 +769,47 @@ object BiliTools {
                 return ToolResult.fail("这个位置之前已经回过了（判重命中），不重复打扰。")
             }
 
+            // 只有顶层评论才自动 @：楼中楼回复本身就会通知到对方，
+            // 再 @ 一遍等于在一条评论里喊两次人。
+            val needAt = parent <= 0
+            val (at, atNote) = if (needAt) atTarget(ctx) else null to ""
+            val (pics, picNote) = preparePictures(ctx, message)
+
             val target = if (parent > 0) "回复 rpid $parent（楼 $root）" else "顶层评论"
-            val dry = args.boolOf("dry_run", true) || !s.biliCommentEnabled
+            val dry = args.boolOf("dry_run", false)
             if (dry) {
-                val why = if (!s.biliCommentEnabled) "（设置里「允许发评论」没开，强制干跑）" else ""
                 return ToolResult.ok(
-                    "干跑预览 $why\n→ $bvid $target · 风格「${tone.name}」\n「$message」\n" +
-                        "（共 ${message.length} 字。确认要发就把 dry_run 设为 false；" +
-                        "真发前会再弹一次确认。）"
+                    "预览（未发送）\n→ $bvid $target · 风格「${tone.name}」\n「$message」\n" +
+                        (at?.let { "@${it.name} " } ?: "") +
+                        (if (pics.isNotEmpty()) "\n配图：${pics.size} 张" else "")
                 )
             }
             if (ctx.biliCookie().isBlank()) {
                 return ToolResult.fail("还没登录 B站（需要 SESSDATA 与 bili_jct），发不了评论。用扫码登录。")
             }
-            return runCatching { api(ctx).reply(bvid, message, root, parent) }.fold(
+
+            val left = remainingQuota(ctx, s.biliCommentQuota)
+            if (left <= 0) {
+                return ToolResult.fail(
+                    "今天的发言上限（${s.biliCommentQuota} 条）已经用完了，不能再发 —— " +
+                        "这是为了防止账号被 B站 判定成刷屏。明天再来，或让用户调高上限。"
+                )
+            }
+
+            return runCatching { api(ctx).reply(bvid, message, root, parent, at, pics) }.fold(
                 onSuccess = {
                     markReplied(ctx, key)
-                    ToolResult.ok("已发布到 $bvid（$target）：「$message」")
+                    markSent(ctx, "reply", key)
+                    ToolResult.ok(
+                        buildString {
+                            append("已发布到 ").append(bvid).append("（").append(target).append("）：「").append(message).append("」")
+                            if (at != null) append("\n已 @ ").append(at.name)
+                            if (pics.isNotEmpty()) append("\n带图 ").append(pics.size).append(" 张")
+                            append("\n今日还剩 ").append(left - 1).append(" 条发言额度。")
+                            if (atNote.isNotBlank()) append('\n').append(atNote)
+                            if (picNote.isNotBlank()) append('\n').append(picNote)
+                        }
+                    )
                 },
                 onFailure = { ToolResult.fail(errText(it)) },
             )
@@ -664,6 +821,86 @@ object BiliTools {
             append(' ').append((args.strOf("message") ?: "").take(16))
         }
     }
+
+    // ------------------------------------------------------------------
+    // 10. 发私信
+    // ------------------------------------------------------------------
+
+    /**
+     * 给 UP 主 / 指定 UID 发私信。
+     *
+     * 私信比评论更「重」：它直接进对方的消息中心，且**不能撤回**。
+     * 所以额外做了两件事：同一天同一个人只发一条；风格闸门照旧。
+     */
+    object DmTool : AgentTool {
+        override val name = "bili_dm"
+        override val description =
+            "给某个 UP 主或指定 UID 发一条私信（不可撤回）。只有设置里模式为「发私信」时可用。" +
+                "不填 to_uid 就发给 bvid 的 UP 主。同一天同一个人只会发一条。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "message" to Schema.str("私信内容，10–150 字，要像人说的话"),
+                "bvid" to Schema.str("可选。给这个视频的 UP 主发"),
+                "to_uid" to Schema.str("可选。直接指定收件人 UID，优先级高于 bvid"),
+            ),
+            required = listOf("message"),
+        )
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            val message = args.strOf("message")?.trim() ?: return ToolResult.fail("缺少 message 参数")
+            val s = ctx.settings()
+            val tone = BiliTones.resolve(s)
+
+            if (!BiliModes.allowsDm(s)) {
+                return ToolResult.fail(
+                    "当前模式不是「发私信」。要发私信请让用户去 设置 → 刷B站 → 刷完做什么 里切换。"
+                )
+            }
+            StyleGate.check(message, tone)?.let { return ToolResult.fail("这条私信被风格闸门拦了：$it") }
+            if (ctx.biliCookie().isBlank()) {
+                return ToolResult.fail("还没登录 B站，发不了私信。用扫码登录。")
+            }
+
+            var receiver = args.strOf("to_uid")?.toLongOrNull() ?: 0L
+            var who = "UID $receiver"
+            if (receiver <= 0) {
+                val bvid = args.strOf("bvid")
+                    ?: return ToolResult.fail("要么给 bvid（发给它的 UP 主），要么给 to_uid。")
+                val detail = runCatching { api(ctx).video(bvid) }
+                    .getOrElse { return ToolResult.fail(errText(it)) }
+                receiver = detail.ownerMid
+                who = detail.owner.ifBlank { bvid }
+                if (receiver <= 0) return ToolResult.fail("这个视频查不到 UP 主的 mid，无法发私信。")
+            }
+
+            // 同一天给同一个人只发一条：连续私信是 B站 判定骚扰的最直接依据
+            val todaySent = ctx.workspace.read(sentPath(), maxChars = 200_000).orEmpty()
+            if (todaySent.lineSequence().any { it.contains(" dm $receiver") }) {
+                return ToolResult.ok("今天已经给 $who 发过私信了，不再连发（避免被当成骚扰）。")
+            }
+
+            val left = remainingQuota(ctx, s.biliCommentQuota)
+            if (left <= 0) {
+                return ToolResult.fail("今天的发言上限（${s.biliCommentQuota} 条）已经用完了，不能再发。")
+            }
+
+            return runCatching { api(ctx).dm(receiver, message) }.fold(
+                onSuccess = {
+                    markSent(ctx, "dm", receiver.toString())
+                    ToolResult.ok("已给 $who 发出私信：「$message」\n今日还剩 ${left - 1} 条发言额度。")
+                },
+                onFailure = { ToolResult.fail(errText(it)) },
+            )
+        }
+
+        override fun summarize(args: JsonObject) =
+            "私信 " + (args.strOf("to_uid") ?: args.strOf("bvid") ?: "—") +
+                " " + (args.strOf("message") ?: "").take(14)
+    }
+
+    // ------------------------------------------------------------------
 
     // ------------------------------------------------------------------
 

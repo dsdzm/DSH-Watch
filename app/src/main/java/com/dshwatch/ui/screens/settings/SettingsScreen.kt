@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.bili.BiliMode
+import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.DeviceProfile
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
@@ -135,8 +137,19 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
 
     SettingsGroups.BILI -> when {
         !settings.biliEnabled -> "已关闭"
-        settings.biliDailyQuota <= 0 -> "已开启 · 不限量"
-        else -> "已开启 · 每天 ${settings.biliDailyQuota} 条"
+        else -> buildString {
+            // 摘要先说「会不会对外说话」，再说配额 —— 用户最关心的是这个
+            append(
+                when (BiliModes.of(settings)) {
+                    BiliMode.SUMMARY -> "只总结"
+                    BiliMode.COMMENT -> "发评论"
+                    BiliMode.DM -> "发私信"
+                }
+            )
+            append(" · ")
+            append(if (settings.biliDailyQuota <= 0) "不限量" else "每天 ${settings.biliDailyQuota} 条")
+            if (settings.biliAutoRun) append(" · 自动")
+        }
     }
 
     SettingsGroups.CHAT -> buildList {

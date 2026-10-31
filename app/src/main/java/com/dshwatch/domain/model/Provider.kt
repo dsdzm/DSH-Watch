@@ -224,12 +224,51 @@ data class AppSettings(
     val biliDailyQuota: Int = 5,
 
     /**
-     * 是否允许**真发**评论，默认关闭。
+     * 旧版「允许发评论」开关。
      *
-     * 发出去就收不回来，且 B站对高频互动有风控。关着的时候
-     * `bili_reply` 恒干跑：只生成预览，连请求都不发。
+     * 1.10 起改由 [biliMode] 三选一表达（评论 / 私信 / 只总结），这个字段
+     * **只为迁移保留**：老用户的设置里它可能是 true，读出来时据此推断模式，
+     * 避免升级后「本来能发，突然变成只总结」。
      */
     val biliCommentEnabled: Boolean = false,
+
+    /**
+     * 刷完之后的动作：`comment` 发评论 / `dm` 发私信 / `summary` 只写日报。
+     *
+     * 空串表示老版本没这个字段，由 [biliCommentEnabled] 推导 ——
+     * 用空串而不是直接默认 `summary`，是为了区分「用户主动选了只总结」
+     * 和「还没选过」这两种情况。
+     */
+    val biliMode: String = "",
+
+    /**
+     * 评论里要 @ 的 UID（一般是用户自己）。
+     *
+     * 只填 UID 不够：B站的 at 需要「昵称 → mid」的映射才能真的通知到人，
+     * 昵称在发送前用 `x/web-interface/card` 现查。
+     */
+    val biliAtUid: String = "",
+
+    /** 评论配图：`none` 不带 / `card` 程序生成的摸鱼卡 / `local` 用户从相册选的那张 */
+    val biliImage: String = "none",
+
+    /** 摸鱼卡上那行字。留空则按日期轮换默认文案 */
+    val biliImageText: String = "",
+
+    /**
+     * 每天最多对外发几条（评论 + 私信合计）。
+     *
+     * 没有这个上限，「不需要确认」就等于把账号交给模型刷 —— B站 对高频互动
+     * 有风控，刷太快是直接封号而不是折叠。0 = 不限（不建议）。
+     */
+    val biliCommentQuota: Int = 3,
+
+    /** 每天定时自动刷一轮 */
+    val biliAutoRun: Boolean = false,
+
+    /** 定时时间（本地时区，24 小时制）。默认 03:30 —— 谷时，几乎不影响任何人 */
+    val biliAutoHour: Int = 3,
+    val biliAutoMinute: Int = 30,
 
     /**
      * 评论风格预设 id：`fish`（默认，吃白饭的摸鱼大肥鱼）/ `serious` / `deadpan` / `custom`。
