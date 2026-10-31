@@ -18,6 +18,21 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.9",
+            date = "2026-10-31",
+            highlights = listOf(
+                "扫码登录：设置 → 刷B站 → 扫码登录，用手机 B站 App 扫表盘上的二维码就行，" +
+                    "不用再开电脑翻开发者工具找 Cookie",
+                "评论风格可换：默认「吃白饭的摸鱼大肥鱼」，也可以选认真点评、抽象玩梗，" +
+                    "或者自己写一段「像谁在说话」",
+                "能接话了：新增 bili_inbox 看谁回复了你，bili_thread 看整栋评论楼，" +
+                    "再用 bili_reply 带上 root/parent 精准回给那个人（仍然默认只预览）",
+                "后台跑得住：生成期间通知栏会写「正在读字幕」这类当前动作，跑完弹一条通知；" +
+                    "唤醒锁会随任务自动续期，熄屏十几分钟也不会断",
+                "对话空态多了一个「看看谁回了我」胶囊，登录后才出现",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.8",
             date = "2026-10-31",
             highlights = listOf(

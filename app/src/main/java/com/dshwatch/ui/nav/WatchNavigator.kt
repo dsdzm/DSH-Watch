@@ -22,6 +22,9 @@ sealed interface Screen {
     data class Input(val initial: String = "") : Screen
     data object ExecSettings : Screen
 
+    /** B站扫码登录 */
+    data object BiliLogin : Screen
+
     /** 设置页的二级分组（id 见 SettingsGroups） */
     data class SettingsGroup(val id: String) : Screen
 }
@@ -84,6 +87,7 @@ class WatchNavigator internal constructor(
             Screen.Workspace -> "ws"
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
             Screen.ExecSettings -> "exec"
+            Screen.BiliLogin -> "bililogin"
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
             is Screen.SettingsGroup -> "sgroup${SEP}${screen.id}"
@@ -102,6 +106,7 @@ class WatchNavigator internal constructor(
                 "diag" -> Screen.Diagnostics
                 "ws" -> Screen.Workspace
                 "exec" -> Screen.ExecSettings
+                "bililogin" -> Screen.BiliLogin
                 "wsp" -> Screen.WorkspacePreview(parts.getOrNull(1).orEmpty())
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())

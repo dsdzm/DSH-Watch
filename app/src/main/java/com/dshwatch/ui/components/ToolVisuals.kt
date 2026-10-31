@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.ThumbUp
@@ -83,6 +85,8 @@ object ToolVisuals {
         "bili_video" -> Icons.Filled.PlayArrow
         "bili_subtitle" -> Icons.Filled.List
         "bili_comments" -> Icons.Filled.ThumbUp
+        "bili_inbox" -> Icons.Filled.Email
+        "bili_thread" -> Icons.Filled.Forum
         "bili_report" -> Icons.Filled.Create
         "bili_reply" -> Icons.Filled.Send
 

@@ -159,6 +159,23 @@ interface AppStrings {
     val biliCookieUnset: String
     val biliOpenDigest: String
     val biliHint: String
+    val biliLogin: String
+    val biliLoginHint: String
+    val biliLoginWaiting: String
+    val biliLoginScanned: String
+    val biliLoginDone: String
+    val biliLoginExpired: String
+    val biliLoginRetry: String
+    val biliLoginPrivacy: String
+    val biliTone: String
+    val biliToneHint: String
+    val biliToneFish: String
+    val biliToneSerious: String
+    val biliToneDeadpan: String
+    val biliToneCustom: String
+    val biliToneCustomHint: String
+    val biliNotifyDone: String
+    val biliNotifyDoneHint: String
 
     fun pluginTitle(id: String): String
     fun pluginDesc(id: String): String
@@ -545,6 +562,23 @@ object Zh : AppStrings {
     override val biliHint =
         "刷B站 = 搜索 → 读字幕正文 → 判断值不值得看 → 写进日报。日报存在工作空间 bili/ 下，" +
             "每条的「### BV号」就是配额计数单位，同一天不会重复记同一条。"
+    override val biliLogin = "扫码登录"
+    override val biliLoginHint = "用手机 B站 App 扫表盘上的二维码；也可以继续用 Cookie 手填"
+    override val biliLoginWaiting = "等待扫码…"
+    override val biliLoginScanned = "已扫码，在手机上点确认"
+    override val biliLoginDone = "登录成功"
+    override val biliLoginExpired = "二维码过期了"
+    override val biliLoginRetry = "重新生成"
+    override val biliLoginPrivacy = "只保存登录凭证，加密存在本机，不上传"
+    override val biliTone = "评论风格"
+    override val biliToneHint = "决定它替你说话的语气"
+    override val biliToneFish = "吃白饭的摸鱼大肥鱼"
+    override val biliToneSerious = "认真点评"
+    override val biliToneDeadpan = "抽象玩梗"
+    override val biliToneCustom = "自定义"
+    override val biliToneCustomHint = "用一段话描述「像谁在说话」，会原样交给模型"
+    override val biliNotifyDone = "跑完通知我"
+    override val biliNotifyDoneHint = "后台跑完弹一条通知，不用反复抬腕看"
     override val pluginsHint = "插件改变模型看到或写出的内容。关掉就完全回到默认行为。"
 
     override fun pluginTitle(id: String): String = when (id) {
@@ -833,6 +867,8 @@ object Zh : AppStrings {
         "bili_video" -> "视频详情"
         "bili_subtitle" -> "读字幕"
         "bili_comments" -> "看评论"
+        "bili_inbox" -> "看回复"
+        "bili_thread" -> "看评论楼"
         "bili_report" -> "写日报"
         "bili_reply" -> "发评论"
         else -> tool
@@ -982,6 +1018,23 @@ object En : AppStrings {
     override val biliHint =
         "The loop is: search → read the actual subtitles → judge → write the digest. " +
             "Digests live under bili/ in the workspace; each '### BV id' line counts toward the quota."
+    override val biliLogin = "Scan to sign in"
+    override val biliLoginHint = "Scan the code on the watch with the Bilibili app, or paste cookies instead"
+    override val biliLoginWaiting = "Waiting for scan…"
+    override val biliLoginScanned = "Scanned — confirm on your phone"
+    override val biliLoginDone = "Signed in"
+    override val biliLoginExpired = "QR code expired"
+    override val biliLoginRetry = "New code"
+    override val biliLoginPrivacy = "Only the login ticket is stored, encrypted on this device"
+    override val biliTone = "Comment tone"
+    override val biliToneHint = "How it sounds when it speaks for you"
+    override val biliToneFish = "Lazy freeloader fish"
+    override val biliToneSerious = "Serious review"
+    override val biliToneDeadpan = "Deadpan memes"
+    override val biliToneCustom = "Custom"
+    override val biliToneCustomHint = "Describe who it should sound like; passed to the model as-is"
+    override val biliNotifyDone = "Notify when done"
+    override val biliNotifyDoneHint = "Ping me when a background run finishes"
     override val pluginsHint =
         "Plugins change what the model sees or writes. Turning one off restores the default behaviour."
 
@@ -1273,6 +1326,8 @@ object En : AppStrings {
         "bili_video" -> "Video info"
         "bili_subtitle" -> "Read subtitles"
         "bili_comments" -> "Top comments"
+        "bili_inbox" -> "Reply feed"
+        "bili_thread" -> "Comment thread"
         "bili_report" -> "Write digest"
         "bili_reply" -> "Post comment"
         else -> tool

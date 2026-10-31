@@ -161,6 +161,14 @@ class ChatEngine(
     /** 生成开始/结束的回调，供前台服务启停 */
     var onStreamingChanged: ((Boolean) -> Unit)? = null
 
+    /**
+     * 每次真正开始跑一个工具时回调一次（参数是给用户看的一句话）。
+     *
+     * 用途只有一个：让前台服务的通知写上「正在读字幕」而不是一直「正在生成」。
+     * 手表上用户不会盯着屏幕等，通知栏是他唯一能确认「还在动」的地方。
+     */
+    var onToolStarted: ((String) -> Unit)? = null
+
     // ---------------- 会话 ----------------
 
     suspend fun open(conversationId: String) {
@@ -959,6 +967,7 @@ class ChatEngine(
             }
 
             updateToolCall(messageId, call.copy(status = ToolStatus.RUNNING, summary = summary))
+            runCatching { onToolStarted?.invoke(summary.ifBlank { tool.name }) }
             val startedAt = System.currentTimeMillis()
             val result = runCatching { tool.execute(args, toolCtx) }
                 .getOrElse { t ->

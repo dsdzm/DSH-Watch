@@ -231,6 +231,22 @@ data class AppSettings(
      */
     val biliCommentEnabled: Boolean = false,
 
+    /**
+     * 评论风格预设 id：`fish`（默认，吃白饭的摸鱼大肥鱼）/ `serious` / `deadpan` / `custom`。
+     *
+     * 存字符串而不是枚举：设置是整包 JSON 落盘的，枚举改名会让老用户读不回来。
+     */
+    val biliTone: String = "fish",
+
+    /** `custom` 风格的实际描述。其它预设下忽略 */
+    val biliToneCustom: String = "",
+
+    /** 扫码登录成功后的昵称，只用于在设置页显示「已登录：xxx」（凭证本身在加密存储里） */
+    val biliUserName: String = "",
+
+    /** 后台跑完是否发一条通知。手表上最怕「跑完了但没人知道」 */
+    val biliNotifyDone: Boolean = true,
+
     // ---------------- MCP ----------------
     /**
      * 远程 MCP server 列表。

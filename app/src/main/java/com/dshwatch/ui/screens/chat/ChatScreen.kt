@@ -322,6 +322,9 @@ fun ChatScreen(
                 // 手表上打字是最贵的一步操作。刷 B站 是个固定流程，
                 // 给它一个一句话就能触发的入口，比让用户敲「帮我刷一遍B站」现实得多。
                 if (settings.biliEnabled) {
+                    val loggedIn = remember(settings.biliUserName) {
+                        container.keyStore.getBiliCookie().orEmpty().isNotBlank()
+                    }
                     Spacer(Modifier.height(10.dp))
                     Chip(
                         text = "刷一轮 B站",
@@ -332,6 +335,20 @@ fun ChatScreen(
                             )
                         },
                     )
+                    // 「有人回我吗」是刷B站的另一半：只发不看等于自言自语。
+                    // 没登录时这个入口没有意义（看不到任何通知），所以直接不显示。
+                    if (loggedIn) {
+                        Spacer(Modifier.height(8.dp))
+                        Chip(
+                            text = "看看谁回了我",
+                            onClick = {
+                                engine.send(
+                                    "看看谁回复了我的评论：挑值得接话的，用我平时的语气回一条，" +
+                                        "先给我看预览"
+                                )
+                            },
+                        )
+                    }
                 }
             }
             return@WatchScaffold

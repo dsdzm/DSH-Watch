@@ -1,6 +1,9 @@
 package com.dshwatch.ui.screens.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +30,7 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.DeviceProfile
 import com.dshwatch.domain.DeviceTier
 import com.dshwatch.domain.PerfProfiles
+import com.dshwatch.domain.bili.BiliTones
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
@@ -689,9 +694,9 @@ private fun ConnectionGroup(settings: AppSettings, nav: WatchNavigator, s: AppSt
 /**
  * 刷 B站的分组页。
  *
- * 这一页只放四件事：总开关、发评论开关、配额、凭证。
- * 「怎么刷」不进设置 —— 那是模型的事（见 `BiliTools.StatusTool` 返回的流程），
- * 用户在这里只需要决定「给不给它这些能力」。
+ * 这一页只放「给不给能力」和「用什么语气」，不教模型怎么刷 ——
+ * 流程写在 `BiliTools.StatusTool` 的返回里，那是它真正需要的时候才读的东西，
+ * 而设置页每一行都要占用户一块小屏幕。
  */
 @Composable
 private fun BiliGroup(
@@ -703,8 +708,11 @@ private fun BiliGroup(
 ) {
     var editingKeywords by remember { mutableStateOf(false) }
     var editingCookie by remember { mutableStateOf(false) }
+    var editingTone by remember { mutableStateOf(false) }
+    var editingToneText by remember { mutableStateOf(false) }
     var keywordDraft by remember { mutableStateOf("") }
     var cookieDraft by remember { mutableStateOf("") }
+    var toneDraft by remember { mutableStateOf("") }
     var cookieStamp by remember { mutableStateOf(0) }
     var todayCount by remember { mutableStateOf(-1) }
 
@@ -716,7 +724,10 @@ private fun BiliGroup(
             if (!f.exists()) 0 else f.readLines().count { it.startsWith("### BV") }
         }
     }
-    val cookieMask = remember(cookieStamp) { container.keyStore.maskedBiliCookie() }
+    val cookieMask = remember(cookieStamp, settings.biliUserName) {
+        container.keyStore.maskedBiliCookie()
+    }
+    val tone = remember(settings.biliTone, settings.biliToneCustom) { BiliTones.resolve(settings) }
 
     SettingCard {
         SwitchRow(
@@ -730,6 +741,12 @@ private fun BiliGroup(
             subtitle = s.biliCommentHint,
             checked = settings.biliCommentEnabled,
             onCheckedChange = { v -> update { it.copy(biliCommentEnabled = v) } },
+        )
+        SwitchRow(
+            title = s.biliNotifyDone,
+            subtitle = s.biliNotifyDoneHint,
+            checked = settings.biliNotifyDone,
+            onCheckedChange = { v -> update { it.copy(biliNotifyDone = v) } },
         )
     }
 
@@ -755,6 +772,27 @@ private fun BiliGroup(
                 keywordDraft = settings.biliKeywords
                 editingKeywords = true
             },
+        )
+        SettingRow(
+            title = s.biliTone,
+            subtitle = tone.name,
+            trailing = "›",
+            showDivider = true,
+            onClick = { editingTone = true },
+        )
+        SettingRow(
+            // 扫码登录与手填 Cookie 是同一个凭证的两种进法：
+            // 能扫码就不该逼用户去翻开发者工具，但代理/公司网环境扫码也可能连不上，
+            // 所以手填这条永远留着。
+            title = s.biliLogin,
+            subtitle = when {
+                settings.biliUserName.isNotBlank() -> "已登录 · ${settings.biliUserName}"
+                cookieMask.isNotBlank() -> cookieMask
+                else -> s.biliCookieUnset
+            },
+            trailing = "›",
+            showDivider = true,
+            onClick = { nav.push(Screen.BiliLogin) },
         )
         SettingRow(
             title = s.biliCookie,
@@ -815,6 +853,70 @@ private fun BiliGroup(
                 editingCookie = false
             },
             onDismiss = { editingCookie = false },
+        )
+    }
+
+    if (editingTone) {
+        val options = listOf(
+            "fish" to s.biliToneFish,
+            "serious" to s.biliToneSerious,
+            "deadpan" to s.biliToneDeadpan,
+            "custom" to s.biliToneCustom,
+        )
+        AlertDialog(
+            onDismissRequest = { editingTone = false },
+            title = { Text(text = s.biliTone, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    options.forEach { (id, label) ->
+                        val picked = settings.biliTone == id
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    update { it.copy(biliTone = id) }
+                                    editingTone = false
+                                    if (id == "custom") {
+                                        toneDraft = settings.biliToneCustom
+                                        editingToneText = true
+                                    }
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = if (picked) "●" else "○",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (picked) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline,
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingTone = false }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    if (editingToneText) {
+        SimpleEditDialog(
+            title = s.biliToneCustom,
+            value = toneDraft,
+            placeholder = "像一个刚下班的程序员，随口吐槽两句",
+            onChange = { toneDraft = it },
+            onConfirm = {
+                update { it.copy(biliTone = "custom", biliToneCustom = toneDraft.trim()) }
+                editingToneText = false
+            },
+            onDismiss = { editingToneText = false },
         )
     }
 }

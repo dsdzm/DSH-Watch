@@ -5,6 +5,11 @@
     <string name="notification_channel_streaming_desc">保持流式回答时的网络连接</string>
     <string name="notification_title">DSH 正在生成</string>
     <string name="notification_stop">停止</string>
+    <string name="notification_channel_done">任务完成</string>
+    <string name="notification_channel_done_desc">后台任务跑完后提醒你</string>
+    <string name="notification_done_title">跑完了</string>
+    <string name="notification_done_body">点按查看结果</string>
+    <string name="notification_working">正在处理</string>
     <string name="notification_channel_alarm">闹钟</string>
     <string name="notification_channel_alarm_desc">由 AI 助手设置的手表闹钟</string>
     <string name="notification_alarm_body">时间到了</string>

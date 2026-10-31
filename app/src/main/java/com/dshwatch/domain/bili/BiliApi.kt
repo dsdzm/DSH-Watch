@@ -242,16 +242,24 @@ class BiliApi(private val cookie: () -> String) {
         )
         return (data["replies"] as? kotlinx.serialization.json.JsonArray).orEmpty()
             .mapNotNull { it as? JsonObject }
-            .mapNotNull { o ->
-                val member = o["member"] as? JsonObject ?: return@mapNotNull null
-                val content = o["content"] as? JsonObject ?: return@mapNotNull null
-                Comment(
-                    user = member.str("uname"),
-                    message = content.str("message"),
-                    like = o.int("like"),
-                    replies = o.int("rcount"),
-                )
-            }
+            .mapNotNull { parseComment(it) }
+    }
+
+    /** 评论对象 → 领域模型。`rpid` 必须留着：回复楼中楼全靠它定位 */
+    private fun parseComment(o: JsonObject): Comment? {
+        val member = o["member"] as? JsonObject ?: return null
+        val content = o["content"] as? JsonObject ?: return null
+        return Comment(
+            rpid = o.long("rpid"),
+            user = member.str("uname"),
+            mid = member.long("mid"),
+            message = content.str("message"),
+            like = o.int("like"),
+            replies = o.int("rcount"),
+            rootId = o.long("root"),
+            parentId = o.long("parent"),
+            ctime = o.long("ctime"),
+        )
     }
 
     /**
@@ -260,7 +268,12 @@ class BiliApi(private val cookie: () -> String) {
      * 需要 Cookie（SESSDATA + bili_jct，后者就是 csrf 参数）。
      * 没登录态时直接抛异常 —— 绝不做「匿名试一下」这种会触发风控的事。
      */
-    suspend fun reply(bvid: String, message: String): String {
+    suspend fun reply(
+        bvid: String,
+        message: String,
+        root: Long = 0L,
+        parent: Long = 0L,
+    ): String {
         ensureBuvid()
         val raw = cookie().trim()
         if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法发评论")
@@ -268,13 +281,17 @@ class BiliApi(private val cookie: () -> String) {
             ?: throw BiliException("Cookie 里缺少 bili_jct（csrf 令牌），无法发评论")
         val detail = video(bvid)
 
+        // 楼中楼回复的口径：`root` 是整栋楼的根评论，`parent` 是**被回复的那一条**。
+        // 只填 parent 不填 root，B站会把回复挂到评论区顶层而不是对方那条下面 ——
+        // 表现就是「明明回复了，对方收不到通知」。
+        if (parent > 0 && root <= 0) throw BiliException("回复某条评论时 root 不能为 0")
         val form = okhttp3.FormBody.Builder()
             .add("oid", detail.aid.toString())
             .add("type", "1")
             .add("message", message)
             .add("csrf", csrf)
-            .add("root", "0")
-            .add("parent", "0")
+            .add("root", root.coerceAtLeast(0L).toString())
+            .add("parent", parent.coerceAtLeast(0L).toString())
             .build()
         val request = req("$API/x/v2/reply/add")
             .header("Referer", "https://www.bilibili.com/video/$bvid")
@@ -293,6 +310,154 @@ class BiliApi(private val cookie: () -> String) {
             throw BiliException("B站拒绝了这条评论：${code} ${obj.str("message")}（${friendlyCode(code)}）")
         }
         return "已发布"
+    }
+
+    // ------------------------------------------------------------------
+    // 扫码登录
+    // ------------------------------------------------------------------
+
+    /**
+     * 申请一个登录二维码。
+     *
+     * 走的是 passport 域名（不是 api.bilibili.com），返回的 `url` 就是二维码里
+     * 该编码的内容，`qrcode_key` 用来轮询结果。两者都必须原样用，
+     * 自己拼 `https://bilibili.com` 是扫不出来的。
+     */
+    suspend fun qrGenerate(): QrLogin {
+        val body = withContext(Dispatchers.IO) {
+            val request = req(QR_GENERATE, withCookie = false).get().build()
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrElse { throw BiliException("生成二维码失败：${it.message.orEmpty().take(100)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
+            ?: throw BiliException("生成二维码失败：返回不是 JSON")
+        val code = obj.int("code")
+        if (code != 0) throw BiliException("生成二维码失败：$code ${obj.str("message")}")
+        val data = obj["data"] as? JsonObject ?: throw BiliException("生成二维码失败：返回没有 data")
+        val key = data.str("qrcode_key")
+        val url = data.str("url")
+        if (key.isBlank() || url.isBlank()) throw BiliException("生成二维码失败：缺少 qrcode_key")
+        return QrLogin(key = key, url = url)
+    }
+
+    /**
+     * 轮询扫码结果。
+     *
+     * 内层 `code`：0 成功 / 86101 未扫码 / 86090 已扫码待确认 / 86038 已过期。
+     * 外层 code 永远是 0，别拿外层判断状态 —— 这是最容易写错的一处。
+     */
+    suspend fun qrPoll(key: String): QrPoll {
+        val pair = withContext(Dispatchers.IO) {
+            val request = req("$QR_POLL?qrcode_key=$key", withCookie = false).get().build()
+            runCatching {
+                Http.client.newCall(request).execute().use { resp ->
+                    (resp.body?.string().orEmpty()) to resp.headers.values("Set-Cookie")
+                }
+            }.getOrElse { throw BiliException("查询扫码状态失败：${it.message.orEmpty().take(100)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(pair.first) as JsonObject }.getOrNull()
+            ?: throw BiliException("查询扫码状态失败：返回不是 JSON")
+        if (obj.int("code") != 0) {
+            throw BiliException("查询扫码状态失败：${obj.int("code")} ${obj.str("message")}")
+        }
+        val data = obj["data"] as? JsonObject ?: JsonObject(emptyMap())
+        val inner = data.int("code")
+        // 成功时凭证在两个地方都有：Set-Cookie 头，以及 data.url 的 query。
+        // 优先用 Set-Cookie（更全），拿不到再从 url 里取 —— 有些机型/代理会吃掉响应头。
+        val cookie = cookiesToHeader(pair.second).ifBlank { cookieFromUrl(data.str("url")) }
+        return QrPoll(
+            code = inner,
+            message = data.str("message"),
+            cookie = if (inner == 0) cookie else "",
+        )
+    }
+
+    /** 当前登录账号（未登录时 loggedIn = false）。用来在设置页显示「已登录：昵称」 */
+    suspend fun me(): BiliMe {
+        val body = withContext(Dispatchers.IO) {
+            val request = req("$API/x/web-interface/nav").get().build()
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrDefault("")
+        }
+        val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
+            ?: return BiliMe(0L, "", false)
+        val data = obj["data"] as? JsonObject
+        val logged = data?.get("isLogin")?.let { (it as? JsonPrimitive)?.contentOrNull == "true" } ?: false
+        return BiliMe(
+            mid = data?.long("mid") ?: 0L,
+            name = data?.str("uname").orEmpty(),
+            loggedIn = logged,
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // 「回复我的」与楼中楼
+    // ------------------------------------------------------------------
+
+    /**
+     * 最近收到的回复（B站消息中心的「回复我的」）。
+     *
+     * 每一项里有两段关键正文：
+     *  - `source_content`：**对方**回复了什么
+     *  - `target_reply_content`：**我**原来那条评论
+     * 再加上 `root_id` / `source_id` 两个 id，就能直接接一条精准的楼中楼回复。
+     */
+    suspend fun inbox(num: Int): List<ReplyNotice> {
+        val data = call(
+            url = "$API/x/msgfeed/reply",
+            params = mapOf(
+                "platform" to "web",
+                "id" to "",
+                "reply_time" to "",
+            ),
+            signed = false,
+        )
+        val items = (data["items"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .take(num.coerceIn(1, 20))
+        return items.mapNotNull { o ->
+            val user = o["user"] as? JsonObject ?: JsonObject(emptyMap())
+            val item = o["item"] as? JsonObject ?: JsonObject(emptyMap())
+            val uri = item.str("uri").ifBlank { item.str("native_uri") }
+            val bvid = BVID_REGEX.find(uri)?.value.orEmpty()
+            ReplyNotice(
+                id = o.long("id"),
+                from = user.str("nickname"),
+                fromMid = user.long("mid"),
+                timeSec = o.long("reply_time"),
+                theirReply = item.str("source_content").ifBlank { item.str("desc") },
+                myComment = item.str("target_reply_content").ifBlank { item.str("root_reply_content") },
+                videoTitle = item.str("title"),
+                bvid = bvid,
+                aid = item.long("subject_id"),
+                rootId = item.long("root_id"),
+                sourceId = item.long("source_id"),
+                targetId = item.long("target_id"),
+                businessId = item.int("business_id"),
+            )
+        }
+    }
+
+    /** 某一栋评论楼的全部回复（含根评论）。用来在回复前看清上下文 */
+    suspend fun thread(aid: Long, root: Long, num: Int): ThreadView {
+        val data = call(
+            url = "$API/x/v2/reply/reply",
+            params = mapOf(
+                "type" to "1",
+                "oid" to aid.toString(),
+                "root" to root.toString(),
+                "ps" to num.coerceIn(1, 20).toString(),
+                "pn" to "1",
+            ),
+            signed = false,
+        )
+        val rootObj = data["root"] as? JsonObject
+        return ThreadView(
+            rootComment = rootObj?.let { parseComment(it) },
+            replies = (data["replies"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+                .mapNotNull { it as? JsonObject }
+                .mapNotNull { parseComment(it) },
+        )
     }
 
     // ------------------------------------------------------------------
@@ -477,6 +642,44 @@ class BiliApi(private val cookie: () -> String) {
         return parts.joinToString("; ")
     }
 
+    /**
+     * 从 Set-Cookie 头里挑出登录凭证，拼成一条 Cookie 头。
+     *
+     * 只保留白名单里的键：响应里还有一堆 `buvid_fp`、`CURRENT_FNVAL` 之类，
+     * 全塞进去既没必要，也会把 Cookie 撑长到被某些网关拦掉。
+     */
+    private fun cookiesToHeader(list: List<String>): String {
+        val out = LinkedHashMap<String, String>()
+        list.forEach { raw ->
+            val first = raw.substringBefore(';')
+            val name = first.substringBefore('=').trim()
+            val value = first.substringAfter('=', "").trim()
+            if (name in LOGIN_COOKIE_KEYS && value.isNotEmpty() && !value.equals("deleted", true)) {
+                out[name] = value
+            }
+        }
+        return out.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    /**
+     * 从 `data.url` 的 query 里取凭证。
+     *
+     * 刻意**不解码**：SESSDATA 的值本身是 URL 编码过的（含 `%2C`），
+     * 浏览器与本尊 B站 都是拿编码值当 Cookie 发的；解码后再拼回去会让签名对不上。
+     */
+    private fun cookieFromUrl(url: String): String {
+        if (url.isBlank()) return ""
+        val query = url.substringAfter('?', "")
+        if (query.isBlank()) return ""
+        val out = LinkedHashMap<String, String>()
+        query.split('&').forEach { pair ->
+            val name = pair.substringBefore('=', "")
+            val value = pair.substringAfter('=', "")
+            if (name in LOGIN_COOKIE_KEYS && value.isNotEmpty()) out[name] = value
+        }
+        return out.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
     /** 从 Cookie 串里取某个键的值 */
     private fun cookieValue(raw: String, key: String): String? =
         raw.split(';').map { it.trim() }
@@ -527,6 +730,18 @@ class BiliApi(private val cookie: () -> String) {
     companion object {
         private const val API = "https://api.bilibili.com"
         private const val KEY_TTL_MS = 6 * 3600_000L
+
+        private const val QR_GENERATE =
+            "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+        private const val QR_POLL =
+            "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
+
+        /** 登录必须保留的 Cookie 键。少了 bili_jct 就发不了评论，少了 SESSDATA 就等于没登录 */
+        private val LOGIN_COOKIE_KEYS = setOf(
+            "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid", "buvid3", "buvid4",
+        )
+
+        private val BVID_REGEX = Regex("BV[0-9A-Za-z]{10}")
 
         /**
          * 用**桌面** Chrome 的 UA。
@@ -587,7 +802,50 @@ data class VideoDetail(
 
 data class Page(val cid: Long, val page: Int, val part: String, val durationSec: Int)
 
-data class Comment(val user: String, val message: String, val like: Int, val replies: Int)
+data class Comment(
+    /** 评论 id。回复楼中楼时必须用它当 `parent` */
+    val rpid: Long,
+    val user: String,
+    val mid: Long,
+    val message: String,
+    val like: Int,
+    val replies: Int,
+    /** 所在楼的根评论 id（顶层评论自身为 0） */
+    val rootId: Long,
+    val parentId: Long,
+    val ctime: Long,
+)
+
+data class QrLogin(val key: String, val url: String)
+
+data class QrPoll(val code: Int, val message: String, val cookie: String) {
+    val ok: Boolean get() = code == 0 && cookie.isNotBlank()
+}
+
+data class BiliMe(val mid: Long, val name: String, val loggedIn: Boolean)
+
+/** 一条「回复我的」通知 */
+data class ReplyNotice(
+    val id: Long,
+    val from: String,
+    val fromMid: Long,
+    val timeSec: Long,
+    /** 对方说的话 */
+    val theirReply: String,
+    /** 我原来那条评论 */
+    val myComment: String,
+    val videoTitle: String,
+    val bvid: String,
+    val aid: Long,
+    val rootId: Long,
+    /** 对方那条评论的 id —— 回复时当 `parent` */
+    val sourceId: Long,
+    /** 被回复的评论 id（也就是我的评论） */
+    val targetId: Long,
+    val businessId: Int,
+)
+
+data class ThreadView(val rootComment: Comment?, val replies: List<Comment>)
 
 data class SubtitleResult(
     val text: String,
