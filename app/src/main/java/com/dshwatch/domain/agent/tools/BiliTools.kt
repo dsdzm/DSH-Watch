@@ -109,7 +109,9 @@ object BiliTools {
             val cookie = ctx.biliCookie().isNotBlank()
             return ToolResult.ok(
                 buildString {
-                    append("今日已记：").append(used).append(" / ").append(s.biliDailyQuota).append(" 条\n")
+                    append("今日已记：").append(used)
+                        .append(" / ").append(if (s.biliDailyQuota <= 0) "不限" else "${s.biliDailyQuota} 条")
+                        .append("\n")
                     append("关注关键词：").append(s.biliKeywords.ifBlank { "（未设置，由你按用户这次的话决定）" })
                         .append('\n')
                     append("登录态：").append(if (cookie) "已配置 Cookie" else "匿名（能搜索/读字幕，不能发评论）")
@@ -253,7 +255,9 @@ object BiliTools {
             val max = (args.intOf("max_chars") ?: 6000).coerceIn(500, 20_000)
             return runCatching { api(ctx).subtitle(bvid, page, max) }.fold(
                 onSuccess = { r ->
-                    if (!r.available) return ToolResult.fail("$bvid：${r.hint}")
+                    // 「没有字幕」是常见结果而不是报错：标红会让工具卡片看着像出了问题，
+                    // 而实际上模型应该据此改道（读简介 + 评论）。
+                    if (!r.available) return ToolResult.ok("$bvid 没有字幕：${r.hint}")
                     val head = "字幕（${r.lang}，共 ${r.text.length} 字${if (r.text.length >= max) "，已截断" else ""}）：\n"
                     ToolResult.ok(head + r.text)
                 },
