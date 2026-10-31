@@ -416,7 +416,14 @@ object BiliTools {
                     append("   我说过：").append(n.myComment.replace('\n', ' ').take(120)).append('\n')
                 }
                 if (n.bvid.isNotBlank() && n.sourceId > 0) {
-                    val root = if (n.rootId > 0) n.rootId else n.sourceId
+                    // 楼的根谁都可能是：对方直接回我的顶层评论时 root_id 是 0，
+                    // 此时根就是**我那条**（target_id）。拿 source_id 当根会把回复
+                    // 挂到对方自己那条下面，等于自己回自己。
+                    val root = when {
+                        n.rootId > 0 -> n.rootId
+                        n.targetId > 0 -> n.targetId
+                        else -> n.sourceId
+                    }
                     append("   回复他：bili_reply bvid=").append(n.bvid)
                         .append(" root=").append(root)
                         .append(" parent=").append(n.sourceId).append('\n')
