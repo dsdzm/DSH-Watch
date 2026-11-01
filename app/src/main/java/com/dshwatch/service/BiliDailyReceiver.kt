@@ -26,6 +26,11 @@ class BiliDailyReceiver : BroadcastReceiver() {
         ) {
             runCatching { BiliSchedule.sync(context, settings) }
                 .onFailure { Logx.w(TAG, "开机重排失败：${it.message}") }
+            // QQ 通道是常驻的，开机后要自己回来；否则用户得手动打开 App 才「在线」
+            if (settings.qqEnabled && settings.qqAppId.isNotBlank()) {
+                runCatching { QqService.start(context) }
+                    .onFailure { Logx.w(TAG, "开机启动 QQ 通道失败：${it.message}") }
+            }
             return
         }
         if (intent.action != BiliSchedule.ACTION_RUN) return

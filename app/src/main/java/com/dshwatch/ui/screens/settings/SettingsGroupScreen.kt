@@ -42,6 +42,8 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.domain.model.WorkspaceLocation
+import com.dshwatch.domain.qq.QqState
+import com.dshwatch.service.QqService
 import com.dshwatch.ui.components.AgentModeDialog
 import com.dshwatch.ui.components.SegmentedRow
 import com.dshwatch.ui.components.SettingCard
@@ -79,9 +81,10 @@ internal object SettingsGroups {
     const val PLUGINS = "plugins"
     const val MCP = "mcp"
     const val BILI = "bili"
+    const val QQ = "qq"
 
     /** 顺序即一级页的显示顺序。插件、MCP、B站 紧跟「AI 能力」—— 它们扩展的都是能力 */
-    val all = listOf(MODEL, ABILITY, PLUGINS, MCP, BILI, CHAT, APPEARANCE, FILES, RUNTIME, CONNECTION)
+    val all = listOf(MODEL, ABILITY, PLUGINS, MCP, BILI, QQ, CHAT, APPEARANCE, FILES, RUNTIME, CONNECTION)
 
     fun title(id: String, s: AppStrings): String = when (id) {
         MODEL -> s.groupModel
@@ -93,6 +96,7 @@ internal object SettingsGroups {
         PLUGINS -> s.groupPlugins
         MCP -> s.groupMcp
         BILI -> s.groupBili
+        QQ -> s.groupQq
         else -> s.groupConnection
     }
 }
@@ -160,6 +164,7 @@ fun SettingsGroupScreen(
                 SettingsGroups.PLUGINS -> PluginsGroup(settings, update, s)
                 SettingsGroups.MCP -> McpGroup(settings, update, container, s)
                 SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
+                SettingsGroups.QQ -> QqGroup(settings, update, container, s)
                 else -> ConnectionGroup(settings, nav, s)
             }
         }
@@ -1335,6 +1340,178 @@ private fun BiliGroup(
 }
 
 /** 手表上唯一的多行输入场景（关键词 / Cookie），做成一个弹窗就够 */
+// ---------------------------------------------------------------------------
+// QQ 通道
+// ---------------------------------------------------------------------------
+
+/**
+ * QQ 机器人设置。
+ *
+ * 这里只放「接不接、接哪个机器人、谁可以跟它说话」三件事，
+ * 具体怎么连、断了怎么重连全在 [com.dshwatch.domain.qq.QqGateway] 里，
+ * 设置页不该知道协议细节。
+ *
+ * 改完 AppID / Secret / 环境之后都要**重启服务**：这三样都是握手时定死的，
+ * 只改设置不重连，界面显示「已保存」而实际连的还是旧机器人 —— 这种
+ * 「改了没反应」最难排查，所以宁可直接重启。
+ */
+@Composable
+private fun QqGroup(
+    settings: AppSettings,
+    update: Update,
+    container: AppContainer,
+    s: AppStrings,
+) {
+    val context = LocalContext.current
+    val state by container.qqBridge.state.collectAsStateWithLifecycle()
+    val lastError by container.qqBridge.lastError.collectAsStateWithLifecycle()
+
+    var editingAppId by remember { mutableStateOf(false) }
+    var editingSecret by remember { mutableStateOf(false) }
+    var editingAllow by remember { mutableStateOf(false) }
+    var appIdDraft by remember { mutableStateOf("") }
+    var secretDraft by remember { mutableStateOf("") }
+    var allowDraft by remember { mutableStateOf("") }
+    var secretStamp by remember { mutableStateOf(0) }
+    val maskedSecret = remember(secretStamp) { container.keyStore.maskedQqSecret() }
+
+    val status = when (state) {
+        QqState.ONLINE -> "已连接"
+        QqState.CONNECTING -> "连接中…"
+        QqState.RECONNECTING -> "重连中…"
+        QqState.FAILED -> "连不上"
+        QqState.IDLE -> if (settings.qqEnabled) "等待启动" else "未开启"
+    }
+
+    val allowSubtitle = if (settings.qqAllowOpenids.isBlank()) {
+        s.qqAllowHint
+    } else {
+        val list = settings.qqAllowOpenids.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
+        "已允许 ${list.size} 个：" + list.take(2).joinToString("、") { it.take(6) + "…" }
+    }
+
+    SettingCard {
+        SwitchRow(
+            title = s.qqEnable,
+            subtitle = s.qqEnableHint,
+            checked = settings.qqEnabled,
+            onCheckedChange = { v ->
+                update { it.copy(qqEnabled = v) }
+                // 开关本身就是启动/停止信号：留一个「开了但没跑」的中间态只会让人困惑
+                if (v) QqService.start(context) else QqService.stop(context)
+            },
+        )
+    }
+
+    if (settings.qqEnabled) {
+        Spacer(Modifier.height(6.dp))
+        SettingCard {
+            SettingRow(
+                title = s.qqAppId,
+                subtitle = settings.qqAppId.ifBlank { s.qqAppIdHint },
+                trailing = "›",
+                showDivider = true,
+                onClick = {
+                    appIdDraft = settings.qqAppId
+                    editingAppId = true
+                },
+            )
+            SettingRow(
+                title = s.qqSecret,
+                subtitle = maskedSecret.ifBlank { s.qqSecretHint },
+                trailing = "›",
+                showDivider = true,
+                onClick = {
+                    secretDraft = ""
+                    editingSecret = true
+                },
+            )
+            SettingRow(
+                title = s.qqAllow,
+                subtitle = allowSubtitle,
+                trailing = "›",
+                showDivider = true,
+                onClick = {
+                    allowDraft = settings.qqAllowOpenids
+                    editingAllow = true
+                },
+            )
+            SwitchRow(
+                title = s.qqSandbox,
+                subtitle = s.qqSandboxHint,
+                checked = settings.qqSandbox,
+                onCheckedChange = { v ->
+                    update { it.copy(qqSandbox = v) }
+                    QqService.start(context)
+                },
+            )
+        }
+
+        Spacer(Modifier.height(6.dp))
+        SettingCard {
+            SettingRow(
+                title = "连接状态",
+                subtitle = lastError.ifBlank { status },
+                trailing = "",
+            )
+        }
+    }
+
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = s.qqFootnote,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+
+    if (editingAppId) {
+        SimpleEditDialog(
+            title = s.qqAppId,
+            value = appIdDraft,
+            placeholder = "1029xxxxx",
+            onChange = { appIdDraft = it },
+            onConfirm = {
+                update { it.copy(qqAppId = appIdDraft.trim()) }
+                QqService.start(context)
+                editingAppId = false
+            },
+            onDismiss = { editingAppId = false },
+        )
+    }
+
+    if (editingSecret) {
+        SimpleEditDialog(
+            title = s.qqSecret,
+            value = secretDraft,
+            placeholder = "AppSecret（只显示一次）",
+            onChange = { secretDraft = it },
+            onConfirm = {
+                container.keyStore.putQqSecret(secretDraft.trim())
+                secretStamp++
+                QqService.start(context)
+                editingSecret = false
+            },
+            onDismiss = { editingSecret = false },
+        )
+    }
+
+    if (editingAllow) {
+        SimpleEditDialog(
+            title = s.qqAllow,
+            value = allowDraft,
+            placeholder = "openid1,openid2",
+            onChange = { allowDraft = it },
+            onConfirm = {
+                update { it.copy(qqAllowOpenids = allowDraft.trim()) }
+                QqService.start(context)
+                editingAllow = false
+            },
+            onDismiss = { editingAllow = false },
+        )
+    }
+}
+
 @Composable
 private fun SimpleEditDialog(
     title: String,

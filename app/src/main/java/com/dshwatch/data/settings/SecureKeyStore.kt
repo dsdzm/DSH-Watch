@@ -124,6 +124,26 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         runCatching { prefs.edit().remove(k(BILI_SCOPE, FIELD_BILI_COOKIE)).apply() }
     }
 
+    /**
+     * QQ 机器人 AppSecret。
+     *
+     * 和 SESSDATA 一个级别：拿到它就能换 access_token、以机器人的身份收消息发消息。
+     * AppID 是公开的，放普通设置里；Secret 只进这里，读出来只用于换 token。
+     */
+    fun getQqSecret(): String? = get(k(QQ_SCOPE, FIELD_QQ_SECRET))
+
+    fun putQqSecret(value: String?) = put(k(QQ_SCOPE, FIELD_QQ_SECRET), value)
+
+    fun clearQqSecret() {
+        runCatching { prefs.edit().remove(k(QQ_SCOPE, FIELD_QQ_SECRET)).apply() }
+    }
+
+    /** 只回显长度，够确认「填过没有」 */
+    fun maskedQqSecret(): String {
+        val raw = getQqSecret()?.trim().orEmpty()
+        return if (raw.isEmpty()) "" else "已保存 · ${raw.length} 位"
+    }
+
     /** 只回显长度与首键，够用来确认「填对了没有」，又不会把凭证显示在屏幕上 */
     fun maskedBiliCookie(): String {
         val raw = getBiliCookie()?.trim().orEmpty()
@@ -216,6 +236,10 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         /** B站 Cookie 同样是一个合成作用域 */
         private const val BILI_SCOPE = "bili"
         private const val FIELD_BILI_COOKIE = "biliCookie"
+
+        /** QQ 机器人：只有 AppSecret 需要加密，AppID 在普通设置里 */
+        private const val QQ_SCOPE = "qq"
+        private const val FIELD_QQ_SECRET = "appSecret"
         private const val FIELD_MCP_TOKEN = "mcpToken"
         private const val MCP_SCOPE = "mcp"
         private const val PROBE_KEY = "__probe__"

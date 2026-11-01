@@ -13,4 +13,9 @@
     <string name="notification_channel_alarm">Alarms</string>
     <string name="notification_channel_alarm_desc">Alarms created by the AI assistant</string>
     <string name="notification_alarm_body">Time is up</string>
+    <string name="qq_channel_name">QQ channel</string>
+    <string name="qq_channel_desc">Keeps the QQ bot websocket alive</string>
+    <string name="qq_notification_title">QQ channel online</string>
+    <string name="qq_notification_connecting">Connecting to QQ…</string>
+    <string name="qq_notification_stop">Disconnect</string>
 </resources>

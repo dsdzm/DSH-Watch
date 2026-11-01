@@ -320,6 +320,36 @@ data class AppSettings(
      */
     val biliLikeEnabled: Boolean = true,
 
+    // ---------------- QQ 机器人通道 ----------------
+
+    /**
+     * 收到 QQ 群里 @ 它的消息时，用当前供应商的模型回一句。
+     *
+     * 只聊天：QQ 那头没人能点「批准」，所以这条通道**不挂任何工具** ——
+     * 挂了也只会让模型停在审批上，永远等不到回音。
+     */
+    val qqEnabled: Boolean = false,
+
+    /** 开放平台机器人的 AppID（纯数字）。AppSecret 不放这里，进加密存储 */
+    val qqAppId: String = "",
+
+    /**
+     * 沙箱环境。
+     *
+     * 正式环境强制 IP 白名单，而手表的出口 IP 跟着基站走、随时会变 ——
+     * 直连正式环境的表现就是「连上了，几小时后 401，再也连不回来」。
+     * 自用一律走沙箱（免白名单，群人数 ≤20，只收配置过的沙箱群）。
+     */
+    val qqSandbox: Boolean = true,
+
+    /**
+     * 允许对话的 openid，逗号分隔。空 = 谁都不理。
+     *
+     * QQ 消息进来等于给对面一个能跟你的模型说话的入口，默认必须关死；
+     * 第一次接上后从日志里看到自己的 openid，填进来才生效。
+     */
+    val qqAllowOpenids: String = "",
+
     /** 每天定时自动刷一轮 */
     val biliAutoRun: Boolean = false,
 

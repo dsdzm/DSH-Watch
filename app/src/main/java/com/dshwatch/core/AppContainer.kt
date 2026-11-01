@@ -18,6 +18,7 @@ import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.WorkspaceLocation
+import com.dshwatch.domain.qq.QqBridge
 import com.dshwatch.net.backend.BackendRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -130,6 +131,20 @@ class AppContainer(private val app: Context) {
 
     val settings: StateFlow<AppSettings> = settingsRepo.flow
         .stateIn(appScope, SharingStarted.Eagerly, AppSettings())
+
+    /**
+     * QQ 通道。
+     *
+     * 放容器里而不是服务里 new：它要读实时设置、复用同一个后端注册表，
+     * 服务被系统杀掉重建时也不该丢掉 token 缓存。
+     */
+    val qqBridge = QqBridge(
+        settings = { settings.value },
+        appSecret = { keyStore.getQqSecret().orEmpty() },
+        keyStore = keyStore,
+        backends = backends,
+        scope = appScope,
+    )
 
     val engine = ChatEngine(
         appScope = appScope,
