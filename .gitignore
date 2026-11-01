@@ -18,3 +18,6 @@ app/build/
 # 云端编译必然 Unresolved reference 'build'。
 dist/
 *.apk
+
+# Kotlin 增量编译产生的会话文件，不进仓库
+.kotlin/
