@@ -2,12 +2,6 @@ package com.dshwatch.ui.screens.about
 
 import android.app.ActivityManager
 import android.content.Context
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.VolunteerActivism
+import com.dshwatch.ui.nav.Screen
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,13 +46,14 @@ import com.dshwatch.ui.wear.wearVerticalScroll
 private const val AUTHOR_NAME = "东山の字幕"
 private const val AUTHOR_EMAIL = "2332184782@qq.com"
 
-/** 反馈群群号。同样不翻译：数字换了就不是同一个群了 */
-private const val GROUP_ID = "1087183734"
-
 /**
  * 关于页。
  *
- * 四张卡片：作者、应用介绍（技术栈 / 借鉴项目 / 功能）、更新日志、设备信息。
+ * 卡片顺序：作者 → 社区与支持（群聊 / 捐赠 / 致谢，各自独立成页）→
+ * 应用介绍（技术栈 / 借鉴项目 / 功能）→ 更新日志 → 设备信息。
+ *
+ * 社区入口只是三个跳转行，二维码不再内嵌在这里 —— 手表一屏放不下
+ * 「二维码 + 群号 + 更新日志」，而且想捐赠的人得先翻过整段更新日志才能找到码。
  *
  * 更新日志来自 [AppChangelog]，**发版时只需往那个列表最前面加一条** ——
  * 这里会自动渲染出来，不用维护两份文档。
@@ -67,19 +67,6 @@ fun AboutScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
-    var groupCopied by remember { mutableStateOf(false) }
-
-    /*
-     * assets 里的群二维码只解码一次。
-     *
-     * 用 `remember` 而不是 `rememberSaveable`：Bitmap 没法序列化，
-     * 而且页面重建时重新解一张 250KB 的图代价很小。
-     */
-    val groupQr = remember {
-        runCatching {
-            context.assets.open("community/qq_group.jpg").use { BitmapFactory.decodeStream(it) }
-        }.getOrNull()
-    }
 
     val info = remember {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -149,50 +136,30 @@ fun AboutScreen(
                 Spacer(Modifier.height(2.dp))
             }
 
-            // ---------------- 反馈群 ----------------
-            SectionHeader(s.communityTitle)
+            // ---------------- 社区与支持 ----------------
+            // 三个入口各自独立成页：反馈群是出问题才点，捐赠是想谢一下才点，
+            // 致谢是想看看这是谁做的 —— 三种场景，挤在这里只会被更新日志淹掉
+            SectionHeader(s.communitySection)
             SettingCard {
-                Text(
-                    text = s.communityHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                CommunityEntryRow(
+                    icon = Icons.Filled.Group,
+                    title = s.navGroupChat,
+                    subtitle = s.navGroupChatHint,
+                    onClick = { nav.push(Screen.GroupChat) },
                 )
-                Spacer(Modifier.height(6.dp))
-                // 直接显示 QQ 生成的原图，不重画：二维码重绘一遍容易扫不出来。
-                // 解码失败（assets 被裁剪）时整块跳过，留群号照样能加。
-                groupQr?.let { bmp ->
-                    Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = s.communityTitle,
-                        contentScale = ContentScale.FillWidth,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp)),
-                    )
-                    Spacer(Modifier.height(3.dp))
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = s.communityGroup,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                        )
-                        Text(
-                            text = GROUP_ID,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Chip(
-                        text = if (groupCopied) s.communityCopied else s.communityCopy,
-                        onClick = {
-                            clipboard.setText(AnnotatedString(GROUP_ID))
-                            groupCopied = true
-                        },
-                    )
-                }
-                Spacer(Modifier.height(2.dp))
+                CommunityEntryRow(
+                    icon = Icons.Filled.VolunteerActivism,
+                    title = s.navDonate,
+                    subtitle = s.navDonateHint,
+                    onClick = { nav.push(Screen.Donate) },
+                )
+                CommunityEntryRow(
+                    icon = Icons.Filled.Favorite,
+                    title = s.navThanks,
+                    subtitle = s.navThanksHint,
+                    onClick = { nav.push(Screen.Thanks) },
+                    showDivider = false,
+                )
             }
 
             // ---------------- 应用介绍 ----------------

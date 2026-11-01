@@ -95,7 +95,7 @@ class BiliModePlanTest {
         // 逐次确认模式下也不例外：用户明确要求发评论不要弹窗，
         // 护栏改成模式 + 配额 + 判重 + 风格闸门
         val s = AppSettings(agentMode = AgentMode.ASK_EVERY_STEP)
-        listOf("bili_reply", "bili_dm", "bili_dyn", "bili_coin").forEach { name ->
+        listOf("bili_reply", "bili_dm", "bili_dyn", "bili_like").forEach { name ->
             assertThat(
                 ApprovalPolicy.needsApproval(s, name, ToolSafety.NETWORK, JsonObject(emptyMap()), emptySet())
             ).isFalse()
@@ -135,7 +135,7 @@ class BiliModePlanTest {
     @Test
     fun `dynamic tool is registered and network bound`() {
         assertThat(BiliTools.all().map { it.name }).contains("bili_dyn")
-        assertThat(BiliTools.all().map { it.name }).contains("bili_coin")
+        assertThat(BiliTools.all().map { it.name }).contains("bili_like")
         assertThat(BiliTools.DynTool.safety).isEqualTo(ToolSafety.NETWORK)
     }
 

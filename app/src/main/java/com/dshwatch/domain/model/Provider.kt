@@ -313,12 +313,12 @@ data class AppSettings(
     val biliDynTopics: String = "life,roast,master",
 
     /**
-     * 允许它自己点赞、投币。
+     * 允许它自己点赞。
      *
-     * 投币花的是账号里的硬币，属于**不可逆**的资源消耗，所以单独一个开关；
-     * 每天最多 1 枚（[COIN_PER_DAY]），且同一条视频只投一次。
+     * 只有点赞 —— 投币那套已经整条链路删掉了：硬币是账号里不可逆的存量资源，
+     * 让模型替用户花，风险远大于收益。点赞重复点也不消耗任何东西。
      */
-    val biliCoinEnabled: Boolean = true,
+    val biliLikeEnabled: Boolean = true,
 
     /** 每天定时自动刷一轮 */
     val biliAutoRun: Boolean = false,

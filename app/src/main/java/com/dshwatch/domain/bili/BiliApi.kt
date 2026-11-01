@@ -511,61 +511,56 @@ class BiliApi(private val cookie: () -> String) {
     }
 
     // ------------------------------------------------------------------
-    // 点赞 / 投币
+    // 点赞
     // ------------------------------------------------------------------
 
     /**
-     * 给视频点赞。
+     * 给视频点个赞。
      *
      * 接口是幂等的：重复 `like=1` 不会连点两次，所以判重只是为了省请求。
-     * 传 `aid` 而不是 `bvid`：这两个接口的 bvid 分支在不同版本里时好时坏，
-     * aid 是从来没有变过的那个。
+     * 传 `aid` 而不是 `bvid`：bvid 分支在不同版本里时好时坏，aid 是从没变过的那个。
+     *
+     * 这里**不加 WBI 签名**：`archive/like` 是网页端最老的一批接口之一，
+     * 只认「Cookie + form 表单 + csrf」。多塞 `wts` / `w_rid` 它也不看，
+     * 反而因为参数集合跟网页端对不上，更容易被当成脚本。
      */
-    suspend fun like(bvid: String, on: Boolean = true): String =
-        actOnVideo(
+    suspend fun like(bvid: String, on: Boolean = true): String {
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法点赞")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct，无法点赞")
+        val aid = video(bvid).aid
+        if (aid <= 0) throw BiliException("查不到 $bvid 的 aid，点赞失败")
+
+        val (code, message) = postAction(
             path = "/x/web-interface/archive/like",
             bvid = bvid,
-            what = if (on) "点赞" else "取消点赞",
-            extra = arrayOf("like" to if (on) "1" else "0"),
+            params = linkedMapOf(
+                "aid" to aid.toString(),
+                "like" to if (on) "1" else "0",
+                "csrf" to csrf,
+            ),
         )
+        if (code != 0) {
+            throw BiliException("B站拒绝了这次点赞：$code $message（${friendlyCode(code)}）")
+        }
+        return if (on) "已点赞" else "已取消点赞"
+    }
 
     /**
-     * 给视频投一枚硬币。
+     * 点赞的请求骨架：**参数只放 form 表单**，不签名、不往 query 里塞第二份。
      *
-     * `multiply=1` 是「投几枚」，这里**写死 1** —— 硬币是账号的存量资源，
-     * 一次投两枚属于不可逆的加倍消耗，工具层不该给模型这个自由度。
-     * `select_like=0`：点赞由 [like] 单独做，两个动作分开才能分别报错。
+     * 之前那版为了让签名覆盖到参数，把同一组键值同时写进 query 和 body，
+     * 服务端于是能解析出两个 `csrf`、两个 `aid`，取到哪个全看框架实现 ——
+     * 表现就是「别的接口都正常，只有这个动作回 -401 非法访问」。
+     * 网页端发的本来就只有一份表单，照着发最不容易出事。
      */
-    suspend fun coin(bvid: String): String =
-        actOnVideo(
-            path = "/x/web-interface/coin/add",
-            bvid = bvid,
-            what = "投币",
-            extra = arrayOf("multiply" to "1", "select_like" to "0"),
-        )
-
-    /**
-     * 点赞与投币共用的请求骨架。
-     *
-     * 两者的参数、参照页、错误码处理完全一致，唯一的区别是路径与两个额外参数，
-     * 所以合成一处 —— 分开写必然会有一次漏掉 `csrf` 或 Referer。
-     */
-    private suspend fun actOnVideo(
+    private suspend fun postAction(
         path: String,
         bvid: String,
-        what: String,
-        extra: Array<Pair<String, String>>,
-    ): String {
-        ensureBuvid()
-        val raw = cookie().trim()
-        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法$what")
-        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct，无法$what")
-        val aid = video(bvid).aid
-        if (aid <= 0) throw BiliException("查不到 $bvid 的 aid，$what 失败")
-
-        val form = okhttp3.FormBody.Builder().add("aid", aid.toString())
-        extra.forEach { (k, v) -> form.add(k, v) }
-        form.add("csrf", csrf)
+        params: Map<String, String>,
+    ): Pair<Int, String> {
+        val form = okhttp3.FormBody.Builder()
+        params.forEach { (k, v) -> form.add(k, stripForbidden(v)) }
 
         val request = req("$API$path")
             .header("Referer", "https://www.bilibili.com/video/$bvid")
@@ -574,15 +569,11 @@ class BiliApi(private val cookie: () -> String) {
 
         val body = withContext(Dispatchers.IO) {
             runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
-                .getOrElse { throw BiliException("$what 失败：${it.message.orEmpty().take(120)}") }
+                .getOrElse { throw BiliException("点赞失败：${it.message.orEmpty().take(120)}") }
         }
         val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
-            ?: throw BiliException("$what 接口返回不是 JSON（可能被风控）：${body.take(120)}")
-        val code = obj.int("code")
-        if (code != 0) {
-            throw BiliException("B站拒绝了这次$what：$code ${obj.str("message")}（${friendlyCode(code)}）")
-        }
-        return "已$what"
+            ?: throw BiliException("点赞接口返回不是 JSON（可能被风控）：${body.take(120)}")
+        return obj.int("code") to obj.str("message")
     }
 
     /**
@@ -990,15 +981,15 @@ class BiliApi(private val cookie: () -> String) {
      *
      * 匿名请求也带一个 buvid3：B站对没有设备指纹的请求更容易直接 -412（风控），
      * 而拿 buvid3 本身不需要登录。
+     *
+     * **但两套指纹绝不能混用**：buvid3 / buvid4 / b_nut 是一组，B站会校验
+     * 三者的签发关系。登录 Cookie 里已经有服务端下发的 buvid3 时，如果再拼一个
+     * 匿名 b_nut 进去，两者对不上 —— 表现就是大部分接口正常，只有点赞这种
+     * 带写操作的动作返回 -401 非法访问。所以只有在我们自己注入 buvid3 的那条
+     * 分支里，才顺带注入配套的 buvid4 与 b_nut。
      */
-    private fun cookieHeader(raw: String): String {
-        val parts = ArrayList<String>(4)
-        if (raw.isNotBlank()) parts += raw.trim().trimEnd(';')
-        if (buvid.isNotEmpty() && !raw.contains("buvid3=")) parts += "buvid3=$buvid"
-        if (buvid4.isNotEmpty() && !raw.contains("buvid4=")) parts += "buvid4=$buvid4"
-        if (bNut > 0 && !raw.contains("b_nut=")) parts += "b_nut=$bNut"
-        return parts.joinToString("; ")
-    }
+    private fun cookieHeader(raw: String): String =
+        composeCookieHeader(raw, buvid, buvid4, bNut)
 
     /**
      * 从 Set-Cookie 头里挑出登录凭证，拼成一条 Cookie 头。
@@ -1074,6 +1065,8 @@ class BiliApi(private val cookie: () -> String) {
 
     private fun friendlyCode(code: Int): String = when (code) {
         -101 -> "未登录"
+        -400 -> "参数不合法"
+        -401 -> "签名校验失败（这个接口要 WBI 签名，或 Cookie 不完整）"
         -352 -> "被风控拦截（需要 buvid 或换个网络）"
         -403 -> "签名校验失败或权限不足"
         -404 -> "视频不存在或已删除"
@@ -1105,7 +1098,10 @@ class BiliApi(private val cookie: () -> String) {
 
         /** 登录必须保留的 Cookie 键。少了 bili_jct 就发不了评论，少了 SESSDATA 就等于没登录 */
         private val LOGIN_COOKIE_KEYS = setOf(
-            "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid", "buvid3", "buvid4",
+            "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid",
+            // buvid3 / buvid4 / b_nut 必须成组保存：带写操作的接口会校验
+            // 三者的签发关系，只留 buvid3 而丢掉 b_nut 会被判成「指纹不完整」
+            "buvid3", "buvid4", "b_nut",
         )
 
         private val BVID_REGEX = Regex("BV[0-9A-Za-z]{10}")
@@ -1232,3 +1228,32 @@ data class SubtitleResult(
     val available: Boolean,
     val hint: String,
 )
+
+/**
+ * 拼 Cookie 头。抽成顶层函数只为一个原因：**这条逻辑值得单测**。
+ *
+ * 规则是「设备指纹不许混用」——
+ * - 登录 Cookie 里已经有 buvid3：它是服务端下发的，与 SESSDATA 绑定。
+ *   此时**什么都不补**，尤其是不能塞匿名 buvid4 / b_nut；
+ * - 没有 buvid3：三件套（buvid3 / buvid4 / b_nut）整体注入，它们是一组。
+ *
+ * 混用的后果很隐蔽：搜索、看视频、发评论全都正常，只有点赞这种带写操作的
+ * 接口回 `-401 非法访问`，看上去像是「接口要签名」，实际是设备指纹对不上。
+ */
+internal fun composeCookieHeader(
+    raw: String,
+    buvid: String,
+    buvid4: String,
+    bNut: Long,
+): String {
+    val parts = ArrayList<String>(4)
+    if (raw.isNotBlank()) parts += raw.trim().trimEnd(';')
+    // 只在完全没有 buvid3 时才整套注入：给一个服务端下发的 buvid3 配一个
+    // 别处换来的 buvid4，两者签发关系对不上，比不带还要糟。
+    if (!raw.contains("buvid3=") && buvid.isNotEmpty()) {
+        parts += "buvid3=$buvid"
+        if (buvid4.isNotEmpty()) parts += "buvid4=$buvid4"
+        if (bNut > 0) parts += "b_nut=$bNut"
+    }
+    return parts.joinToString("; ")
+}

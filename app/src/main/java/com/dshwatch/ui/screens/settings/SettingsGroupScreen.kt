@@ -983,21 +983,13 @@ private fun BiliGroup(
             )
         }
 
-        // 点赞投币：唯一会消耗账号资源的动作，所以单独一行说清楚
+        // 点赞：不动账号里的任何资源，只发一个公开信号，所以只给一个总开关
         SwitchRow(
-            title = s.biliCoin,
-            subtitle = s.biliCoinHint,
-            checked = settings.biliCoinEnabled,
-            onCheckedChange = { v -> update { it.copy(biliCoinEnabled = v) } },
+            title = s.biliLike,
+            subtitle = s.biliLikeHint,
+            checked = settings.biliLikeEnabled,
+            onCheckedChange = { v -> update { it.copy(biliLikeEnabled = v) } },
         )
-        if (settings.biliCoinEnabled) {
-            SettingRow(
-                title = s.biliCoinQuota,
-                subtitle = s.biliCoinQuotaHint,
-                trailing = "1 枚 / 天",
-                showDivider = true,
-            )
-        }
     }
 
     Spacer(Modifier.height(6.dp))

@@ -215,14 +215,37 @@ interface AppStrings {
     val biliDynTopicRoastHint: String
     val biliDynTopicMaster: String
     val biliDynTopicMasterHint: String
-    val biliCoin: String
-    val biliCoinHint: String
-    val biliCoinQuota: String
-    val biliCoinQuotaHint: String
+    val biliLike: String
+    val biliLikeHint: String
     val communityTitle: String
     val communityHint: String
     val communityGroup: String
     val communityCopy: String
+
+    // 社区与支持（三个独立页面）
+    val communitySection: String
+    val navGroupChat: String
+    val navGroupChatHint: String
+    val navDonate: String
+    val navDonateHint: String
+    val navThanks: String
+    val navThanksHint: String
+
+    val groupTitle: String
+    val groupIntro: String
+    val groupLongPress: String
+
+    val donateTitle: String
+    val donateIntro: String
+    val donateScan: String
+    val donateNote: String
+    val donateThanks: String
+
+    val thanksTitle: String
+    val thanksIntro: String
+    val thanksPeople: String
+    val thanksProjects: String
+    val thanksFooter: String
     val communityCopied: String
     val biliAutoRun: String
     val biliAutoRunHint: String
@@ -672,14 +695,36 @@ object Zh : AppStrings {
     override val biliDynTopicRoastHint = "刚刷到的视频，哪里离谱、哪里真不错"
     override val biliDynTopicMaster = "对你的感受"
     override val biliDynTopicMasterHint = "跟着你、被你使唤、嘴上嫌心里舍不得"
-    override val biliCoin = "自动点赞投币"
-    override val biliCoinHint = "觉得好才投，不是每条都投"
-    override val biliCoinQuota = "每日硬币"
-    override val biliCoinQuotaHint = "写死 1 枚；同一条视频只投一次"
+    override val biliLike = "自动点赞"
+    override val biliLikeHint = "觉得好才点，同一条视频一天只点一次"
     override val communityTitle = "Bug 反馈群"
     override val communityHint = "遇到问题、想提需求，扫码进来"
     override val communityGroup = "群号"
     override val communityCopy = "复制群号"
+
+    override val communitySection = "社区与支持"
+    override val navGroupChat = "加入群聊"
+    override val navGroupChatHint = "QQ 群，答疑与反馈"
+    override val navDonate = "捐赠支持"
+    override val navDonateHint = "请大肥鱼喝一杯"
+    override val navThanks = "特别感谢"
+    override val navThanksHint = "没有他们就没有这个 App"
+
+    override val groupTitle = "加入群聊"
+    override val groupIntro = "扫码进群，或者手动搜群号。提需求、报 Bug、单纯来骂两句都行。"
+    override val groupLongPress = "群号可长按复制"
+
+    override val donateTitle = "捐赠支持"
+    override val donateIntro = "这个 App 不收费、不放广告，服务器和代码签名都是自掏腰包。"
+    override val donateScan = "微信扫码，金额随意"
+    override val donateNote = "不打赏也照样用，功能一个不少。别因为这个给自己添负担。"
+    override val donateThanks = "谢谢你的心意"
+
+    override val thanksTitle = "特别感谢"
+    override val thanksIntro = "这个 App 站在很多人肩膀上。"
+    override val thanksPeople = "内测与反馈"
+    override val thanksProjects = "开源项目"
+    override val thanksFooter = "名单随版本更新，漏掉的人随时来群里找我补上。"
     override val communityCopied = "已复制"
     override val biliAutoRun = "每日自动刷一轮"
     override val biliAutoRunHint = "到点自动跑，跑完按上面选的方式处理"
@@ -981,7 +1026,7 @@ object Zh : AppStrings {
         "bili_reply" -> "发评论"
         "bili_dm" -> "发私信"
         "bili_dyn" -> "发动态"
-        "bili_coin" -> "点赞投币"
+        "bili_like" -> "点赞"
         else -> tool
     }
 }
@@ -1185,14 +1230,36 @@ object En : AppStrings {
     override val biliDynTopicRoastHint = "About the video it just watched"
     override val biliDynTopicMaster = "Feelings for you"
     override val biliDynTopicMasterHint = "Follows you around, complains but stays"
-    override val biliCoin = "Auto like & coin"
-    override val biliCoinHint = "Only when it genuinely likes something"
-    override val biliCoinQuota = "Daily coins"
-    override val biliCoinQuotaHint = "Fixed at 1; never twice on the same video"
+    override val biliLike = "Auto like"
+    override val biliLikeHint = "Only when it genuinely likes something; once per video per day"
     override val communityTitle = "Bug report group"
     override val communityHint = "Scan to join; report bugs or request features"
     override val communityGroup = "Group ID"
     override val communityCopy = "Copy ID"
+
+    override val communitySection = "Community & support"
+    override val navGroupChat = "Join the group"
+    override val navGroupChatHint = "QQ group for help and feedback"
+    override val navDonate = "Support the author"
+    override val navDonateHint = "Buy the fish a coffee"
+    override val navThanks = "Special thanks"
+    override val navThanksHint = "This app exists because of them"
+
+    override val groupTitle = "Join the group"
+    override val groupIntro = "Scan to join, or type the group ID. Bugs, requests, complaints — all welcome."
+    override val groupLongPress = "Long-press the ID to copy"
+
+    override val donateTitle = "Support the author"
+    override val donateIntro = "Free, no ads. Servers and signing keys come out of my own pocket."
+    override val donateScan = "WeChat Pay, any amount"
+    override val donateNote = "Everything works without paying. Don't strain your wallet over it."
+    override val donateThanks = "Thank you"
+
+    override val thanksTitle = "Special thanks"
+    override val thanksIntro = "This app stands on a lot of shoulders."
+    override val thanksPeople = "Testers & feedback"
+    override val thanksProjects = "Open source"
+    override val thanksFooter = "The list grows with each release. Ping me in the group if I missed you."
     override val communityCopied = "Copied"
     override val biliAutoRun = "Run daily"
     override val biliAutoRunHint = "Fires on schedule and handles it as selected above"
@@ -1497,7 +1564,7 @@ object En : AppStrings {
         "bili_reply" -> "Post comment"
         "bili_dm" -> "Send DM"
         "bili_dyn" -> "Publish"
-        "bili_coin" -> "Like & coin"
+        "bili_like" -> "Like"
         else -> tool
     }
 }

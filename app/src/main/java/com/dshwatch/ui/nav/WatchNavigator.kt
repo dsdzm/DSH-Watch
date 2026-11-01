@@ -27,6 +27,15 @@ sealed interface Screen {
 
     /** 设置页的二级分组（id 见 SettingsGroups） */
     data class SettingsGroup(val id: String) : Screen
+
+    /** 加入群聊：二维码 + 群号 */
+    data object GroupChat : Screen
+
+    /** 捐赠支持：微信收款码 */
+    data object Donate : Screen
+
+    /** 特别感谢 */
+    data object Thanks : Screen
 }
 
 /**
@@ -88,6 +97,9 @@ class WatchNavigator internal constructor(
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
             Screen.ExecSettings -> "exec"
             Screen.BiliLogin -> "bililogin"
+            Screen.GroupChat -> "group"
+            Screen.Donate -> "donate"
+            Screen.Thanks -> "thanks"
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
             is Screen.SettingsGroup -> "sgroup${SEP}${screen.id}"
@@ -107,6 +119,9 @@ class WatchNavigator internal constructor(
                 "ws" -> Screen.Workspace
                 "exec" -> Screen.ExecSettings
                 "bililogin" -> Screen.BiliLogin
+                "group" -> Screen.GroupChat
+                "donate" -> Screen.Donate
+                "thanks" -> Screen.Thanks
                 "wsp" -> Screen.WorkspacePreview(parts.getOrNull(1).orEmpty())
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())

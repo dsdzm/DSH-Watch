@@ -96,8 +96,8 @@ object BiliSchedule {
             append("如果今天确实有想说的，用 bili_dyn 发一条动态，写").append(BiliTopics.summary(settings.biliDynTopics))
             append("；没有想说的就不发，别硬凑。")
         }
-        if (settings.biliCoinEnabled) {
-            append("看到真觉得好的视频可以 bili_coin 点个赞投枚币（每天最多一枚硬币，不要每条都投）。")
+        if (settings.biliLikeEnabled) {
+            append("看到真觉得好的视频可以 bili_like 点个赞（同一条当天只点一次，不要每条都点）。")
         }
         append("做完把今天的结论列给我。")
     }

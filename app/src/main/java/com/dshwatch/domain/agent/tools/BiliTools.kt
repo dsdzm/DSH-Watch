@@ -64,7 +64,7 @@ object BiliTools {
         ReplyTool,
         DmTool,
         DynTool,
-        CoinTool,
+        LikeTool,
     )
 
     /** 日报放在工作空间根的 `bili/` 下：跨会话共享，换会话不会丢配额与判重记录 */
@@ -247,7 +247,7 @@ object BiliTools {
         override val name = "bili_status"
         override val description =
             "刷B站 / 回评论前的第一步：返回今日配额、关注关键词、登录状态、当前模式" +
-                "（发评论 / 发私信 / 只总结）、@ 目标、配图设置、动态选题、点赞投币额度、评论风格，" +
+                "（发评论 / 发私信 / 只总结）、@ 目标、配图设置、动态选题、点赞开关、评论风格，" +
                 "以及本轮标准流程。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
@@ -307,13 +307,10 @@ object BiliTools {
                             else -> "不带"
                         }
                     ).append('\n')
-                    if (s.biliCoinEnabled) {
-                        val coins = ctx.workspace.read(coinPath(), maxChars = 100_000).orEmpty()
-                            .lineSequence().count { it.contains(" coin ") }
-                        append("点赞投币：**开**，今日已投 ").append(coins).append(" / ")
-                            .append(COIN_PER_DAY).append(" 枚（点赞不占额度）\n")
+                    if (s.biliLikeEnabled) {
+                        append("点赞：**开**（同一条视频当天只点一次，不消耗任何资源）\n")
                     } else {
-                        append("点赞投币：关（不要调用 bili_coin）\n")
+                        append("点赞：关（不要调用 bili_like）\n")
                     }
                     append("评论风格【").append(tone.name).append("】：").append(tone.prompt).append('\n')
                     append("日报：").append(digestPath()).append('\n')
@@ -357,11 +354,10 @@ object BiliTools {
                         append("5. 有独立每日上限，超了会拒绝；相同内容当天不会重复发\n")
                     }
 
-                    if (s.biliCoinEnabled) {
-                        append("\n流程 D · 点赞投币（可选，不是每条都投）：\n")
-                        append("1. 只在你真觉得这条值得的时候用 bili_coin，不要每看完一条就投\n")
-                        append("2. 投币每天只有 1 枚，投出去就没了；同一条视频不重复投\n")
-                        append("3. 只想点个赞就传 coin=false\n")
+                    if (s.biliLikeEnabled) {
+                        append("\n流程 D · 点赞（可选，不是每条都点）：\n")
+                        append("1. 只在你真觉得这条值得的时候用 bili_like，不要每看完一条就点\n")
+                        append("2. 同一条视频当天只点一次，重复调用会被跳过\n")
                     }
 
                     append("\n字幕取不到时用 bili_comments 看评论区，仍取不到就跳过这条并说明原因。")
@@ -978,112 +974,56 @@ object BiliTools {
     }
 
     // ------------------------------------------------------------------
-    // 11. 点赞 / 投币
+    // 11. 点赞
     // ------------------------------------------------------------------
 
     /**
-     * 给视频点赞、投币。
+     * 给视频点个赞。
      *
-     * 这是唯一一个**会消耗账号资源**的工具：投币用掉的是硬币，投出去就回不来。
-     * 所以它比评论更保守：
+     * 这里原来还有一个「投币」分支，后来整个砍掉了：硬币是账号里不可逆的存量资源，
+     * 让模型替用户花，收益（一条视频的权重）和风险（扣掉回不来、被风控 -401 白折腾）
+     * 完全不成比例。点赞是纯公开信号，重复点也不消耗任何东西，所以留下。
      *
-     * - 每天最多 [COIN_PER_DAY] 枚（写死 1，不开放设置 —— 用户说「每日可以投一颗币」，
-     *   那就是一颗；把这个数字做成可调的旋钮只会多一个手滑的机会）
-     * - 同一条视频只投一次（`bili/coins/<日期>.md` 记 bvid）
-     * - 点赞不耗资源，但同样判重，避免模型在一个视频上反复调接口
-     *
-     * 投币和点赞分开报错：两者失败原因不同（硬币不够 / 已投过 / 未登录），
-     * 合成一句「操作失败」等于把排查线索扔了。
+     * 判重只为了省请求 —— 接口本身幂等，不是防扣费。
      */
-    object CoinTool : AgentTool {
-        override val name = "bili_coin"
+    object LikeTool : AgentTool {
+        override val name = "bili_like"
         override val description =
-            "给一个视频点赞、投币。投币每天最多 1 枚且同一视频只投一次，是消耗账号硬币的不可逆操作。" +
-                "一般在你真的觉得这条视频有意思时才用，不要每条都投。"
+            "给一个视频点赞。只在你真的觉得这条视频有意思时才用，不要每看完一条就点。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
-            properties = mapOf(
-                "bvid" to Schema.str("视频 BV 号"),
-                "coin" to Schema.bool("是否投币，默认 true。硬币不够或已投过会自动跳过"),
-                "like" to Schema.bool("是否点赞，默认 true"),
-            ),
+            properties = mapOf("bvid" to Schema.str("视频 BV 号")),
             required = listOf("bvid"),
         )
-        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliCoinEnabled }
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliLikeEnabled }
 
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             val bvid = args.strOf("bvid")?.trim()?.takeIf { it.isNotBlank() }
                 ?: return ToolResult.fail("缺少 bvid")
-            val s = ctx.settings()
-            if (!s.biliCoinEnabled) {
-                return ToolResult.fail(
-                    "设置里没打开「自动点赞投币」。要开请让用户去 设置 → 刷B站 → 自动点赞投币。"
-                )
+            if (!ctx.settings().biliLikeEnabled) {
+                return ToolResult.fail("设置里没打开「自动点赞」。要开请让用户去 设置 → 刷B站 → 自动点赞。")
             }
-            if (ctx.biliCookie().isBlank()) {
-                return ToolResult.fail("还没登录 B站，点不了赞也投不了币。用扫码登录。")
-            }
+            if (ctx.biliCookie().isBlank()) return ToolResult.fail("还没登录 B站，点不了赞。用扫码登录。")
 
-            val wantCoin = args.boolOf("coin", true)
-            val wantLike = args.boolOf("like", true)
-            if (!wantCoin && !wantLike) return ToolResult.fail("coin 和 like 至少要选一个。")
+            val log = likePath()
+            val done = ctx.workspace.read(log, maxChars = 100_000).orEmpty()
+                .lineSequence().any { it.contains("like $bvid") }
+            if (done) return ToolResult.ok("今天已经给 $bvid 点过赞了，跳过。")
 
-            val log = coinPath()
-            val todayLog = ctx.workspace.read(log, maxChars = 100_000).orEmpty()
-            val lines = todayLog.lineSequence().filter { it.isNotBlank() }.toList()
-
-            val out = StringBuilder()
-            var didSomething = false
-
-            if (wantLike) {
-                if (lines.any { it.contains(" like $bvid") }) {
-                    out.append("今天已经给 $bvid 点过赞了，跳过。")
-                } else {
-                    runCatching { api(ctx).like(bvid) }.fold(
-                        onSuccess = {
-                            ctx.workspace.append(log, "${stamp()} like $bvid\n")
-                            out.append("已点赞 $bvid。")
-                            didSomething = true
-                        },
-                        onFailure = { out.append("点赞失败：${errText(it)}") },
-                    )
-                }
-            }
-
-            if (wantCoin) {
-                val used = lines.count { it.contains(" coin ") }
-                when {
-                    lines.any { it.contains(" coin $bvid") } ->
-                        out.append("\n$bvid 今天已经投过币了，跳过（同一条不重复投）。")
-
-                    used >= COIN_PER_DAY ->
-                        out.append("\n今天那 1 枚硬币已经投出去了，今天不再投 —— 硬币存着也是有限的。")
-
-                    else -> runCatching { api(ctx).coin(bvid) }.fold(
-                        onSuccess = {
-                            ctx.workspace.append(log, "${stamp()} coin $bvid\n")
-                            out.append("\n已给 $bvid 投了 1 枚硬币（今日额度用完）。")
-                            didSomething = true
-                        },
-                        onFailure = { out.append("\n投币失败：${errText(it)}") },
-                    )
-                }
-            }
-
-            // 什么都没做（全都跳过或全失败）时给 ok 还是 fail？
-            // 跳过是「按规则不该做」，不是错误；全失败才是错误。
-            return if (didSomething || out.contains("跳过") || out.contains("不再投")) {
-                ToolResult.ok(out.toString().trim())
-            } else {
-                ToolResult.fail(out.toString().trim().ifBlank { "点赞和投币都没成功。" })
-            }
+            return runCatching { api(ctx).like(bvid) }.fold(
+                onSuccess = {
+                    ctx.workspace.append(log, "${stamp()} like $bvid\n")
+                    ToolResult.ok("已点赞 $bvid。")
+                },
+                onFailure = { ToolResult.fail("点赞失败：${errText(it)}") },
+            )
         }
 
-        override fun summarize(args: JsonObject) = "赞币 " + (args.strOf("bvid") ?: "—")
+        override fun summarize(args: JsonObject) = "点赞 " + (args.strOf("bvid") ?: "—")
     }
 
-    /** 点赞/投币的当日记录。和发言记录分开：它们不占「对外发言」额度 */
-    private fun coinPath(): String = "$DIR/coins/${today()}.md"
+    /** 点赞的当日记录。和发言记录分开：点赞不占「对外发言」额度 */
+    private fun likePath(): String = "$DIR/likes/${today()}.md"
 
     /**
      * 把设置里的动态选题转成人话。
@@ -1095,11 +1035,9 @@ object BiliTools {
 
     private fun stamp(): String = SimpleDateFormat("HH:mm", Locale.US).format(Date())
 
-    /** 每天最多投几枚硬币。写死 1：用户要的就是「每日一颗」 */
-    private const val COIN_PER_DAY = 1
 
     // ------------------------------------------------------------------
-    // 11. 发动态
+    // 12. 发动态
     // ------------------------------------------------------------------
 
     /**

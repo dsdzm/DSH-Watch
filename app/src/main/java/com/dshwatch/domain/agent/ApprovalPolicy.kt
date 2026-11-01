@@ -43,12 +43,10 @@ object ApprovalPolicy {
      * 动态会进粉丝时间线，曝光面比评论大，所以「能发」这件事由
      * `biliDynEnabled` 单独控制，而不是搭评论的车。
      *
-     * `bili_coin` 也在这里，尽管它花的是硬币。理由不是「硬币不重要」，
-     * 而是**它必须能在定时任务里跑**：凌晨三点没人点确认，要确认就等于
-     * 这个功能只能白天手动用。额度那一侧已经写死「每天 1 枚、同视频不重复」，
-     * 上限是硬的，不需要人每次点头。
+     * `bili_like` 也在这里。它不改任何内容、不消耗任何资源（重复点赞是幂等的），
+     * 所以没有「点错」的成本，也就不需要每次点一遍弹窗。
      */
-    val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm", "bili_dyn", "bili_coin")
+    val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm", "bili_dyn", "bili_like")
 
     private const val RUN_SCRIPT = "run_script"
     private const val SHELL_KEY = "run_script:shell"

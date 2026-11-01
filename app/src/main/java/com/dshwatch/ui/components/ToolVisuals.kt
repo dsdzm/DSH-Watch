@@ -92,7 +92,7 @@ object ToolVisuals {
         "bili_reply" -> Icons.Filled.Send
         "bili_dm" -> Icons.Filled.Email
         "bili_dyn" -> Icons.Filled.Edit
-        "bili_coin" -> Icons.Filled.Star
+        "bili_like" -> Icons.Filled.Star
 
         // 执行与云端
         "run_script" -> Icons.Filled.PlayArrow

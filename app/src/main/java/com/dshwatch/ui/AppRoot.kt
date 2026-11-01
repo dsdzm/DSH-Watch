@@ -7,6 +7,9 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.about.AboutScreen
+import com.dshwatch.ui.screens.about.DonateScreen
+import com.dshwatch.ui.screens.about.GroupChatScreen
+import com.dshwatch.ui.screens.about.ThanksScreen
 import com.dshwatch.ui.screens.chat.ChatScreen
 import com.dshwatch.ui.screens.diagnostics.DiagnosticsScreen
 import com.dshwatch.ui.screens.input.InputScreen
@@ -44,6 +47,9 @@ fun AppRoot(
         Screen.Usage -> UsageScreen(container = container, nav = nav)
         Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)
         Screen.About -> AboutScreen(container = container, nav = nav)
+        Screen.GroupChat -> GroupChatScreen(nav = nav)
+        Screen.Donate -> DonateScreen(nav = nav)
+        Screen.Thanks -> ThanksScreen(nav = nav)
         Screen.Diagnostics -> DiagnosticsScreen(container = container, settings = settings, nav = nav)
         Screen.Workspace -> WorkspaceScreen(container = container, nav = nav)
         Screen.BiliLogin -> BiliLoginScreen(

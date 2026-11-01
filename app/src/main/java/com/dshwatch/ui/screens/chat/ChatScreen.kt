@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -59,6 +60,7 @@ import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -580,9 +582,28 @@ private fun BubbleScaffold(
     headerTrailing: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // 用户气泡的蓝灰：比助手的中性灰多一点点倾向，但仍是低饱和
-    val bubbleColor = if (isUser) Color(0xFF4A5670) else MaterialTheme.colorScheme.surfaceContainerHigh
-    val textColor = if (isUser) Color(0xFFF2F2F2) else MaterialTheme.colorScheme.onSurface
+    /*
+     * 用户气泡的底色必须跟着主题走。
+     *
+     * 原来写死 `0xFF4A5670`（深蓝灰）+ `0xFFF2F2F2`（近白字），在深色主题下是对的，
+     * 但浅色主题里正文用的是 `colorScheme.onSurface`（深色字），深底深字直接糊成一片 ——
+     * 也就是「用户发的话看不清」。
+     *
+     * 判断明暗看 `background` 的亮度：Material3 没有现成的 isLight()，
+     * 而 luminance() 是线性的，0.5 这个阈值对纯黑/纯白两端足够可靠，
+     * 也自动适配动态取色出来的任意色调。
+     */
+    val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val bubbleColor = when {
+        isUser && light -> MaterialTheme.colorScheme.secondaryContainer
+        isUser -> Color(0xFF4A5670)
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val textColor = when {
+        isUser && light -> MaterialTheme.colorScheme.onSecondaryContainer
+        isUser -> Color(0xFFF2F2F2)
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -693,13 +714,28 @@ private fun MessageItem(
 
         if (body.isNotBlank()) {
             if (isUser) {
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                /*
+                 * 节选复制：长按气泡里的文字会弹出系统选择手柄，可以只拖一段复制，
+                 * 不必整条搬走。「复制」按钮保留整条复制的快捷方式 ——
+                 * 手表上长按拖动本来就不轻松，两种入口各有用处。
+                 *
+                 * 颜色用 LocalContentColor 而不是写死 onSurface：气泡底色已经
+                 * 随主题变化（浅色模式是 secondaryContainer），文字颜色必须跟着
+                 * 气泡走，否则就是「深底深字」。
+                 */
+                SelectionContainer {
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = LocalContentColor.current,
+                    )
+                }
             } else {
-                MarkdownText(text = body)
+                SelectionContainer {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        MarkdownText(text = body)
+                    }
+                }
             }
         } else if (isStreaming) {
             Text(
