@@ -58,13 +58,6 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- QQ 通道：常驻 WebSocket。和 StreamingService 分开，因为它是长期在线的，
-             不是「等一次生成」；两者的通知语义也不一样 -->
-        <service
-            android:name=".service.QqService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
         <!-- 工作空间产物导出：只暴露 files/workspace/，见 res/xml/file_paths.xml -->
         <provider
             android:name="androidx.core.content.FileProvider"

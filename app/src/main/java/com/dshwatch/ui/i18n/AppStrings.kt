@@ -217,18 +217,6 @@ interface AppStrings {
     val biliDynTopicMasterHint: String
     val biliLike: String
     val biliLikeHint: String
-    val groupQq: String
-    val qqEnable: String
-    val qqEnableHint: String
-    val qqAppId: String
-    val qqAppIdHint: String
-    val qqSecret: String
-    val qqSecretHint: String
-    val qqSandbox: String
-    val qqSandboxHint: String
-    val qqAllow: String
-    val qqAllowHint: String
-    val qqFootnote: String
     val communityTitle: String
     val communityHint: String
     val communityGroup: String
@@ -709,18 +697,6 @@ object Zh : AppStrings {
     override val biliDynTopicMasterHint = "跟着你、被你使唤、嘴上嫌心里舍不得"
     override val biliLike = "自动点赞"
     override val biliLikeHint = "觉得好才点，同一条视频一天只点一次"
-    override val groupQq = "QQ 通道"
-    override val qqEnable = "接入 QQ 群"
-    override val qqEnableHint = "有人在群里 @ 它，就用当前模型回一句"
-    override val qqAppId = "AppID"
-    override val qqAppIdHint = "开放平台机器人页面上那串数字"
-    override val qqSecret = "AppSecret"
-    override val qqSecretHint = "只显示一次，加密存在本机"
-    override val qqSandbox = "沙箱环境"
-    override val qqSandboxHint = "免 IP 白名单；正式环境要求固定公网 IP，手表做不到"
-    override val qqAllow = "允许的 openid"
-    override val qqAllowHint = "逗号分隔；留空谁都不理"
-    override val qqFootnote = "这条通道只聊天：不调工具、不读写文件、不发 B 站。群里没人能点「批准」，挂了工具也只会卡住。"
     override val communityTitle = "Bug 反馈群"
     override val communityHint = "遇到问题、想提需求，扫码进来"
     override val communityGroup = "群号"
@@ -1256,18 +1232,6 @@ object En : AppStrings {
     override val biliDynTopicMasterHint = "Follows you around, complains but stays"
     override val biliLike = "Auto like"
     override val biliLikeHint = "Only when it genuinely likes something; once per video per day"
-    override val groupQq = "QQ channel"
-    override val qqEnable = "Join a QQ group"
-    override val qqEnableHint = "When someone @s it in the group, it answers with the current model"
-    override val qqAppId = "AppID"
-    override val qqAppIdHint = "The number on your bot page in the QQ open platform"
-    override val qqSecret = "AppSecret"
-    override val qqSecretHint = "Shown once only; stored encrypted on this device"
-    override val qqSandbox = "Sandbox"
-    override val qqSandboxHint = "No IP allowlist; production requires a fixed public IP, which a watch cannot keep"
-    override val qqAllow = "Allowed openids"
-    override val qqAllowHint = "Comma separated; empty means nobody"
-    override val qqFootnote = "This channel only chats: no tools, no files, no Bilibili. Nobody in a QQ group can tap Approve."
     override val communityTitle = "Bug report group"
     override val communityHint = "Scan to join; report bugs or request features"
     override val communityGroup = "Group ID"

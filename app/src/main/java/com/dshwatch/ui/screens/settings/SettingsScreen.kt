@@ -104,7 +104,6 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
     SettingsGroups.RUNTIME -> Icons.Outlined.Memory
-    SettingsGroups.QQ -> Icons.Outlined.ChatBubbleOutline
     else -> Icons.Outlined.Wifi
 }
 
@@ -149,13 +148,6 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
             if (settings.biliImage != "none") append(" · 带图")
             if (settings.biliAutoRun) append(" · 自动")
         }
-    }
-
-    SettingsGroups.QQ -> when {
-        !settings.qqEnabled -> "已关闭"
-        settings.qqAppId.isBlank() -> "缺 AppID"
-        settings.qqAllowOpenids.isBlank() -> "白名单为空"
-        else -> if (settings.qqSandbox) "沙箱 · 群 @" else "正式 · 群 @"
     }
 
     SettingsGroups.CHAT -> buildList {

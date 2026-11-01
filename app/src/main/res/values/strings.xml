@@ -13,9 +13,4 @@
     <string name="notification_channel_alarm">闹钟</string>
     <string name="notification_channel_alarm_desc">由 AI 助手设置的手表闹钟</string>
     <string name="notification_alarm_body">时间到了</string>
-    <string name="qq_channel_name">QQ 通道</string>
-    <string name="qq_channel_desc">保持 QQ 机器人的长连接</string>
-    <string name="qq_notification_title">QQ 通道在线</string>
-    <string name="qq_notification_connecting">正在连接 QQ…</string>
-    <string name="qq_notification_stop">断开</string>
 </resources>
