@@ -31,6 +31,16 @@ fun AppRoot(
     settings: AppSettings,
     nav: WatchNavigator,
 ) {
+    // 首次启动：先走三步引导（形状 / 布局 / 主题）。
+    // 引导页不挂导航栈，也不允许返回键退出 —— 它本身就是根。
+    if (!settings.onboardingDone) {
+        com.dshwatch.ui.screens.onboarding.OnboardingScreen(
+            container = container,
+            settings = settings,
+        )
+        return
+    }
+
     BackHandler(enabled = nav.canGoBack) { nav.pop() }
 
     // 屏幕圆角安全边距由 MainActivity 注入的 DeviceProfile 决定

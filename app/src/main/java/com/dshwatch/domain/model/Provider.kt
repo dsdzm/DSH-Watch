@@ -71,6 +71,52 @@ data class Provider(
 @Serializable
 enum class ThemeMode { SYSTEM, DARK, LIGHT }
 
+/**
+ * 屏幕形状。
+ *
+ * 存在设置里的原因：`Configuration.isScreenRound` 在少数手表 ROM 上会判错
+ * （把方表报成圆屏，于是左右白收 16dp），而圆屏和方屏的布局差别很大，
+ * 用户需要一条「我自己知道」的出口。`auto` 表示继续信任系统。
+ */
+object ScreenShapes {
+    const val AUTO = "auto"
+    const val ROUND = "round"
+    const val SQUARE = "square"
+
+    val all = listOf(AUTO, ROUND, SQUARE)
+
+    fun of(id: String): String = id.takeIf { it in all } ?: AUTO
+
+    /** 最终是否按圆屏布局：显式选择优先，其次看系统检测值 */
+    fun resolve(choice: String, detected: Boolean): Boolean = when (of(choice)) {
+        ROUND -> true
+        SQUARE -> false
+        else -> detected
+    }
+}
+
+/**
+ * 对话页布局。
+ *
+ * 存字符串而不是枚举：设置整包 JSON 落盘，枚举改名会让老用户整包读不回来。
+ */
+object ChatLayouts {
+    const val BUBBLE = "bubble"
+    const val CARD = "card"
+    const val MINIMAL = "minimal"
+
+    /** 环形布局：只给圆屏 —— 方屏上它和一个窄居中的极简布局没有区别 */
+    const val RING = "ring"
+
+    val all = listOf(BUBBLE, CARD, MINIMAL, RING)
+
+    fun of(id: String): String = id.takeIf { it in all } ?: BUBBLE
+
+    /** 当前设备可选的布局：方屏不提供环形 */
+    fun available(isRound: Boolean): List<String> =
+        if (isRound) all else all.filter { it != RING }
+}
+
 @Serializable
 enum class PerfMode {
     /** 依据设备内存/核心数自动选择 */
@@ -144,6 +190,30 @@ data class AppSettings(
     val maxAgentSteps: Int = 8,
     /** 用户点过「总是允许」的工具名 */
     val autoApprovedTools: Set<String> = emptySet(),
+
+    // ---------------- 初次引导 / 外观 ----------------
+    /**
+     * 是否完成首次启动引导。
+     * false 时 [com.dshwatch.ui.AppRoot] 直接进引导页，不渲染任何主界面。
+     */
+    val onboardingDone: Boolean = false,
+
+    /** 屏幕形状：`auto` 跟随系统 / `round` 圆屏 / `square` 方屏 */
+    val screenShape: String = ScreenShapes.AUTO,
+
+    /** 对话页布局 id，见 [ChatLayouts] */
+    val chatLayout: String = ChatLayouts.BUBBLE,
+
+    /**
+     * 主题预设 id。
+     *
+     * 与 [themeMode] 是**正交**的两层：预设决定色板（哪套颜色），
+     * themeMode 决定明暗。这样「深色」和「深海蓝」可以自由组合。
+     */
+    val themePreset: String = "oled",
+
+    /** 强调色 id：在预设色板之上换主色，不改背景与正文层次 */
+    val accentColor: String = "blue",
 
     // ---------------- 屏幕 ----------------
     /** 屏幕边角安全边距（dp）。-1 表示按屏幕尺寸自动估算 */

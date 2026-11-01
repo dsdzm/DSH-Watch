@@ -2,16 +2,24 @@ package com.dshwatch.ui.screens.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,7 +48,9 @@ import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTones
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.model.ChatLayouts
 import com.dshwatch.domain.model.PerfMode
+import com.dshwatch.domain.model.ScreenShapes
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.domain.model.WorkspaceLocation
 import com.dshwatch.ui.components.AgentModeDialog
@@ -55,6 +66,8 @@ import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.theme.Accents
+import com.dshwatch.ui.theme.ThemePresets
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -320,6 +333,21 @@ private fun AppearanceGroup(
     profile: DeviceProfile,
     s: AppStrings,
 ) {
+    var editingPreset by remember { mutableStateOf(false) }
+    var editingAccent by remember { mutableStateOf(false) }
+    var editingLayout by remember { mutableStateOf(false) }
+    val dark = when (settings.themeMode) {
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    // 系统检测值单独取一次：AUTO 时需要它，而 profile.isRound 已经被用户选择覆盖过了
+    val configuration = LocalConfiguration.current
+    val detectedRound = remember(configuration) {
+        runCatching { configuration.isScreenRound }.getOrDefault(false)
+    }
+    val layouts = ChatLayouts.available(profile.isRound)
+
     SettingCard {
         Text(
             text = s.theme,
@@ -347,7 +375,22 @@ private fun AppearanceGroup(
                 }
             },
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(2.dp))
+        // 预设与强调色正交：预设定底色层级，强调色定主色。
+        // 选任一项都会关掉动态取色 —— 不然用户挑的颜色会被系统色直接盖掉。
+        SettingRow(
+            title = s.themePreset,
+            subtitle = s.themePresetHint,
+            trailing = s.themePresetLabel(settings.themePreset) + " ›",
+            showDivider = true,
+            onClick = { editingPreset = true },
+        )
+        SettingRow(
+            title = s.accentColor,
+            trailing = s.accentLabel(settings.accentColor) + " ›",
+            onClick = { editingAccent = true },
+        )
+        Spacer(Modifier.height(4.dp))
         SwitchRow(
             title = s.dynamicColor,
             subtitle = s.dynamicColorHint,
@@ -408,7 +451,54 @@ private fun AppearanceGroup(
                 }
             },
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        // 屏幕形状：圆屏和方屏的可用宽度完全不同，选错会让界面白收或切字。
+        Text(
+            text = s.screenShape,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(4.dp))
+        SegmentedRow(
+            options = listOf(s.shapeAuto, s.shapeRound, s.shapeSquare),
+            selectedIndex = when (ScreenShapes.of(settings.screenShape)) {
+                ScreenShapes.ROUND -> 1
+                ScreenShapes.SQUARE -> 2
+                else -> 0
+            },
+            onSelect = { index ->
+                val next = when (index) {
+                    1 -> ScreenShapes.ROUND
+                    2 -> ScreenShapes.SQUARE
+                    else -> ScreenShapes.AUTO
+                }
+                val nextRound = ScreenShapes.resolve(next, detectedRound)
+                update { st ->
+                    st.copy(
+                        screenShape = next,
+                        // 环形布局只属于圆屏：切到方屏时自动退回气泡
+                        chatLayout = if (!nextRound && st.chatLayout == ChatLayouts.RING) {
+                            ChatLayouts.BUBBLE
+                        } else {
+                            st.chatLayout
+                        },
+                    )
+                }
+            },
+        )
+        Spacer(Modifier.height(2.dp))
+        SettingRow(
+            title = s.chatLayout,
+            subtitle = s.chatLayoutHint(settings.chatLayout),
+            trailing = s.chatLayoutLabel(settings.chatLayout) + " ›",
+            showDivider = true,
+            onClick = { editingLayout = true },
+        )
         // 屏幕 R 角系统不给半径，只能估算 + 手动微调。
         // 这是唯一能解决「内容被圆角切掉」的旋钮。
         StepperRow(
@@ -443,6 +533,173 @@ private fun AppearanceGroup(
             onClick = { update { it.copy(showMascot = !it.showMascot) } },
         )
         Spacer(Modifier.height(4.dp))
+    }
+
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        SettingRow(
+            title = s.rerunOnboarding,
+            subtitle = s.rerunOnboardingHint,
+            trailing = "↻",
+            onClick = { update { it.copy(onboardingDone = false) } },
+        )
+    }
+
+    if (editingPreset) {
+        AlertDialog(
+            onDismissRequest = { editingPreset = false },
+            title = { Text(text = s.themePreset, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    ThemePresets.all.forEach { preset ->
+                        PickRow(
+                            title = s.themePresetLabel(preset.id),
+                            selected = preset.id == settings.themePreset,
+                            onClick = {
+                                update { it.copy(themePreset = preset.id, dynamicColor = false) }
+                                editingPreset = false
+                            },
+                            leading = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    ThemePresets.swatch(preset.id, settings.accentColor, dark)
+                                        .forEach { c ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(11.dp)
+                                                    .background(c, CircleShape),
+                                            )
+                                        }
+                                }
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingPreset = false }) { Text(s.close) }
+            },
+        )
+    }
+
+    if (editingAccent) {
+        AlertDialog(
+            onDismissRequest = { editingAccent = false },
+            title = { Text(text = s.accentColor, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Accents.all.forEach { accent ->
+                        PickRow(
+                            title = s.accentLabel(accent.id),
+                            selected = accent.id == settings.accentColor,
+                            onClick = {
+                                update { it.copy(accentColor = accent.id, dynamicColor = false) }
+                                editingAccent = false
+                            },
+                            leading = {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .background(
+                                            if (dark) accent.darkPrimary else accent.lightPrimary,
+                                            CircleShape,
+                                        ),
+                                )
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingAccent = false }) { Text(s.close) }
+            },
+        )
+    }
+
+    if (editingLayout) {
+        AlertDialog(
+            onDismissRequest = { editingLayout = false },
+            title = { Text(text = s.chatLayout, style = MaterialTheme.typography.titleSmall) },
+            text = {
+                Column {
+                    layouts.forEach { id ->
+                        PickRow(
+                            title = s.chatLayoutLabel(id),
+                            hint = s.chatLayoutHint(id),
+                            selected = ChatLayouts.of(settings.chatLayout) == id,
+                            onClick = {
+                                update { it.copy(chatLayout = id) }
+                                editingLayout = false
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { editingLayout = false }) { Text(s.close) }
+            },
+        )
+    }
+}
+
+/** 单选行：圆点 + 标题（可带说明）+ 勾 */
+@Composable
+private fun PickRow(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    hint: String? = null,
+    leading: @Composable (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (leading != null) {
+            leading()
+        } else {
+            Text(
+                text = if (selected) "●" else "○",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outline
+                },
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (!hint.isNullOrBlank()) {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+        if (selected) {
+            Text(
+                text = "✓",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 

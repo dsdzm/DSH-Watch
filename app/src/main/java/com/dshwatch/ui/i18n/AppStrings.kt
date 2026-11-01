@@ -487,6 +487,45 @@ interface AppStrings {
 
     val shareFailed: String
 
+    // ---------------- 初次引导 / 外观 ----------------
+    val onboardingTitle: String
+    val onboardingSubtitle: String
+    val onboardingShapeTitle: String
+    val onboardingShapeHint: String
+    val onboardingLayoutTitle: String
+    val onboardingLayoutHint: String
+    val onboardingThemeTitle: String
+    val onboardingThemeHint: String
+    val onboardingNext: String
+    val onboardingBack: String
+    val onboardingStart: String
+    val onboardingDetectedRound: String
+    val onboardingDetectedSquare: String
+    val shapeRound: String
+    val shapeSquare: String
+    val shapeAuto: String
+    val layoutBubble: String
+    val layoutCard: String
+    val layoutMinimal: String
+    val layoutRing: String
+    val layoutBubbleHint: String
+    val layoutCardHint: String
+    val layoutMinimalHint: String
+    val layoutRingHint: String
+    val screenShape: String
+    val chatLayout: String
+    val themePreset: String
+    val themePresetHint: String
+    val accentColor: String
+    val rerunOnboarding: String
+    val rerunOnboardingHint: String
+
+    /** 主题预设与强调色的显示名（定义在 ui.theme，这里只按语言取） */
+    fun themePresetLabel(id: String): String
+    fun accentLabel(id: String): String
+    fun chatLayoutLabel(id: String): String
+    fun chatLayoutHint(id: String): String
+
     /**
      * 工具名 → 用户看得懂的说法。
      *
@@ -984,8 +1023,61 @@ object Zh : AppStrings {
     override val cloudInstallTemplates = "安装 workflow 模板到仓库"
     override val cloudTestLabel = "测试连接"
 
+    override val onboardingTitle = "先认一下你的表"
+    override val onboardingSubtitle = "三步把界面调成适合这块屏幕的样子，之后在设置里随时能改。"
+    override val onboardingShapeTitle = "屏幕形状"
+    override val onboardingShapeHint = "圆屏四角没有像素，贴边的内容会被切掉；选错会让界面白白内收。"
+    override val onboardingLayoutTitle = "对话布局"
+    override val onboardingLayoutHint = "同一段对话，四种读法。选个顺眼的，之后随时换。"
+    override val onboardingThemeTitle = "主题"
+    override val onboardingThemeHint = "先挑底色，再挑强调色。OLED 纯黑底最省电。"
+    override val onboardingNext = "下一步"
+    override val onboardingBack = "上一步"
+    override val onboardingStart = "开始使用"
+    override val onboardingDetectedRound = "系统检测：圆形屏"
+    override val onboardingDetectedSquare = "系统检测：方形屏"
+    override val shapeRound = "圆形"
+    override val shapeSquare = "方形"
+    override val shapeAuto = "跟随系统"
+    override val layoutBubble = "气泡"
+    override val layoutCard = "卡片"
+    override val layoutMinimal = "极简"
+    override val layoutRing = "环形"
+    override val layoutBubbleHint = "左右气泡，对话感最强"
+    override val layoutCardHint = "每条一张卡片，信息分层清楚"
+    override val layoutMinimalHint = "去掉底色，小屏也能多读两行"
+    override val layoutRingHint = "沿表盘收窄的居中版式，圆屏专属"
+    override val screenShape = "屏幕形状"
+    override val chatLayout = "对话布局"
+    override val themePreset = "主题预设"
+    override val themePresetHint = "换一套底色，不影响明暗与字号"
+    override val accentColor = "强调色"
+    override val rerunOnboarding = "重新运行引导"
+    override val rerunOnboardingHint = "重选屏幕形状、布局与主题；不会删除任何对话"
+
+    override fun themePresetLabel(id: String) =
+        com.dshwatch.ui.theme.ThemePresets.of(id).labelZh
+
+    override fun accentLabel(id: String) =
+        com.dshwatch.ui.theme.Accents.of(id).labelZh
+
+    override fun chatLayoutLabel(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
+        com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCard
+        com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimal
+        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRing
+        else -> layoutBubble
+    }
+
+    override fun chatLayoutHint(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
+        com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCardHint
+        com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimalHint
+        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRingHint
+        else -> layoutBubbleHint
+    }
+
     override fun toolTitle(tool: String): String = when (tool) {
-        "get_datetime" -> "查看时间"        "calculate" -> "计算"
+        "get_datetime" -> "查看时间"
+        "calculate" -> "计算"
         "get_device_info" -> "查看设备信息"
         "get_token_usage" -> "查询用量"
         "http_fetch" -> "联网获取"
@@ -1520,6 +1612,58 @@ object En : AppStrings {
     override val cloudTokenHint = "Needs Actions read/write; stored encrypted on this device"
     override val cloudInstallTemplates = "Install workflow templates into the repo"
     override val cloudTestLabel = "Test connection"
+
+    override val onboardingTitle = "Let's match your watch"
+    override val onboardingSubtitle = "Three steps to fit this screen. Everything stays editable in Settings."
+    override val onboardingShapeTitle = "Screen shape"
+    override val onboardingShapeHint = "Round screens have no pixels in the corners, so edge content gets clipped. A wrong pick wastes width."
+    override val onboardingLayoutTitle = "Chat layout"
+    override val onboardingLayoutHint = "Four ways to read the same conversation. Pick one now, switch anytime."
+    override val onboardingThemeTitle = "Theme"
+    override val onboardingThemeHint = "Pick a base first, then an accent. Pure black OLED saves the most power."
+    override val onboardingNext = "Next"
+    override val onboardingBack = "Back"
+    override val onboardingStart = "Start"
+    override val onboardingDetectedRound = "Detected: round"
+    override val onboardingDetectedSquare = "Detected: square"
+    override val shapeRound = "Round"
+    override val shapeSquare = "Square"
+    override val shapeAuto = "Auto"
+    override val layoutBubble = "Bubble"
+    override val layoutCard = "Card"
+    override val layoutMinimal = "Minimal"
+    override val layoutRing = "Ring"
+    override val layoutBubbleHint = "Left/right bubbles, the most conversational"
+    override val layoutCardHint = "One card per turn, clear hierarchy"
+    override val layoutMinimalHint = "No fills, more lines on a tiny screen"
+    override val layoutRingHint = "Centered and narrowed around the dial, round-only"
+    override val screenShape = "Screen shape"
+    override val chatLayout = "Chat layout"
+    override val themePreset = "Theme preset"
+    override val themePresetHint = "Changes the base palette, not brightness or font size"
+    override val accentColor = "Accent color"
+    override val rerunOnboarding = "Run setup again"
+    override val rerunOnboardingHint = "Re-pick shape, layout and theme; no conversations are deleted"
+
+    override fun themePresetLabel(id: String) =
+        com.dshwatch.ui.theme.ThemePresets.of(id).labelEn
+
+    override fun accentLabel(id: String) =
+        com.dshwatch.ui.theme.Accents.of(id).labelEn
+
+    override fun chatLayoutLabel(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
+        com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCard
+        com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimal
+        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRing
+        else -> layoutBubble
+    }
+
+    override fun chatLayoutHint(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
+        com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCardHint
+        com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimalHint
+        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRingHint
+        else -> layoutBubbleHint
+    }
 
     override fun toolTitle(tool: String): String = when (tool) {
         "get_datetime" -> "Check time"

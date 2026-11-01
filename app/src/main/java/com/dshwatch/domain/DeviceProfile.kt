@@ -61,7 +61,11 @@ data class DeviceProfile(
 
 object DeviceProfiler {
 
-    fun detect(context: Context, overrideInsetDp: Int = -1): DeviceProfile {
+    fun detect(
+        context: Context,
+        overrideInsetDp: Int = -1,
+        shapeChoice: String = com.dshwatch.domain.model.ScreenShapes.AUTO,
+    ): DeviceProfile {
         val metrics = screenMetrics(context)
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val cores = Runtime.getRuntime().availableProcessors()
@@ -95,9 +99,12 @@ object DeviceProfiler {
             sdkInt = Build.VERSION.SDK_INT,
             compact = metrics.widthDp in 1..220,
             squarish = ratio > 0.8f,
-            isRound = runCatching {
-                context.resources.configuration.isScreenRound
-            }.getOrDefault(false),
+            // 系统检测值只作兜底：用户在引导页里可以显式选「圆屏 / 方屏」，
+            // 少数 ROM 的 isScreenRound 会判错，显式选择必须优先。
+            isRound = com.dshwatch.domain.model.ScreenShapes.resolve(
+                shapeChoice,
+                runCatching { context.resources.configuration.isScreenRound }.getOrDefault(false),
+            ),
         )
     }
 

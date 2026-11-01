@@ -77,6 +77,8 @@ object WatchDimens {
 fun DshWatchTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
     dynamicColor: Boolean = true,
+    themePreset: String = "oled",
+    accentColor: String = "blue",
     fontScale: Float = 0.92f,
     appLanguage: String = AppLanguage.SYSTEM,
     perf: PerfProfile = PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID),
@@ -91,13 +93,14 @@ fun DshWatchTheme(
         ThemeMode.LIGHT -> false
     }
 
-    val colorScheme = remember(dark, dynamicColor) {
+    // 主题预设 + 强调色：两者都变时才重算色板。
+    // 动态取色优先级最高 —— 它本来就是「跟着壁纸走」，用户开了就该由系统决定。
+    val colorScheme = remember(dark, dynamicColor, themePreset, accentColor) {
         val useDynamic = dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         when {
             useDynamic && dark -> dynamicDarkColorScheme(context)
             useDynamic -> dynamicLightColorScheme(context)
-            dark -> DshDarkColors
-            else -> DshLightColors
+            else -> ThemePresets.scheme(themePreset, accentColor, dark)
         }
     }
 

@@ -131,6 +131,15 @@ class AppContainer(private val app: Context) {
     val settings: StateFlow<AppSettings> = settingsRepo.flow
         .stateIn(appScope, SharingStarted.Eagerly, AppSettings())
 
+    /**
+     * 设置是否已从磁盘读出来。
+     *
+     * `stateIn` 的初始值是内存里的默认 [AppSettings]（onboardingDone=false），
+     * 直接拿它渲染会让老用户每次启动闪一下引导页。界面先等这个标志再出内容。
+     */
+    private val _settingsReady = MutableStateFlow(false)
+    val settingsReady: StateFlow<Boolean> = _settingsReady.asStateFlow()
+
     val engine = ChatEngine(
         appScope = appScope,
         settingsRepo = settingsRepo,
@@ -148,7 +157,9 @@ class AppContainer(private val app: Context) {
     init {
         appScope.launch {
             settings.collect { s ->
-                val prof = DeviceProfiler.detect(app, s.cornerInsetDp)
+                _settingsReady.value = true
+                // 屏幕形状可能是用户在引导页里手选的（ROM 的 isScreenRound 不一定可信）
+                val prof = DeviceProfiler.detect(app, s.cornerInsetDp, s.screenShape)
                 _profile.value = prof
 
                 var p = PerfProfiles.of(s.perfMode, prof.tier)

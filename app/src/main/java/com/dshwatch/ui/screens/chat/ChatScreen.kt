@@ -1,5 +1,6 @@
 package com.dshwatch.ui.screens.chat
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -60,6 +63,7 @@ import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -74,6 +78,7 @@ import com.dshwatch.domain.TokenEstimator
 import com.dshwatch.domain.ApprovalDecision
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.model.ChatLayouts
 import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.MessageStatus
 import com.dshwatch.domain.model.Role
@@ -103,11 +108,13 @@ import com.dshwatch.ui.markdown.MarkdownText
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.components.cornerSafe
+import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.math.sqrt
 
 @Composable
 fun ChatScreen(
@@ -117,6 +124,14 @@ fun ChatScreen(
 ) {
     val s = LocalStrings.current
     val perf = LocalPerf.current
+    val profile = LocalDeviceProfile.current
+    val round = profile.isRound
+    // 环形布局只在圆屏上有意义：方屏上它会退化成「窄一点的气泡」，没有辨识度
+    val chatLayout = if (!round && settings.chatLayout == ChatLayouts.RING) {
+        ChatLayouts.BUBBLE
+    } else {
+        ChatLayouts.of(settings.chatLayout)
+    }
     val engine = container.engine
     val scope = rememberCoroutineScope()
 
@@ -174,6 +189,31 @@ fun ChatScreen(
     }
     val turns = remember(visible) { groupMessages(visible) }
 
+    /*
+     * 圆屏的「弦长内收」。
+     *
+     * 圆屏上离屏幕中心越远，可用的横向宽度越窄：高度 y 处的半弦长是 sqrt(R²-y²)。
+     * 列表本身不知道每一项最终画在哪里，所以这里把 layoutInfo 里每一项的中心偏移
+     * 归一化成 t ∈ [-1,1]（0 = 正中，±1 = 顶/底），交给每一项按 1-sqrt(1-t²) 的比例
+     * 再收一次边、缩一点、淡一点 —— 这就是圆屏专属的呼吸感。
+     * 方屏恒为空表，不产生任何额外测量。
+     */
+    val roundShift by remember(round) {
+        derivedStateOf {
+            if (!round) {
+                emptyMap<Int, Float>()
+            } else {
+                val info = listState.layoutInfo
+                val half = ((info.viewportEndOffset - info.viewportStartOffset) / 2f)
+                    .coerceAtLeast(1f)
+                val cy = (info.viewportStartOffset + info.viewportEndOffset) / 2f
+                info.visibleItemsInfo.associate { item ->
+                    item.index to ((item.offset + item.size / 2f - cy) / half)
+                }
+            }
+        }
+    }
+
     // 首次进入：自动打开最近一个会话
     LaunchedEffect(Unit) {
         if (engine.conversation.value == null) {
@@ -228,6 +268,7 @@ fun ChatScreen(
             ChatBottomBar(
                 settings = settings,
                 streaming = streaming,
+                round = round,
                 onOpenInput = { nav.push(Screen.Input()) },
                 onSend = { nav.push(Screen.Input()) },
                 onStop = { engine.stop() },
@@ -381,11 +422,11 @@ fun ChatScreen(
                 contentPadding = PaddingValues(vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(
+                itemsIndexed(
                     items = turns,
-                    key = { it.key },
-                    contentType = { it.messages.first().role },
-                ) { turn ->
+                    key = { _, turn -> turn.key },
+                    contentType = { _, turn -> turn.messages.first().role },
+                ) { index, turn ->
                     val msgs = turn.messages
                     val sizeOf: (String) -> Long = { path -> artifactSizeOf(container, path) }
                     val openArtifact: (String) -> Unit = { path -> nav.push(Screen.WorkspacePreview(path)) }
@@ -402,49 +443,72 @@ fun ChatScreen(
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
                     }
 
-                    if (msgs.size == 1) {
-                        val message = msgs.first()
-                        val isLive = live.messageId == message.id
-                        MessageItem(
-                            message = message,
-                            live = if (isLive) live else null,
-                            settings = settings,
-                            onCopy = copyText,
-                            onRegenerate = { engine.regenerate(message.id) },
-                            onDelete = { pendingDelete = message },
-                            sizeOf = sizeOf,
-                            onOpenArtifact = openArtifact,
-                            onExportArtifact = exportArtifact,
-                        )
-                    } else {
-                        // 多步 Agent 回合：连续助手消息合成一条，只显示一条工作流程卡片
-                        val isLive = live.messageId == msgs.last().id
-                        AgentTurnItem(
-                            messages = msgs,
-                            live = if (isLive) live else null,
-                            settings = settings,
-                            onCopy = copyText,
-                            onRegenerate = { engine.regenerate(msgs.last().id) },
-                            onDelete = { pendingDelete = msgs.last() },
-                            sizeOf = sizeOf,
-                            onOpenArtifact = openArtifact,
-                            onExportArtifact = exportArtifact,
-                        )
-                    }
-
-                    if (settings.showTokenBadge) {
-                        val usage = msgs.mapNotNull { it.usage }
-                            .fold(TokenUsage.ZERO) { acc, u -> acc + u }
-                        if (!usage.isEmpty) {
-                            TokenBadgeBar(
-                                usage = usage,
-                                at = msgs.last().createdAt,
-                                estimated = msgs.any { it.status == MessageStatus.STOPPED },
+                    // 圆屏：按这一条离屏幕中心的距离再收边 / 缩一点 / 淡一点
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .roundRow(
+                                shift = roundShift[index] ?: 0f,
+                                enabled = round && perf.enableAnimations,
+                            ),
+                    ) {
+                        if (msgs.size == 1) {
+                            val message = msgs.first()
+                            val isLive = live.messageId == message.id
+                            MessageItem(
+                                message = message,
+                                live = if (isLive) live else null,
+                                settings = settings,
+                                layout = chatLayout,
+                                isRound = round,
+                                onCopy = copyText,
+                                onRegenerate = { engine.regenerate(message.id) },
+                                onDelete = { pendingDelete = message },
+                                sizeOf = sizeOf,
+                                onOpenArtifact = openArtifact,
+                                onExportArtifact = exportArtifact,
                             )
+                        } else {
+                            // 多步 Agent 回合：连续助手消息合成一条，只显示一条工作流程卡片
+                            val isLive = live.messageId == msgs.last().id
+                            AgentTurnItem(
+                                messages = msgs,
+                                live = if (isLive) live else null,
+                                settings = settings,
+                                layout = chatLayout,
+                                isRound = round,
+                                onCopy = copyText,
+                                onRegenerate = { engine.regenerate(msgs.last().id) },
+                                onDelete = { pendingDelete = msgs.last() },
+                                sizeOf = sizeOf,
+                                onOpenArtifact = openArtifact,
+                                onExportArtifact = exportArtifact,
+                            )
+                        }
+
+                        if (settings.showTokenBadge) {
+                            val usage = msgs.mapNotNull { it.usage }
+                                .fold(TokenUsage.ZERO) { acc, u -> acc + u }
+                            if (!usage.isEmpty) {
+                                TokenBadgeBar(
+                                    usage = usage,
+                                    at = msgs.last().createdAt,
+                                    estimated = msgs.any { it.status == MessageStatus.STOPPED },
+                                )
+                            }
                         }
                     }
                 }
                 item(key = "__tail__") { Spacer(Modifier.height(6.dp)) }
+            }
+
+            // 圆屏专属：右侧贴边的滚动弧线 + 当前位置圆点。
+            // 圆屏没有「上下边界」这条视觉线索，滚动位置只能靠这条弧来读。
+            if (round && turns.isNotEmpty()) {
+                RoundScrollArc(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
             }
 
             if (!atBottom && turns.isNotEmpty()) {
@@ -579,6 +643,8 @@ private fun BubbleScaffold(
     isUser: Boolean,
     label: String,
     showMascot: Boolean,
+    layout: String,
+    isRound: Boolean,
     headerTrailing: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -604,40 +670,216 @@ private fun BubbleScaffold(
         isUser -> Color(0xFFF2F2F2)
         else -> MaterialTheme.colorScheme.onSurface
     }
+    // 方屏上环形布局退化成气泡（设置层已兜底，这里再防一层）
+    val effective = if (!isRound && layout == ChatLayouts.RING) ChatLayouts.BUBBLE else layout
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(start = 4.dp, bottom = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (!isUser && showMascot) {
-                Image(
-                    painter = painterResource(R.drawable.mascot_avatar),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape),
-                )
-                Spacer(Modifier.width(5.dp))
+    when (effective) {
+        /*
+         * 极简：去掉所有底色，只靠一条细分隔线划分回合。
+         * 小屏上这是「同样的内容多读两行」的最直接办法。
+         */
+        ChatLayouts.MINIMAL -> Column(modifier = Modifier.fillMaxWidth()) {
+            BubbleHeader(isUser, label, showMascot, headerTrailing)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(if (isUser) 0.9f else 1f)
+                    .padding(start = if (isUser) 6.dp else 0.dp),
+            ) {
+                CompositionLocalProvider(
+                    LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+                ) { content() }
             }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.outline,
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
             )
-            headerTrailing()
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(if (isUser) 0.94f else 1f)
-                .clip(RoundedCornerShape(26.dp))
-                .background(bubbleColor)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        ) {
-            CompositionLocalProvider(LocalContentColor provides textColor) {
-                content()
+
+        /*
+         * 卡片：每条一张独立卡片，左侧一根 3dp 的强调竖条 + 标签。
+         * 信息分层最清楚，代价是比气泡多占一点纵向空间。
+         */
+        ChatLayouts.CARD -> Column(modifier = Modifier.fillMaxWidth()) {
+            BubbleHeader(isUser, label, showMascot, headerTrailing)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth(if (isUser) (if (isRound) 0.92f else 0.94f) else 1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(bubbleColor)
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .heightIn(min = 28.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(
+                            if (isUser) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.secondary,
+                        ),
+                )
+                Column(
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 9.dp),
+                ) {
+                    CompositionLocalProvider(LocalContentColor provides textColor) {
+                        content()
+                    }
+                }
             }
         }
+
+        /*
+         * 环形（圆屏专属）：整块收窄居中、上下全圆角，像顺着表盘走的一段弧。
+         * 标签也居中 —— 圆屏左右没有「边界」，居中才不显得偏。
+         */
+        ChatLayouts.RING -> Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            BubbleHeader(isUser, label, showMascot, headerTrailing, centered = true)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.88f)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(
+                        if (isUser) bubbleColor else bubbleColor.copy(alpha = 0.82f),
+                    )
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                CompositionLocalProvider(LocalContentColor provides textColor) {
+                    content()
+                }
+            }
+        }
+
+        else -> Column(modifier = Modifier.fillMaxWidth()) {
+            BubbleHeader(isUser, label, showMascot, headerTrailing)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(
+                        if (isUser) {
+                            if (isRound) 0.86f else 0.94f
+                        } else {
+                            1f
+                        }
+                    )
+                    .clip(RoundedCornerShape(if (isRound) 22.dp else 26.dp))
+                    .background(bubbleColor)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                CompositionLocalProvider(LocalContentColor provides textColor) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+/** 气泡上方的角色行：头像 + 名字 + 右侧状态（流式中 / 出错…） */
+@Composable
+private fun BubbleHeader(
+    isUser: Boolean,
+    label: String,
+    showMascot: Boolean,
+    trailing: @Composable RowScope.() -> Unit,
+    centered: Boolean = false,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = if (centered) 0.dp else 4.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = if (centered) Arrangement.Center else Arrangement.Start,
+    ) {
+        if (!isUser && showMascot) {
+            Image(
+                painter = painterResource(R.drawable.mascot_avatar),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        trailing()
+    }
+}
+
+/**
+ * 圆屏的逐项「弦长内收」。
+ *
+ * [shift] 是这一项中心相对屏幕中心的归一化偏移（-1 顶边 / 0 正中 / 1 底边）。
+ * 越靠边，额外内收越多、缩放越小、透明度越低 —— 这正是圆形屏幕该有的
+ * 「贴边的东西自然退后」的观感，也顺带保证了贴边内容不会被圆切掉。
+ * 只在圆屏 + 动画档启用；方屏和省电档直接返回原 Modifier。
+ */
+private fun Modifier.roundRow(shift: Float, enabled: Boolean): Modifier {
+    if (!enabled) return this
+    val t = shift.coerceIn(-1f, 1f)
+    val extra = 20.dp * (1f - sqrt(1f - t * t))
+    val scale = 1f - 0.10f * t * t
+    return this
+        .padding(horizontal = extra)
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            alpha = 1f - 0.35f * t * t
+        }
+}
+
+/**
+ * 圆屏右侧的滚动弧线：一条贴着屏幕右缘的细弧 + 当前位置的圆点。
+ *
+ * 圆屏没有「上下边界」这条视觉线索，用户不知道自己是在中间还是快到头了。
+ * 方屏靠列表两端露出的边缘就能判断，圆屏需要这条弧来补上。
+ */
+@Composable
+private fun RoundScrollArc(
+    state: androidx.compose.foundation.lazy.LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    if (total <= 1) return
+    val first = info.visibleItemsInfo.firstOrNull() ?: return
+    val last = info.visibleItemsInfo.lastOrNull() ?: return
+    val scrollable = total - (last.index - first.index) - 1
+    val progress = if (scrollable <= 0) {
+        0f
+    } else {
+        (first.index.toFloat() / scrollable.toFloat()).coerceIn(0f, 1f)
+    }
+    val track = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    val thumb = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+
+    Canvas(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(10.dp)
+            .padding(vertical = 26.dp),
+    ) {
+        val r = size.width / 2f
+        val x = size.width / 2f
+        // 轨道：从上到下的一条 2dp 细线
+        drawLine(
+            color = track,
+            start = androidx.compose.ui.geometry.Offset(x, r),
+            end = androidx.compose.ui.geometry.Offset(x, size.height - r),
+            strokeWidth = 2.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+        // 位置点：跟着滚动进度上下走
+        val dotY = (r + (size.height - 2 * r) * progress).coerceIn(r, size.height - r)
+        drawCircle(color = thumb, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, dotY))
     }
 }
 
@@ -646,6 +888,8 @@ private fun MessageItem(
     message: ChatMessage,
     live: LiveDelta?,
     settings: AppSettings,
+    layout: String,
+    isRound: Boolean,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
     onDelete: () -> Unit,
@@ -663,6 +907,8 @@ private fun MessageItem(
         isUser = isUser,
         label = if (isUser) "我" else "DSH",
         showMascot = settings.showMascot,
+        layout = layout,
+        isRound = isRound,
         headerTrailing = {
             if (message.stepIndex > 0) {
                 Spacer(Modifier.width(6.dp))
@@ -776,6 +1022,8 @@ private fun AgentTurnItem(
     messages: List<ChatMessage>,
     live: LiveDelta?,
     settings: AppSettings,
+    layout: String,
+    isRound: Boolean,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
     onDelete: () -> Unit,
@@ -803,6 +1051,8 @@ private fun AgentTurnItem(
         isUser = false,
         label = "DSH",
         showMascot = settings.showMascot,
+        layout = layout,
+        isRound = isRound,
         headerTrailing = {
             if (isStreaming) {
                 Spacer(Modifier.width(6.dp))
@@ -1140,14 +1390,17 @@ private fun artifactSizeOf(container: AppContainer, path: String): Long =
 private fun ChatBottomBar(
     settings: AppSettings,
     streaming: Boolean,
+    round: Boolean,
     onOpenInput: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onModelClick: () -> Unit,
 ) {
     val s = LocalStrings.current
+    // 圆屏底部两侧是空的：左右再收 10dp，避免两个下角被圆切掉
     Row(
         modifier = Modifier
+            .padding(horizontal = if (round) 10.dp else 0.dp)
             .fillMaxWidth()
             .height(52.dp)
             .cornerSafe()
