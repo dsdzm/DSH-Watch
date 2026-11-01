@@ -21,5 +21,6 @@ object DeviceProfileDefaults {
         sdkInt = 28,
         compact = true,
         squarish = true,
+        isRound = true,
     )
 }

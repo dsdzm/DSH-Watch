@@ -38,8 +38,17 @@ object ApprovalPolicy {
      * `biliMode` 决定能不能发、`biliCommentQuota` 限制每天发几条、
      * 判重挡住重复打扰、`StyleGate` 挡住套话与脏字。
      * 换句话说，**能不能发是用户在设置里一次性决定的事，不该每次点一遍弹窗**。
+     *
+     * `bili_dyn` 同理，但它多一层独立开关与独立上限（默认 1 条/天）：
+     * 动态会进粉丝时间线，曝光面比评论大，所以「能发」这件事由
+     * `biliDynEnabled` 单独控制，而不是搭评论的车。
+     *
+     * `bili_coin` 也在这里，尽管它花的是硬币。理由不是「硬币不重要」，
+     * 而是**它必须能在定时任务里跑**：凌晨三点没人点确认，要确认就等于
+     * 这个功能只能白天手动用。额度那一侧已经写死「每天 1 枚、同视频不重复」，
+     * 上限是硬的，不需要人每次点头。
      */
-    val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm")
+    val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm", "bili_dyn", "bili_coin")
 
     private const val RUN_SCRIPT = "run_script"
     private const val SHELL_KEY = "run_script:shell"

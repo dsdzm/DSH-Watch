@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,
                 fontScale = settings.fontScale,
+                appLanguage = settings.appLanguage,
                 perf = perf,
                 profile = profile,
             ) {

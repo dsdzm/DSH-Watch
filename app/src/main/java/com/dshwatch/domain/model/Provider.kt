@@ -115,6 +115,13 @@ data class AppSettings(
     val activeProviderId: String = "",
     val themeMode: ThemeMode = ThemeMode.DARK,
     val dynamicColor: Boolean = true,
+    /**
+     * 界面语言：`system` 跟随系统 / `zh` / `en`。
+     *
+     * 需要手动开关是因为「跟随系统」在部分手表上不可靠：系统 locale 报英文，
+     * 但用户要的是中文。留一个显式出口，比去猜 ROM 的行为稳。
+     */
+    val appLanguage: String = "system",
     /** 0.85 / 1.0 / 1.15，手表屏小，默认略缩一号 */
     val fontScale: Float = 0.92f,
     val perfMode: PerfMode = PerfMode.AUTO,
@@ -249,11 +256,26 @@ data class AppSettings(
      */
     val biliAtUid: String = "",
 
-    /** 评论配图：`none` 不带 / `card` 程序生成的摸鱼卡 / `local` 用户从相册选的那张 */
-    val biliImage: String = "none",
+    /**
+     * 配图来源：`none` 不带图 / `pack` 内置大肥鱼表情包（随机一张）/
+     * `card` 程序生成的摸鱼卡 / `local` 用户从相册选的那张。
+     *
+     * 默认 `pack` 而不是 `none`：评论带图明显更像真人，而且内置的几张
+     * 本来就是用户给的形象，比自己画的卡片更贴合人设。
+     */
+    val biliImage: String = "pack",
 
     /** 摸鱼卡上那行字。留空则按日期轮换默认文案 */
     val biliImageText: String = "",
+
+    /**
+     * 用户是否主动改过配图来源。
+     *
+     * 用来区分「主动选了不带图」和「从没动过、只是继承了旧默认值」：
+     * 前者要尊重，后者应该在升级时换成新默认（内置表情包）。
+     * 没有这个标记就只能靠 `biliImage == "none"` 猜，两种情况下会猜错一种。
+     */
+    val biliImageTouched: Boolean = false,
 
     /**
      * 每天最多对外发几条（评论 + 私信合计）。
@@ -262,6 +284,41 @@ data class AppSettings(
      * 有风控，刷太快是直接封号而不是折叠。0 = 不限（不建议）。
      */
     val biliCommentQuota: Int = 3,
+
+    /**
+     * 允许自己发动态。
+     *
+     * 和「刷完做什么」的三选一是正交的：评论 / 私信都是对某条视频的反应，
+     * 动态是独立广播，不依附任何视频。所以做成单独开关，而不是塞进模式枚举 ——
+     * 塞进去就变成四选一，用户没法表达「刷的同时偶尔发一条」。
+     */
+    val biliDynEnabled: Boolean = false,
+
+    /**
+     * 每天最多发几条动态。
+     *
+     * 单独设上限且默认只有 1：动态会推到粉丝时间线，可见度比评论高一个量级，
+     * 一天三条以上就已经很像营销号了。它同时计入 [biliCommentQuota] 的总发言数，
+     * 避免「3 条评论 + 1 条动态」变成四次对外发言。0 = 不限。
+     */
+    val biliDynQuota: Int = 1,
+
+    /**
+     * 动态写什么，逗号分隔的多选：`life` 生活日常 / `roast` 刷到的视频吐槽 /
+     * `master` 对主人（用户）的感受。
+     *
+     * 做成多选而不是单选：这三种本来就不互斥，一次真实的朋友圈式动态
+     * 往往是「今天干了啥 + 顺便吐槽一句 + 想主人了」揉在一起。
+     */
+    val biliDynTopics: String = "life,roast,master",
+
+    /**
+     * 允许它自己点赞、投币。
+     *
+     * 投币花的是账号里的硬币，属于**不可逆**的资源消耗，所以单独一个开关；
+     * 每天最多 1 枚（[COIN_PER_DAY]），且同一条视频只投一次。
+     */
+    val biliCoinEnabled: Boolean = true,
 
     /** 每天定时自动刷一轮 */
     val biliAutoRun: Boolean = false,

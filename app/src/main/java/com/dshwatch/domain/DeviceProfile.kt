@@ -46,6 +46,14 @@ data class DeviceProfile(
     val compact: Boolean,
     /** 方形/矩形表盘（宽高比接近） */
     val squarish: Boolean,
+    /**
+     * 圆形表盘。
+     *
+     * 这个值只能从 `Configuration.isScreenRound` 拿 —— 用宽高比判不出来，
+     * 圆屏和方屏的宽高比都是 1:1。布局上两者差别很大：圆屏的四角是空的，
+     * 贴着屏幕边缘的内容会被切掉，横向可用宽度也比同尺寸方屏小。
+     */
+    val isRound: Boolean,
 ) {
     val summary: String
         get() = "${screenWidthPx}×${screenHeightPx} @${densityDpi}dpi · ${screenWidthDp}×${screenHeightDp}dp"
@@ -87,6 +95,9 @@ object DeviceProfiler {
             sdkInt = Build.VERSION.SDK_INT,
             compact = metrics.widthDp in 1..220,
             squarish = ratio > 0.8f,
+            isRound = runCatching {
+                context.resources.configuration.isScreenRound
+            }.getOrDefault(false),
         )
     }
 

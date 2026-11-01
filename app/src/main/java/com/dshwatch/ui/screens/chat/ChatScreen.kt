@@ -2,6 +2,7 @@ package com.dshwatch.ui.screens.chat
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -51,6 +53,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -122,6 +128,11 @@ fun ChatScreen(
     val context = LocalContext.current
     val activityView = androidx.compose.ui.platform.LocalView.current
     val listState = rememberLazyListState()
+    // 表冠滚动：Wear 上不用手指、直接转表冠翻历史是最自然的手势。
+    // 焦点必须先给到列表，否则表冠事件会被别的可聚焦元素吃掉。
+    val rotaryFocus = remember { FocusRequester() }
+    val rotaryBehavior = RotaryScrollableDefaults.behavior(scrollableState = listState)
+    LaunchedEffect(Unit) { runCatching { rotaryFocus.requestFocus() } }
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var showAgentDialog by remember { mutableStateOf(false) }
@@ -203,12 +214,13 @@ fun ChatScreen(
         // 对话页是根：没有返回，靠右滑去设置
         onBack = null,
         actions = {
-            // 首页已经承载了设置入口，这里只留聊天时最常用的两个动作：
-            // 切会话、开新会话 —— 手表顶栏宽度经不起四个图标
+            // 顶栏宽度经不起四个图标，这里只留最常用的三个。
+            // 设置从「右滑第二页」改成显式入口：横滑在圆屏上会和系统返回手势打架。
             IconTap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
             IconTap(Icons.Outlined.Add, s.newChat) {
                 scope.launch { engine.newConversation(settings) }
             }
+            IconTap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         bottom = {
             ChatBottomBar(
@@ -359,7 +371,11 @@ fun ChatScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .rotaryScrollable(rotaryBehavior, rotaryFocus)
+                    .focusRequester(rotaryFocus)
+                    .focusable(),
                 contentPadding = PaddingValues(vertical = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {

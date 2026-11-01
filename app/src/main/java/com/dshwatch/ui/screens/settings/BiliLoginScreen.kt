@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +31,7 @@ import com.dshwatch.ui.components.QrCode
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -141,7 +141,7 @@ fun BiliLoginScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
+                .wearVerticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top,
         ) {

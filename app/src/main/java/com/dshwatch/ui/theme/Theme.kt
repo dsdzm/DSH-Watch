@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -20,8 +21,9 @@ import com.dshwatch.domain.PerfProfile
 import com.dshwatch.domain.PerfProfiles
 import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.ThemeMode
+import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.LocalStrings
-import com.dshwatch.ui.i18n.defaultStrings
+import com.dshwatch.ui.i18n.stringsFor
 
 /** 当前性能档，供组件决定是否播放动画 / 渲染多少内容 */
 val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID) }
@@ -76,6 +78,7 @@ fun DshWatchTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
     dynamicColor: Boolean = true,
     fontScale: Float = 0.92f,
+    appLanguage: String = AppLanguage.SYSTEM,
     perf: PerfProfile = PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID),
     profile: DeviceProfile = DeviceProfileDefaults.fallback,
     content: @Composable () -> Unit,
@@ -104,7 +107,14 @@ fun DshWatchTheme(
         Density(density = baseDensity.density, fontScale = baseDensity.fontScale * fontScale)
     }
 
-    val strings = remember { defaultStrings() }
+    // 语言要跟着「设置值」和「配置里的 locale」一起变：
+    // 只用 remember {} 会让用户在设置里切换语言后界面不刷新。
+    val configuration = LocalConfiguration.current
+    val locales = remember(configuration.locales) {
+        val list = configuration.locales
+        (0 until list.size()).map { list[it] }
+    }
+    val strings = remember(appLanguage, locales) { stringsFor(appLanguage, locales) }
 
     CompositionLocalProvider(
         LocalDensity provides scaledDensity,

@@ -33,16 +33,10 @@ fun AppRoot(
     // 屏幕圆角安全边距由 MainActivity 注入的 DeviceProfile 决定
     val profile = com.dshwatch.ui.theme.LocalDeviceProfile.current
 
-    // 对话页与设置页是同一层的两页（横滑切换），共用同一个 Pager 容器 ——
-    // 这样滑动过程中的动画、指示点、页面状态都不会因为导航而重建
-    if (nav.current == Screen.Chat || nav.current == Screen.Settings) {
-        MainPager(
-            container = container,
-            settings = settings,
-            profile = profile,
-            nav = nav,
-        )
-    } else when (val screen = nav.current) {
+    // 对话页是唯一的根屏，其余页面一律 push 进来、用系统返回退出。
+    // 1.10 之前这里是「对话 / 设置」两页横滑；在 Wear 上那条横滑手势会和
+    // 系统的边缘返回打架（圆屏边缘右滑 = 返回上一级），所以改成标准的层级导航。
+    when (val screen = nav.current) {
         Screen.Chat -> ChatScreen(container = container, settings = settings, nav = nav)
         Screen.Sessions -> SessionsScreen(container = container, nav = nav)
         Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)

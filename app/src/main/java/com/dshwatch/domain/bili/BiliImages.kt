@@ -139,6 +139,41 @@ object BiliImages {
     }
 
     // ------------------------------------------------------------------
+    // 内置表情包
+    // ------------------------------------------------------------------
+
+    /**
+     * 内置表情包（assets/bili/stickers）。
+     *
+     * 顺序固定，不靠 `list()` 读目录 —— assets 的遍历顺序在不同 ROM 上
+     * 并不保证一致，靠它做「按种子取第 N 张」会出现在两台设备上取到不同图。
+     */
+    private val PACK = listOf(
+        "sticker_01.jpg",
+        "sticker_02.jpg",
+        "sticker_03.jpg",
+        "sticker_04.jpg",
+    )
+
+    val packSize: Int get() = PACK.size
+
+    /**
+     * 随机取一张内置表情包。
+     *
+     * `seed` 由调用方给：评论用「时间戳 + 评论内容 hash」，动态用发布时间，
+     * 这样同一轮里不会反复取到同一张，但重试同一条时又能复现。
+     * 取不到（assets 被打包工具漏掉）返回 null，调用方降级到摸鱼卡。
+     */
+    fun pack(context: Context, seed: Long): ByteArray? = runCatching {
+        val name = PACK[Math.floorMod(seed, PACK.size.toLong()).toInt()]
+        context.assets.open("bili/stickers/$name").use { it.readBytes() }
+    }.getOrNull()
+
+    /** 表情包文件名，用于在日志里说明这次带的是哪张 */
+    fun packName(seed: Long): String =
+        PACK[Math.floorMod(seed, PACK.size.toLong()).toInt()]
+
+    // ------------------------------------------------------------------
     // 用户自己选的那张
     // ------------------------------------------------------------------
 

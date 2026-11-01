@@ -15,6 +15,7 @@ import com.dshwatch.domain.bili.BiliMode
 import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTone
 import com.dshwatch.domain.bili.BiliTones
+import com.dshwatch.domain.bili.BiliTopics
 import com.dshwatch.domain.bili.BiliUser
 import com.dshwatch.domain.bili.ReplyNotice
 import com.dshwatch.domain.bili.UploadedImage
@@ -62,6 +63,8 @@ object BiliTools {
         ReportTool,
         ReplyTool,
         DmTool,
+        DynTool,
+        CoinTool,
     )
 
     /** 日报放在工作空间根的 `bili/` 下：跨会话共享，换会话不会丢配额与判重记录 */
@@ -106,10 +109,10 @@ object BiliTools {
     /** 每天发过的话记在这里，一行一条：`HH:mm kind target` */
     private fun sentPath(): String = "$DIR/sent/${today()}.md"
 
-    private suspend fun countSentToday(ctx: ToolContext): Int =
+    private suspend fun countSentToday(ctx: ToolContext, kind: String? = null): Int =
         ctx.workspace.read(sentPath(), maxChars = 200_000).orEmpty()
             .lineSequence()
-            .count { it.isNotBlank() }
+            .count { it.isNotBlank() && (kind == null || it.contains(" $kind ")) }
 
     private suspend fun markSent(ctx: ToolContext, kind: String, target: String) {
         val line = SimpleDateFormat("HH:mm", Locale.US).format(Date()) + " $kind $target\n"
@@ -121,10 +124,13 @@ object BiliTools {
      *
      * `biliCommentQuota` 是评论与私信的**合计**上限：两者都是「以用户身份对外发言」，
      * 分开计数等于把上限翻倍。0 表示不限，但那种情况下用户得自己盯着。
+     *
+     * `kind` 非空时只数这一类。动态用独立上限（[AppSettings.biliDynQuota]），
+     * 但它同时也被计入总发言数 —— 否则「3 条评论 + 1 条动态」就成了四次对外发言。
      */
-    private suspend fun remainingQuota(ctx: ToolContext, quota: Int): Int {
+    private suspend fun remainingQuota(ctx: ToolContext, quota: Int, kind: String? = null): Int {
         if (quota <= 0) return Int.MAX_VALUE
-        return (quota - countSentToday(ctx)).coerceAtLeast(0)
+        return (quota - countSentToday(ctx, kind)).coerceAtLeast(0)
     }
 
     /**
@@ -144,38 +150,68 @@ object BiliTools {
     /**
      * 按设置准备配图。
      *
-     * 返回空列表 = 不带图。上传失败**不阻断**评论：一张配图不值得让整条评论发不出去，
-     * 但要把失败原因带回给模型，让它别再反复重试。
+     * **失败就失败，不静默降级成纯文字。** 之前这里上传失败只回一句提示、
+     * 评论照发，用户看到「已发布」却发现没图 —— 表现和「功能没做」一模一样，
+     * 也没法判断到底是哪一步坏了。配图是用户显式选的，那就该让失败可见。
      */
     private suspend fun preparePictures(
         ctx: ToolContext,
-        message: String,
-    ): Pair<List<UploadedImage>, String> {
+        seed: Long,
+    ): PicturePack {
         val s = ctx.settings()
         val kind = s.biliImage
-        if (kind == "none" || kind.isBlank()) return emptyList<UploadedImage>() to ""
+        if (kind == "none" || kind.isBlank()) return PicturePack()
 
         val bytes = when (kind) {
+            // 内置表情包：四张里随机一张。取不到（assets 被裁掉）才退回摸鱼卡，
+            // 这是唯一一处允许降级的地方 —— 图源缺失不是用户的错。
+            "pack" -> {
+                val c = ctx.appContext
+                val raw = c?.let { BiliImages.pack(it, seed) }
+                if (raw != null) {
+                    raw
+                } else {
+                    val text = s.biliImageText.trim()
+                        .ifBlank { BiliImages.pickFallback(seed.toInt()) }
+                    BiliImages.card(text, coverFooter(s))
+                }
+            }
             "card" -> {
                 val text = s.biliImageText.trim()
-                    .ifBlank { BiliImages.pickFallback(today().hashCode()) }
-                val foot = if (s.biliUserName.isNotBlank()) s.biliUserName else "bilibili.com"
-                BiliImages.card(text, foot)
+                    .ifBlank { BiliImages.pickFallback(seed.toInt()) }
+                BiliImages.card(text, coverFooter(s))
             }
             "local" -> {
-                val c = ctx.appContext ?: return emptyList<UploadedImage>() to "（没有 Android 上下文，跳过配图）"
+                val c = ctx.appContext ?: return PicturePack(error = "没有 Android 上下文，取不到相册图")
                 BiliImages.loadLocal(c)
-                    ?: return emptyList<UploadedImage>() to
-                        "（设置里选了相册图，但还没选过。去设置 → 刷B站 → 评论配图 选一张）"
+                    ?: return PicturePack(
+                        error = "设置里选了相册图，但还没选过。去 设置 → 刷B站 → 配图 选一张，" +
+                            "或者改回「大肥鱼表情包」。"
+                    )
             }
-            else -> return emptyList<UploadedImage>() to ""
+            else -> return PicturePack()
         }
-        return runCatching { listOf(api(ctx).uploadImage(bytes)) }
-            .fold(
-                onSuccess = { it to "" },
-                onFailure = { emptyList<UploadedImage>() to "（配图上传失败：${errText(it)}；评论照发）" },
-            )
+
+        return runCatching { listOf(api(ctx).uploadImage(bytes)) }.fold(
+            onSuccess = { PicturePack(pics = it) },
+            onFailure = {
+                PicturePack(
+                    error = "配图上传失败：${errText(it)}\n" +
+                        "图片没传上去就不会带图，这条先不发 —— 免得你以为带图了其实没有。" +
+                        "可以改设置里的配图来源，或稍后重试。"
+                )
+            },
+        )
     }
+
+    private fun coverFooter(s: com.dshwatch.domain.model.AppSettings): String =
+        if (s.biliUserName.isNotBlank()) s.biliUserName else "bilibili.com"
+
+    /** 配图准备结果。`error` 非空表示「用户要图但没拿到」，调用方必须中止 */
+    private data class PicturePack(
+        val pics: List<UploadedImage> = emptyList(),
+        val error: String? = null,
+    )
 
     private fun durationText(sec: Int): String =
         if (sec <= 0) "?" else "%d:%02d".format(sec / 60, sec % 60)
@@ -211,7 +247,8 @@ object BiliTools {
         override val name = "bili_status"
         override val description =
             "刷B站 / 回评论前的第一步：返回今日配额、关注关键词、登录状态、当前模式" +
-                "（发评论 / 发私信 / 只总结）、@ 目标、配图设置、评论风格，以及本轮标准流程。"
+                "（发评论 / 发私信 / 只总结）、@ 目标、配图设置、动态选题、点赞投币额度、评论风格，" +
+                "以及本轮标准流程。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
         override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
@@ -249,17 +286,35 @@ object BiliTools {
                     if (mode != BiliMode.SUMMARY) {
                         append("今日已对外发：").append(sent).append(" / ").append(quotaText).append('\n')
                     }
+                    if (s.biliDynEnabled) {
+                        val dynUsed = countSentToday(ctx, "dyn")
+                        append("发动态：**开**，今日已发 ").append(dynUsed).append(" / ")
+                            .append(if (s.biliDynQuota <= 0) "不限" else "${s.biliDynQuota} 条")
+                            .append("（独立上限，同时也计入上面的总发言数）\n")
+                        append("动态可写的内容：「").append(dynTopicsText(s)).append("」\n")
+                    } else {
+                        append("发动态：关（不要调用 bili_dyn）\n")
+                    }
                     if (s.biliAtUid.isNotBlank()) {
                         append("评论要 @ 的 UID：").append(s.biliAtUid.trim()).append('\n')
                     }
-                    append("评论配图：").append(
+                    append("配图（评论与动态共用）：").append(
                         when (s.biliImage) {
+                            "pack" -> "大肥鱼表情包（内置 ${BiliImages.packSize} 张，每次随机一张）"
                             "card" -> "摸鱼卡（程序生成，卡上文字「" +
                                 s.biliImageText.ifBlank { "按日期轮换" } + "」）"
                             "local" -> "用户自选的相册图"
                             else -> "不带"
                         }
                     ).append('\n')
+                    if (s.biliCoinEnabled) {
+                        val coins = ctx.workspace.read(coinPath(), maxChars = 100_000).orEmpty()
+                            .lineSequence().count { it.contains(" coin ") }
+                        append("点赞投币：**开**，今日已投 ").append(coins).append(" / ")
+                            .append(COIN_PER_DAY).append(" 枚（点赞不占额度）\n")
+                    } else {
+                        append("点赞投币：关（不要调用 bili_coin）\n")
+                    }
                     append("评论风格【").append(tone.name).append("】：").append(tone.prompt).append('\n')
                     append("日报：").append(digestPath()).append('\n')
 
@@ -289,6 +344,24 @@ object BiliTools {
                             append("\n模式是「只总结」：**不要**调用 bili_reply / bili_dm，\n")
                             append("把想说的话写进日报即可。用户要发评论得先去设置里换模式。\n")
                         }
+                    }
+
+                    if (s.biliDynEnabled) {
+                        append("\n流程 C · 发动态（可选，不是每轮都发）：\n")
+                        append("1. 动态是**独立广播**，会进粉丝时间线 —— 只有真有话想说时才发，\n")
+                        append("   不要为了「用一下工具」而发，也不要把它写成视频摘要\n")
+                        append("2. 从上面「动态可写的内容」里挑一个角度写，三种都是一个人会发的东西：\n")
+                        append("   生活日常像碎碎念，视频吐槽要有具体的点，说「主人」用第一人称、别喊口号\n")
+                        append("3. bili_dyn 直接发（**不需要确认**）；正文 20–200 字，观点或情绪要具体\n")
+                        append("4. 配图跟随设置；纯文字更利落时传 with_image=false\n")
+                        append("5. 有独立每日上限，超了会拒绝；相同内容当天不会重复发\n")
+                    }
+
+                    if (s.biliCoinEnabled) {
+                        append("\n流程 D · 点赞投币（可选，不是每条都投）：\n")
+                        append("1. 只在你真觉得这条值得的时候用 bili_coin，不要每看完一条就投\n")
+                        append("2. 投币每天只有 1 枚，投出去就没了；同一条视频不重复投\n")
+                        append("3. 只想点个赞就传 coin=false\n")
                     }
 
                     append("\n字幕取不到时用 bili_comments 看评论区，仍取不到就跳过这条并说明原因。")
@@ -773,7 +846,12 @@ object BiliTools {
             // 再 @ 一遍等于在一条评论里喊两次人。
             val needAt = parent <= 0
             val (at, atNote) = if (needAt) atTarget(ctx) else null to ""
-            val (pics, picNote) = preparePictures(ctx, message)
+            // 种子取「内容 + 日期」：同一条重试取到同一张，换一条就换一张；
+            // 用时间的纳秒会让每次重试都换图，反而像在刷屏。
+            val pictureSeed = message.hashCode().toLong() * 31 + today().hashCode()
+            val picturePlan = preparePictures(ctx, pictureSeed)
+            picturePlan.error?.let { return ToolResult.fail(it) }
+            val pics = picturePlan.pics
 
             val target = if (parent > 0) "回复 rpid $parent（楼 $root）" else "顶层评论"
             val dry = args.boolOf("dry_run", false)
@@ -807,7 +885,6 @@ object BiliTools {
                             if (pics.isNotEmpty()) append("\n带图 ").append(pics.size).append(" 张")
                             append("\n今日还剩 ").append(left - 1).append(" 条发言额度。")
                             if (atNote.isNotBlank()) append('\n').append(atNote)
-                            if (picNote.isNotBlank()) append('\n').append(picNote)
                         }
                     )
                 },
@@ -898,6 +975,230 @@ object BiliTools {
         override fun summarize(args: JsonObject) =
             "私信 " + (args.strOf("to_uid") ?: args.strOf("bvid") ?: "—") +
                 " " + (args.strOf("message") ?: "").take(14)
+    }
+
+    // ------------------------------------------------------------------
+    // 11. 点赞 / 投币
+    // ------------------------------------------------------------------
+
+    /**
+     * 给视频点赞、投币。
+     *
+     * 这是唯一一个**会消耗账号资源**的工具：投币用掉的是硬币，投出去就回不来。
+     * 所以它比评论更保守：
+     *
+     * - 每天最多 [COIN_PER_DAY] 枚（写死 1，不开放设置 —— 用户说「每日可以投一颗币」，
+     *   那就是一颗；把这个数字做成可调的旋钮只会多一个手滑的机会）
+     * - 同一条视频只投一次（`bili/coins/<日期>.md` 记 bvid）
+     * - 点赞不耗资源，但同样判重，避免模型在一个视频上反复调接口
+     *
+     * 投币和点赞分开报错：两者失败原因不同（硬币不够 / 已投过 / 未登录），
+     * 合成一句「操作失败」等于把排查线索扔了。
+     */
+    object CoinTool : AgentTool {
+        override val name = "bili_coin"
+        override val description =
+            "给一个视频点赞、投币。投币每天最多 1 枚且同一视频只投一次，是消耗账号硬币的不可逆操作。" +
+                "一般在你真的觉得这条视频有意思时才用，不要每条都投。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "bvid" to Schema.str("视频 BV 号"),
+                "coin" to Schema.bool("是否投币，默认 true。硬币不够或已投过会自动跳过"),
+                "like" to Schema.bool("是否点赞，默认 true"),
+            ),
+            required = listOf("bvid"),
+        )
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliCoinEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            val bvid = args.strOf("bvid")?.trim()?.takeIf { it.isNotBlank() }
+                ?: return ToolResult.fail("缺少 bvid")
+            val s = ctx.settings()
+            if (!s.biliCoinEnabled) {
+                return ToolResult.fail(
+                    "设置里没打开「自动点赞投币」。要开请让用户去 设置 → 刷B站 → 自动点赞投币。"
+                )
+            }
+            if (ctx.biliCookie().isBlank()) {
+                return ToolResult.fail("还没登录 B站，点不了赞也投不了币。用扫码登录。")
+            }
+
+            val wantCoin = args.boolOf("coin", true)
+            val wantLike = args.boolOf("like", true)
+            if (!wantCoin && !wantLike) return ToolResult.fail("coin 和 like 至少要选一个。")
+
+            val log = coinPath()
+            val todayLog = ctx.workspace.read(log, maxChars = 100_000).orEmpty()
+            val lines = todayLog.lineSequence().filter { it.isNotBlank() }.toList()
+
+            val out = StringBuilder()
+            var didSomething = false
+
+            if (wantLike) {
+                if (lines.any { it.contains(" like $bvid") }) {
+                    out.append("今天已经给 $bvid 点过赞了，跳过。")
+                } else {
+                    runCatching { api(ctx).like(bvid) }.fold(
+                        onSuccess = {
+                            ctx.workspace.append(log, "${stamp()} like $bvid\n")
+                            out.append("已点赞 $bvid。")
+                            didSomething = true
+                        },
+                        onFailure = { out.append("点赞失败：${errText(it)}") },
+                    )
+                }
+            }
+
+            if (wantCoin) {
+                val used = lines.count { it.contains(" coin ") }
+                when {
+                    lines.any { it.contains(" coin $bvid") } ->
+                        out.append("\n$bvid 今天已经投过币了，跳过（同一条不重复投）。")
+
+                    used >= COIN_PER_DAY ->
+                        out.append("\n今天那 1 枚硬币已经投出去了，今天不再投 —— 硬币存着也是有限的。")
+
+                    else -> runCatching { api(ctx).coin(bvid) }.fold(
+                        onSuccess = {
+                            ctx.workspace.append(log, "${stamp()} coin $bvid\n")
+                            out.append("\n已给 $bvid 投了 1 枚硬币（今日额度用完）。")
+                            didSomething = true
+                        },
+                        onFailure = { out.append("\n投币失败：${errText(it)}") },
+                    )
+                }
+            }
+
+            // 什么都没做（全都跳过或全失败）时给 ok 还是 fail？
+            // 跳过是「按规则不该做」，不是错误；全失败才是错误。
+            return if (didSomething || out.contains("跳过") || out.contains("不再投")) {
+                ToolResult.ok(out.toString().trim())
+            } else {
+                ToolResult.fail(out.toString().trim().ifBlank { "点赞和投币都没成功。" })
+            }
+        }
+
+        override fun summarize(args: JsonObject) = "赞币 " + (args.strOf("bvid") ?: "—")
+    }
+
+    /** 点赞/投币的当日记录。和发言记录分开：它们不占「对外发言」额度 */
+    private fun coinPath(): String = "$DIR/coins/${today()}.md"
+
+    /**
+     * 把设置里的动态选题转成人话。
+     *
+     * 具体措辞放在 [BiliTopics] 里，因为定时任务的 prompt 也要用同一份描述 ——
+     * 两处各写一遍，改了一处忘了另一处，模型收到的就是两套口径。
+     */
+    private fun dynTopicsText(s: AppSettings): String = BiliTopics.summary(s.biliDynTopics)
+
+    private fun stamp(): String = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+
+    /** 每天最多投几枚硬币。写死 1：用户要的就是「每日一颗」 */
+    private const val COIN_PER_DAY = 1
+
+    // ------------------------------------------------------------------
+    // 11. 发动态
+    // ------------------------------------------------------------------
+
+    /**
+     * 发一条动态。
+     *
+     * 这是全套工具里**曝光面最大**的一个：评论只出现在那条视频下，动态直接
+     * 推进粉丝时间线，删掉之前也已经被推过一次了。所以默认上限只有 1 条/天，
+     * 并且要求设置里显式打开开关 —— 不跟随「刷完做什么」的模式，因为
+     * 「只总结」的用户同样可能想让它偶尔发一条。
+     *
+     * 不需要确认（和评论、私信一致），风险由四层兜底：开关、动态上限、
+     * 总发言上限、风格闸门。
+     */
+    object DynTool : AgentTool {
+        override val name = "bili_dyn"
+        override val description =
+            "发一条 B站 动态（公开，会进粉丝时间线，不是回复某个视频）。" +
+                "只有设置里打开「发动态」才可用，每天有独立上限。" +
+                "值得发才发：一条有观点的碎碎念，不要为了用工具而发。" +
+                "用户可以在设置里选动态写什么：生活日常 / 刷到的视频吐槽 / 对主人的感受。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "text" to Schema.str("动态正文，20–200 字。要像人自己发的，可以有观点、有情绪"),
+                "with_image" to Schema.bool(
+                    "可选。是否带图，默认跟随设置里的「配图」。纯文字更有力时传 false"
+                ),
+            ),
+            required = listOf("text"),
+        )
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliDynEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            val text = args.strOf("text")?.trim() ?: return ToolResult.fail("缺少 text 参数")
+            val s = ctx.settings()
+            val tone = BiliTones.resolve(s)
+
+            if (!s.biliDynEnabled) {
+                return ToolResult.fail(
+                    "设置里没有打开「发动态」。要发动态请让用户去 设置 → 刷B站 → 发动态 打开。"
+                )
+            }
+            if (text.length < 5) return ToolResult.fail("动态太短了（至少 5 个字），发出去像个 bug。")
+            if (text.length > 2000) {
+                return ToolResult.fail("动态超过 2000 字（现在 ${text.length} 字），B站 会拒。删短一点。")
+            }
+
+            StyleGate.check(text, tone)?.let { return ToolResult.fail("这条动态被风格闸门拦了：$it") }
+            if (ctx.biliCookie().isBlank()) {
+                return ToolResult.fail("还没登录 B站，发不了动态。用扫码登录。")
+            }
+
+            val leftDyn = remainingQuota(ctx, s.biliDynQuota, "dyn")
+            if (leftDyn <= 0) {
+                return ToolResult.ok("今天已经发过 ${s.biliDynQuota} 条动态了，不再发（动态太密像营销号）。")
+            }
+            val leftAll = remainingQuota(ctx, s.biliCommentQuota)
+            if (leftAll <= 0) {
+                return ToolResult.fail("今天的对外发言上限（${s.biliCommentQuota} 条）已经用完了，不能再发。")
+            }
+
+            // 同一条内容一天不发两遍：模型重试或分步执行时很容易重复
+            val head = text.take(24)
+            val todaySent = ctx.workspace.read(sentPath(), maxChars = 200_000).orEmpty()
+            if (todaySent.lineSequence().any { it.contains(" dyn ") && it.contains(head) }) {
+                return ToolResult.ok("今天已经发过内容相同的动态了，跳过。")
+            }
+
+            val wantImage = args.boolOf("with_image", s.biliImage != "none" && s.biliImage.isNotBlank())
+            // 动态用时间戳当种子：连发两条时能换到不同的表情包，
+            // 固定用日期会连续两天贴同一张，一眼假。
+            val picturePlan = if (wantImage) {
+                preparePictures(ctx, System.currentTimeMillis())
+            } else {
+                PicturePack()
+            }
+            picturePlan.error?.let { return ToolResult.fail(it) }
+            val pics = picturePlan.pics
+
+            return runCatching { api(ctx).createDyn(text, pics) }.fold(
+                onSuccess = { id ->
+                    // 记 id 是为了能删：删动态要 dyn_id + dyn_type，少一个都撤不回
+                    markSent(ctx, "dyn", "${id} $head")
+                    ToolResult.ok(
+                        buildString {
+                            append("已发动态")
+                            if (pics.isNotEmpty()) append("（带 ${pics.size} 张图）")
+                            append("：「").append(text).append("」\n")
+                            if (id > 0) append("dyn_id=").append(id).append("（要删的话用这个）\n")
+                            append("今日动态还剩 ${(leftDyn - 1).coerceAtLeast(0)} 条。")
+                        }
+                    )
+                },
+                onFailure = { ToolResult.fail(errText(it)) },
+            )
+        }
+
+        override fun summarize(args: JsonObject) =
+            "动态 " + (args.strOf("text") ?: "").take(16)
     }
 
     // ------------------------------------------------------------------

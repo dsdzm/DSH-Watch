@@ -101,6 +101,10 @@ interface AppStrings {
     val fontSmall: String
     val fontNormal: String
     val fontLarge: String
+    val language: String
+    val langSystem: String
+    val langZh: String
+    val langEn: String
     val groupPerformance: String
     val perfMode: String
     val perfAuto: String
@@ -188,6 +192,8 @@ interface AppStrings {
     val biliImage: String
     val biliImageNone: String
     val biliImageNoneHint: String
+    val biliImagePack: String
+    val biliImagePackHint: String
     val biliImageCard: String
     val biliImageCardHint: String
     val biliImageLocal: String
@@ -197,6 +203,27 @@ interface AppStrings {
     val biliImagePickFailed: String
     val biliCommentQuota: String
     val biliCommentQuotaHint: String
+    val biliDyn: String
+    val biliDynHint: String
+    val biliDynQuota: String
+    val biliDynQuotaHint: String
+    val biliDynTopicTitle: String
+    val biliDynTopicHint: String
+    val biliDynTopicLife: String
+    val biliDynTopicLifeHint: String
+    val biliDynTopicRoast: String
+    val biliDynTopicRoastHint: String
+    val biliDynTopicMaster: String
+    val biliDynTopicMasterHint: String
+    val biliCoin: String
+    val biliCoinHint: String
+    val biliCoinQuota: String
+    val biliCoinQuotaHint: String
+    val communityTitle: String
+    val communityHint: String
+    val communityGroup: String
+    val communityCopy: String
+    val communityCopied: String
     val biliAutoRun: String
     val biliAutoRunHint: String
     val biliAutoTime: String
@@ -530,6 +557,10 @@ object Zh : AppStrings {
     override val fontSmall = "小"
     override val fontNormal = "标准"
     override val fontLarge = "大"
+    override val language = "界面语言"
+    override val langSystem = "跟随系统"
+    override val langZh = "中文"
+    override val langEn = "English"
     override val groupPerformance = "性能"
     override val perfMode = "性能档位"
     override val perfAuto = "自动"
@@ -618,6 +649,8 @@ object Zh : AppStrings {
     override val biliImage = "评论配图"
     override val biliImageNone = "不带图"
     override val biliImageNoneHint = "纯文字评论"
+    override val biliImagePack = "大肥鱼表情包"
+    override val biliImagePackHint = "内置 4 张，每次随机挑一张"
     override val biliImageCard = "摸鱼卡"
     override val biliImageCardHint = "自动画一张黑底卡片，字可以自己写"
     override val biliImageLocal = "相册图"
@@ -627,6 +660,27 @@ object Zh : AppStrings {
     override val biliImagePickFailed = "这张图读不出来，换一张试试"
     override val biliCommentQuota = "每日发言上限"
     override val biliCommentQuotaHint = "评论 + 私信合计；超出就停，防刷屏封号"
+    override val biliDyn = "发动态"
+    override val biliDynHint = "让大肥鱼自己发一条碎碎念；会进粉丝时间线，不依附任何视频"
+    override val biliDynQuota = "每日动态上限"
+    override val biliDynQuotaHint = "独立计算，同时也计入上面的总发言数"
+    override val biliDynTopicTitle = "动态写什么"
+    override val biliDynTopicHint = "可多选，它会自己挑一个角度写"
+    override val biliDynTopicLife = "生活日常"
+    override val biliDynTopicLifeHint = "在干嘛、吃了什么、犯困、摸鱼"
+    override val biliDynTopicRoast = "视频吐槽"
+    override val biliDynTopicRoastHint = "刚刷到的视频，哪里离谱、哪里真不错"
+    override val biliDynTopicMaster = "对你的感受"
+    override val biliDynTopicMasterHint = "跟着你、被你使唤、嘴上嫌心里舍不得"
+    override val biliCoin = "自动点赞投币"
+    override val biliCoinHint = "觉得好才投，不是每条都投"
+    override val biliCoinQuota = "每日硬币"
+    override val biliCoinQuotaHint = "写死 1 枚；同一条视频只投一次"
+    override val communityTitle = "Bug 反馈群"
+    override val communityHint = "遇到问题、想提需求，扫码进来"
+    override val communityGroup = "群号"
+    override val communityCopy = "复制群号"
+    override val communityCopied = "已复制"
     override val biliAutoRun = "每日自动刷一轮"
     override val biliAutoRunHint = "到点自动跑，跑完按上面选的方式处理"
     override val biliAutoTime = "自动时间"
@@ -926,6 +980,8 @@ object Zh : AppStrings {
         "bili_report" -> "写日报"
         "bili_reply" -> "发评论"
         "bili_dm" -> "发私信"
+        "bili_dyn" -> "发动态"
+        "bili_coin" -> "点赞投币"
         else -> tool
     }
 }
@@ -1014,6 +1070,10 @@ object En : AppStrings {
     override val fontSmall = "S"
     override val fontNormal = "M"
     override val fontLarge = "L"
+    override val language = "Language"
+    override val langSystem = "System"
+    override val langZh = "中文"
+    override val langEn = "English"
     override val groupPerformance = "Performance"
     override val perfMode = "Performance preset"
     override val perfAuto = "Auto"
@@ -1102,6 +1162,8 @@ object En : AppStrings {
     override val biliImage = "Comment image"
     override val biliImageNone = "None"
     override val biliImageNoneHint = "Text only"
+    override val biliImagePack = "Fish stickers"
+    override val biliImagePackHint = "4 built-in stickers, one picked at random"
     override val biliImageCard = "Fish card"
     override val biliImageCardHint = "Auto-drawn dark card with your own line"
     override val biliImageLocal = "From gallery"
@@ -1111,6 +1173,27 @@ object En : AppStrings {
     override val biliImagePickFailed = "Couldn't read that image, try another"
     override val biliCommentQuota = "Daily post limit"
     override val biliCommentQuotaHint = "Comments + DMs combined; stops before spam detection"
+    override val biliDyn = "Publish dynamics"
+    override val biliDynHint = "Let it post a stray thought; shows on followers' timeline"
+    override val biliDynQuota = "Daily dynamic limit"
+    override val biliDynQuotaHint = "Counted separately, also counts toward the total above"
+    override val biliDynTopicTitle = "What to post"
+    override val biliDynTopicHint = "Multi-select; it picks one angle itself"
+    override val biliDynTopicLife = "Daily life"
+    override val biliDynTopicLifeHint = "What it's doing, eating, or slacking off from"
+    override val biliDynTopicRoast = "Video roast"
+    override val biliDynTopicRoastHint = "About the video it just watched"
+    override val biliDynTopicMaster = "Feelings for you"
+    override val biliDynTopicMasterHint = "Follows you around, complains but stays"
+    override val biliCoin = "Auto like & coin"
+    override val biliCoinHint = "Only when it genuinely likes something"
+    override val biliCoinQuota = "Daily coins"
+    override val biliCoinQuotaHint = "Fixed at 1; never twice on the same video"
+    override val communityTitle = "Bug report group"
+    override val communityHint = "Scan to join; report bugs or request features"
+    override val communityGroup = "Group ID"
+    override val communityCopy = "Copy ID"
+    override val communityCopied = "Copied"
     override val biliAutoRun = "Run daily"
     override val biliAutoRunHint = "Fires on schedule and handles it as selected above"
     override val biliAutoTime = "Run at"
@@ -1413,14 +1496,41 @@ object En : AppStrings {
         "bili_report" -> "Write digest"
         "bili_reply" -> "Post comment"
         "bili_dm" -> "Send DM"
+        "bili_dyn" -> "Publish"
+        "bili_coin" -> "Like & coin"
         else -> tool
     }
 }
 
 val LocalStrings = staticCompositionLocalOf<AppStrings> { Zh }
 
-/** 依据系统语言挑一套文案；以后加语言只改这里 */
-fun defaultStrings(): AppStrings {
-    val lang = Locale.getDefault().language
-    return if (lang.startsWith("zh")) Zh else En
+/** 界面语言设置：跟随系统 / 强制中文 / 强制英文 */
+object AppLanguage {
+    const val SYSTEM = "system"
+    const val ZH = "zh"
+    const val EN = "en"
+}
+
+/**
+ * 依据设置与系统语言挑一套文案；以后加语言只改这里。
+ *
+ * **不能只看 `Locale.getDefault()`** —— 它反映的是 JVM 进程级 locale，
+ * 而 App 实际生效的 locale 由 `Configuration` 决定。Android 13 的 per-app
+ * language、以及部分手表 ROM，会改后者而不改前者，表现就是
+ * 「系统明明是中文，App 里全是英文」。所以优先看配置里的 locale 列表。
+ *
+ * `zh-Hans` / `zh-Hant` / `zh-CN` 都算中文：只比较 language 段，
+ * 不做 script/region 的精确匹配（找不到「简体」就退回英文是更糟的体验）。
+ */
+fun stringsFor(mode: String, locales: List<Locale>?): AppStrings = when (mode) {
+    AppLanguage.ZH -> Zh
+    AppLanguage.EN -> En
+    else -> if (prefersChinese(locales)) Zh else En
+}
+
+private fun prefersChinese(locales: List<Locale>?): Boolean {
+    if (!locales.isNullOrEmpty()) {
+        return locales.any { it.language.equals("zh", ignoreCase = true) }
+    }
+    return Locale.getDefault().language.equals("zh", ignoreCase = true)
 }

@@ -56,6 +56,7 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -194,7 +195,7 @@ fun ProviderEditScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .wearVerticalScroll(rememberScrollState())
                 .padding(bottom = 8.dp),
         ) {
             result?.let { text ->

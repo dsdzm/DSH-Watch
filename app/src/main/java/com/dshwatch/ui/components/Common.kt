@@ -83,6 +83,9 @@ fun WatchScaffold(
     bottom: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // 圆屏的可用宽度比同尺寸方屏小得多：屏幕是个内切圆，滚动到上下两端时
+    // 左右各要收回近 1/4 的宽度。8dp 在方屏上刚好，在圆屏上会切字。
+    val side = if (LocalDeviceProfile.current.isRound) 16.dp else WatchDimens.screenPadding
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -93,7 +96,7 @@ fun WatchScaffold(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = WatchDimens.screenPadding),
+                .padding(horizontal = side),
             content = content,
         )
         bottom?.invoke()

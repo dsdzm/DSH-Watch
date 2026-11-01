@@ -17,11 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -66,6 +63,8 @@ import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.theme.MonoSmall
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.wear.WearList
+import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -204,12 +203,13 @@ fun WorkspaceScreen(
             return@WatchScaffold
         }
 
-        LazyColumn(
+        WearList(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 2.dp),
+            contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            items(visible, key = { it.path }) { entry ->
+            items(visible.size, key = { visible[it].path }) { index ->
+                val entry = visible[index]
                 FileRow(
                     entry = entry,
                     isArtifact = isArtifactPath(entry.path),
@@ -349,7 +349,7 @@ fun WorkspacePreviewScreen(
             textContent != null -> Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .wearVerticalScroll(rememberScrollState()),
             ) {
                 Text(
                     text = textContent.orEmpty(),

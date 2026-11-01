@@ -6,9 +6,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -324,7 +329,8 @@ class BiliApi(private val cookie: () -> String) {
                             put("img_src", JsonPrimitive(pic.url))
                             put("img_width", JsonPrimitive(pic.width))
                             put("img_height", JsonPrimitive(pic.height))
-                            put("img_size", JsonPrimitive(pic.size))
+                            // UploadedImage.size 是字节，这个字段要 KB
+                            put("img_size", JsonPrimitive((pic.size / 1024.0).coerceAtLeast(0.1)))
                         }
                     )
                 }
@@ -419,13 +425,34 @@ class BiliApi(private val cookie: () -> String) {
             throw BiliException("上传图片被拒：$code ${obj.str("message")}（${friendlyCode(code)}）")
         }
         val data = obj["data"] as? JsonObject ?: throw BiliException("上传图片没有返回 data")
-        val url = data.str("image_url").ifBlank { data.str("img_src") }
-        if (url.isBlank()) throw BiliException("上传图片没有返回地址")
+        val rawUrl = data.str("image_url").ifBlank { data.str("img_src") }
+        if (rawUrl.isBlank()) throw BiliException("上传图片没有返回地址")
+
+        // 返回的地址偶尔是协议相对形式（`//i0.hdslb.com/...`）。
+        // 评论接口原样接受，但动态接口会把它当成非法 URL 直接吞掉图片 —— 补齐。
+        val url = when {
+            rawUrl.startsWith("//") -> "https:$rawUrl"
+            rawUrl.startsWith("http") -> rawUrl
+            rawUrl.startsWith("/") -> "https://i0.hdslb.com$rawUrl"
+            else -> "https://i0.hdslb.com/bfs/new_dyn/$rawUrl"
+        }
+
+        /*
+         * `img_size` 的单位是 **KB**，而且常带小数（88.5）。
+         *
+         * 这里统一折算成字节存进 UploadedImage，让「字节」成为唯一口径：
+         * 评论接口要 KB、动态接口也要 KB，各自除 1024 就行。
+         * 之前直接把接口返回的 KB 当字节存，评论那边原样传出去是 88（碰巧对），
+         * 而走 bytes.size 兜底时传的是 97000 —— 被 B站 判成非法参数，
+         * 图片被静默丢弃，表现就是「评论发出去了但没图」。
+         */
+        val kb = data.str("img_size").trim().toDoubleOrNull()?.takeIf { it > 0 }
+            ?: data.int("img_size").takeIf { it > 0 }?.toDouble()
         return UploadedImage(
             url = url,
             width = data.int("image_width").takeIf { it > 0 } ?: 720,
             height = data.int("image_height").takeIf { it > 0 } ?: 720,
-            size = data.int("img_size").takeIf { it > 0 } ?: bytes.size,
+            size = if (kb != null) (kb * 1024).toInt() else bytes.size,
         )
     }
 
@@ -481,6 +508,166 @@ class BiliApi(private val cookie: () -> String) {
             throw BiliException("B站拒绝了这条私信：$code ${obj.str("message").ifBlank { obj.str("msg") }}")
         }
         return "已发送"
+    }
+
+    // ------------------------------------------------------------------
+    // 点赞 / 投币
+    // ------------------------------------------------------------------
+
+    /**
+     * 给视频点赞。
+     *
+     * 接口是幂等的：重复 `like=1` 不会连点两次，所以判重只是为了省请求。
+     * 传 `aid` 而不是 `bvid`：这两个接口的 bvid 分支在不同版本里时好时坏，
+     * aid 是从来没有变过的那个。
+     */
+    suspend fun like(bvid: String, on: Boolean = true): String =
+        actOnVideo(
+            path = "/x/web-interface/archive/like",
+            bvid = bvid,
+            what = if (on) "点赞" else "取消点赞",
+            extra = arrayOf("like" to if (on) "1" else "0"),
+        )
+
+    /**
+     * 给视频投一枚硬币。
+     *
+     * `multiply=1` 是「投几枚」，这里**写死 1** —— 硬币是账号的存量资源，
+     * 一次投两枚属于不可逆的加倍消耗，工具层不该给模型这个自由度。
+     * `select_like=0`：点赞由 [like] 单独做，两个动作分开才能分别报错。
+     */
+    suspend fun coin(bvid: String): String =
+        actOnVideo(
+            path = "/x/web-interface/coin/add",
+            bvid = bvid,
+            what = "投币",
+            extra = arrayOf("multiply" to "1", "select_like" to "0"),
+        )
+
+    /**
+     * 点赞与投币共用的请求骨架。
+     *
+     * 两者的参数、参照页、错误码处理完全一致，唯一的区别是路径与两个额外参数，
+     * 所以合成一处 —— 分开写必然会有一次漏掉 `csrf` 或 Referer。
+     */
+    private suspend fun actOnVideo(
+        path: String,
+        bvid: String,
+        what: String,
+        extra: Array<Pair<String, String>>,
+    ): String {
+        ensureBuvid()
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法$what")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct，无法$what")
+        val aid = video(bvid).aid
+        if (aid <= 0) throw BiliException("查不到 $bvid 的 aid，$what 失败")
+
+        val form = okhttp3.FormBody.Builder().add("aid", aid.toString())
+        extra.forEach { (k, v) -> form.add(k, v) }
+        form.add("csrf", csrf)
+
+        val request = req("$API$path")
+            .header("Referer", "https://www.bilibili.com/video/$bvid")
+            .post(form.build())
+            .build()
+
+        val body = withContext(Dispatchers.IO) {
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrElse { throw BiliException("$what 失败：${it.message.orEmpty().take(120)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
+            ?: throw BiliException("$what 接口返回不是 JSON（可能被风控）：${body.take(120)}")
+        val code = obj.int("code")
+        if (code != 0) {
+            throw BiliException("B站拒绝了这次$what：$code ${obj.str("message")}（${friendlyCode(code)}）")
+        }
+        return "已$what"
+    }
+
+    /**
+     * 发一条动态。
+     *
+     * 和评论不一样，动态是**独立广播**：它进粉丝时间线，不依附任何视频，
+     * 也没有「楼」可以回。接口是 `x/dynamic/feed/create/dyn`，body 是 JSON，
+     * `csrf` 放在 query —— 这个接口**不需要 WBI 签名**（匿名实测只回 `-101`，
+     * 说明参数层是通的，卡在登录校验）。
+     *
+     * 图片直接复用 [uploadImage] 的 `biz=new_dyn` 图床，返回地址填进 `pics`。
+     * 注意 `img_size` 的单位是 **KB**，而 [UploadedImage.size] 是字节数。
+     *
+     * `scene` 只能 1（纯文本）或 2（带图）。传错不会报错，只会得到一条没有图的
+     * 动态 —— 所以这里按 pics 是否为空自己定，不交给调用方。
+     */
+    suspend fun createDyn(text: String, pics: List<UploadedImage> = emptyList()): Long {
+        ensureBuvid()
+        if (text.isBlank()) throw BiliException("动态内容是空的")
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，发不了动态")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct")
+        val self = selfMid()
+        if (self <= 0) throw BiliException("Cookie 里没有 DedeUserID，无法确定发布者；请重新扫码登录")
+
+        // upload_id 是可选的客户端追踪号，格式 mid_秒级时间戳_四位随机。
+        // 不传也能发，但带上更接近网页端行为，风控上少一个可疑点。
+        val uploadId = "${self}_${System.currentTimeMillis() / 1000}_${(1000..9999).random()}"
+
+        val payload = kotlinx.serialization.json.buildJsonObject {
+            putJsonObject("dyn_req") {
+                putJsonObject("content") {
+                    putJsonArray("contents") {
+                        addJsonObject {
+                            put("raw_text", text)
+                            put("type", 1)
+                        }
+                    }
+                    if (pics.isNotEmpty()) {
+                        putJsonArray("pics") {
+                            pics.forEach { p ->
+                                addJsonObject {
+                                    put("img_src", p.url)
+                                    put("img_width", p.width)
+                                    put("img_height", p.height)
+                                    // 接口要 KB，UploadedImage 存的是字节
+                                    put("img_size", (p.size / 1024.0).coerceAtLeast(0.1))
+                                }
+                            }
+                        }
+                    }
+                }
+                put("scene", if (pics.isEmpty()) 1 else 2)
+                put("upload_id", uploadId)
+                putJsonObject("meta") {
+                    putJsonObject("app_meta") {
+                        put("from", "create.dynamic.web")
+                        put("mobi_app", "web")
+                    }
+                }
+            }
+        }.toString()
+
+        val url = "$API/x/dynamic/feed/create/dyn?platform=web&csrf=${csrf}"
+        val request = req(url)
+            .header("Referer", "https://www.bilibili.com/")
+            .header("Origin", "https://www.bilibili.com")
+            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        val body = withContext(Dispatchers.IO) {
+            runCatching { Http.client.newCall(request).execute().use { it.body?.string().orEmpty() } }
+                .getOrElse { throw BiliException("发动态失败：${it.message.orEmpty().take(120)}") }
+        }
+        val obj = runCatching { json.parseToJsonElement(body) as JsonObject }.getOrNull()
+            ?: throw BiliException("动态接口返回不是 JSON（可能被风控）：${body.take(120)}")
+        val code = obj.int("code")
+        if (code != 0) {
+            throw BiliException("B站拒绝了这条动态：$code ${obj.str("message").ifBlank { obj.str("msg") }}（${friendlyCode(code)}）")
+        }
+        val data = obj["data"] as? JsonObject
+        // dyn_id_str 是字符串形式的 id（超过 2^53 时网页端也是用它），优先取它
+        return data?.str("dyn_id_str")?.toLongOrNull()?.takeIf { it > 0 }
+            ?: data?.long("dyn_id")?.takeIf { it > 0 }
+            ?: 0L
     }
 
     // ------------------------------------------------------------------

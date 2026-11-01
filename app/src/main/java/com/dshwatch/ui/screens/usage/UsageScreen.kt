@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +43,7 @@ import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 
 @Composable
@@ -75,7 +75,7 @@ fun UsageScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .wearVerticalScroll(rememberScrollState())
                 .padding(bottom = 8.dp),
         ) {
             SectionHeader("统计区间")

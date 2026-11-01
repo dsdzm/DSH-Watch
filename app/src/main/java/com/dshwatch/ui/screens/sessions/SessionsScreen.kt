@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -53,6 +51,7 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.data.store.ConversationStore
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.wear.WearList
 import kotlinx.coroutines.launch
 
 @Composable
@@ -91,12 +90,15 @@ fun SessionsScreen(
             return@WatchScaffold
         }
 
-        LazyColumn(
+        // 外层 WatchScaffold 已经给了横向留白，这里只补上下的呼吸空间，
+        // 否则会叠成两层内边距，在 205dp 的表盘上白白浪费 20dp 宽度
+        WearList(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp, horizontal = 2.dp),
+            contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(conversations, key = { it.id }) { conv ->
+            items(conversations.size, key = { conversations[it].id }) { index ->
+                val conv = conversations[index]
                 ConversationRow(
                     conversation = conv,
                     onClick = {

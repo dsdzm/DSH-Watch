@@ -90,6 +90,15 @@ object BiliSchedule {
             BiliMode.SUMMARY ->
                 append("只要日报，不用发评论也不用私信。")
         }
+        if (settings.biliDynEnabled) {
+            // 明确写「没有就不发」：定时任务里模型容易把「可用工具」当成
+            // 「必须做的事」，于是每天准时发一条没话找话的动态。
+            append("如果今天确实有想说的，用 bili_dyn 发一条动态，写").append(BiliTopics.summary(settings.biliDynTopics))
+            append("；没有想说的就不发，别硬凑。")
+        }
+        if (settings.biliCoinEnabled) {
+            append("看到真觉得好的视频可以 bili_coin 点个赞投枚币（每天最多一枚硬币，不要每条都投）。")
+        }
         append("做完把今天的结论列给我。")
     }
 }

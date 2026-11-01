@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -51,10 +50,12 @@ import com.dshwatch.ui.components.StepperRow
 import com.dshwatch.ui.components.SwitchRow
 import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -100,6 +101,21 @@ internal object SettingsGroups {
 internal typealias Update = ((AppSettings) -> AppSettings) -> Unit
 
 /**
+ * 逗号分隔的多选题切换（动态选题用）。
+ *
+ * 存字符串而不是 `Set`：设置整包是 JSON 落盘的，`Set` 会被序列化成数组，
+ * 老版本读到不认识的类型有整包丢弃的风险；字符串最坏只是内容读不懂。
+ * 写完按固定顺序重排，避免「同样的选择、不同的字符串」让设置 diff 变脏。
+ */
+private fun toggleTopic(current: String, key: String): String {
+    val picked = current.split(',').map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+    if (!picked.remove(key)) picked.add(key)
+    val order = listOf("life", "roast", "master")
+    return picked.sortedBy { order.indexOf(it).let { i -> if (i < 0) order.size else i } }
+        .joinToString(",")
+}
+
+/**
  * 某个分组的详情页。
  *
  * ## 为什么拆成二级
@@ -131,7 +147,7 @@ fun SettingsGroupScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .wearVerticalScroll(rememberScrollState())
                 .padding(bottom = 10.dp),
         ) {
             when (groupId) {
@@ -359,6 +375,34 @@ private fun AppearanceGroup(
                             0 -> 0.85f
                             2 -> 1.12f
                             else -> 0.92f
+                        }
+                    )
+                }
+            },
+        )
+        Spacer(Modifier.height(6.dp))
+        // 语言单独给一个显式开关：跟随系统在部分手表上会判成英文，
+        // 用户至少要有一条「我自己选」的路，而不是只能忍着。
+        Text(
+            text = s.language,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        SegmentedRow(
+            options = listOf(s.langSystem, s.langZh, s.langEn),
+            selectedIndex = when (settings.appLanguage) {
+                AppLanguage.ZH -> 1
+                AppLanguage.EN -> 2
+                else -> 0
+            },
+            onSelect = { index ->
+                update {
+                    it.copy(
+                        appLanguage = when (index) {
+                            1 -> AppLanguage.ZH
+                            2 -> AppLanguage.EN
+                            else -> AppLanguage.SYSTEM
                         }
                     )
                 }
@@ -864,13 +908,14 @@ private fun BiliGroup(
             // 配图选择放在这里而不是单独一页：只有三档，进去看一眼就知道选哪个
             title = s.biliImage,
             subtitle = when (settings.biliImage) {
+                "pack" -> s.biliImagePack
                 "card" -> s.biliImageCard + settings.biliImageText.takeIf { it.isNotBlank() }
                     ?.let { "「$it」" }.orEmpty()
                 "local" -> s.biliImageLocal
                 else -> s.biliImageNone
             } + if (imageNote.isNotBlank()) " · $imageNote" else "",
             trailing = "›",
-            showDivider = settings.biliImage == "card",
+            showDivider = true,
             onClick = { editingImage = true },
         )
         if (settings.biliImage == "card") {
@@ -878,10 +923,79 @@ private fun BiliGroup(
                 title = s.biliImageText,
                 subtitle = settings.biliImageText.ifBlank { s.biliImageTextHint },
                 trailing = "✎",
+                showDivider = true,
                 onClick = {
                     imageTextDraft = settings.biliImageText
                     editingImageText = true
                 },
+            )
+        }
+        // 动态和评论共用同一套配图设置：多一个图片选择器只会让设置页更长，
+        // 而且用户大概率希望「配图」是一致的。
+        SwitchRow(
+            title = s.biliDyn,
+            subtitle = s.biliDynHint,
+            checked = settings.biliDynEnabled,
+            onCheckedChange = { v -> update { it.copy(biliDynEnabled = v) } },
+        )
+        if (settings.biliDynEnabled) {
+            StepperRow(
+                title = s.biliDynQuota,
+                subtitle = s.biliDynQuotaHint,
+                value = if (settings.biliDynQuota <= 0) "∞" else "${settings.biliDynQuota} 条",
+                onDecrease = {
+                    update { it.copy(biliDynQuota = (it.biliDynQuota - 1).coerceIn(0, 10)) }
+                },
+                onIncrease = {
+                    update { it.copy(biliDynQuota = (it.biliDynQuota + 1).coerceIn(0, 10)) }
+                },
+            )
+            // 动态写什么：三种视角可多选。默认全开 —— 一条像人的动态本来
+            // 就是「今天干了啥 + 顺手吐槽 + 想到谁」混在一起，不是三选一。
+            SettingRow(
+                title = s.biliDynTopicTitle,
+                subtitle = s.biliDynTopicHint,
+                showDivider = true,
+            )
+            SwitchRow(
+                title = s.biliDynTopicLife,
+                subtitle = s.biliDynTopicLifeHint,
+                checked = settings.biliDynTopics.contains("life"),
+                onCheckedChange = {
+                    update { st -> st.copy(biliDynTopics = toggleTopic(st.biliDynTopics, "life")) }
+                },
+            )
+            SwitchRow(
+                title = s.biliDynTopicRoast,
+                subtitle = s.biliDynTopicRoastHint,
+                checked = settings.biliDynTopics.contains("roast"),
+                onCheckedChange = {
+                    update { st -> st.copy(biliDynTopics = toggleTopic(st.biliDynTopics, "roast")) }
+                },
+            )
+            SwitchRow(
+                title = s.biliDynTopicMaster,
+                subtitle = s.biliDynTopicMasterHint,
+                checked = settings.biliDynTopics.contains("master"),
+                onCheckedChange = {
+                    update { st -> st.copy(biliDynTopics = toggleTopic(st.biliDynTopics, "master")) }
+                },
+            )
+        }
+
+        // 点赞投币：唯一会消耗账号资源的动作，所以单独一行说清楚
+        SwitchRow(
+            title = s.biliCoin,
+            subtitle = s.biliCoinHint,
+            checked = settings.biliCoinEnabled,
+            onCheckedChange = { v -> update { it.copy(biliCoinEnabled = v) } },
+        )
+        if (settings.biliCoinEnabled) {
+            SettingRow(
+                title = s.biliCoinQuota,
+                subtitle = s.biliCoinQuotaHint,
+                trailing = "1 枚 / 天",
+                showDivider = true,
             )
         }
     }
@@ -1018,9 +1132,10 @@ private fun BiliGroup(
 
     if (editingImage) {
         val options = listOf(
-            Triple("none", s.biliImageNone, s.biliImageNoneHint),
+            Triple("pack", s.biliImagePack, s.biliImagePackHint),
             Triple("card", s.biliImageCard, s.biliImageCardHint),
             Triple("local", s.biliImageLocal, s.biliImageLocalHint),
+            Triple("none", s.biliImageNone, s.biliImageNoneHint),
         )
         AlertDialog(
             onDismissRequest = { editingImage = false },
@@ -1033,7 +1148,8 @@ private fun BiliGroup(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    update { it.copy(biliImage = id) }
+                                    // 打上「用户主动选过」标记，升级迁移就不会再覆盖这个选择
+                                    update { it.copy(biliImage = id, biliImageTouched = true) }
                                     editingImage = false
                                     // 有些手表 ROM 没装 DocumentsUI，launch 会直接抛异常；
                                     // 那种情况下退回「摸鱼卡」，而不是让设置页崩掉

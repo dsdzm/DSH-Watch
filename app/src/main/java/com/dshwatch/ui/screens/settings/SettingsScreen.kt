@@ -1,15 +1,14 @@
 package com.dshwatch.ui.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -39,11 +38,13 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.domain.plugin.PluginRegistry
+import com.dshwatch.ui.components.WatchTopBar
 import com.dshwatch.ui.components.WearCardRow
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.WearList
 
 /**
  * 设置页（横滑的第二页）。
@@ -66,33 +67,28 @@ fun SettingsScreen(
 ) {
     val s = LocalStrings.current
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    // 设置现在是对话页的二级页（不再靠右滑进入），所以顶部要有返回。
+    // 之前作为「第二页」时不需要返回键，因为横滑本身就回去了。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        item {
-            Text(
-                text = s.navSettings,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 6.dp),
-            )
-        }
-        items(SettingsGroups.all) { id ->
-            WearCardRow(
-                icon = groupIcon(id),
-                title = SettingsGroups.title(id, s),
-                subtitle = summaryOf(id, settings, s),
-                trailing = "›",
-                onClick = { nav.push(Screen.SettingsGroup(id)) },
-            )
+        WatchTopBar(title = s.navSettings, onBack = { nav.pop() })
+        WearList(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(SettingsGroups.all.size) { index ->
+                val id = SettingsGroups.all[index]
+                WearCardRow(
+                    icon = groupIcon(id),
+                    title = SettingsGroups.title(id, s),
+                    subtitle = summaryOf(id, settings, s),
+                    trailing = "›",
+                    onClick = { nav.push(Screen.SettingsGroup(id)) },
+                )
+            }
         }
     }
 }
@@ -148,6 +144,8 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
             )
             append(" · ")
             append(if (settings.biliDailyQuota <= 0) "不限量" else "每天 ${settings.biliDailyQuota} 条")
+            if (settings.biliDynEnabled) append(" · 发动态")
+            if (settings.biliImage != "none") append(" · 带图")
             if (settings.biliAutoRun) append(" · 自动")
         }
     }

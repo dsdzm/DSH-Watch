@@ -422,4 +422,5 @@ private fun testProfile() = DeviceProfile(
     sdkInt = 28,
     compact = true,
     squarish = false,
+isRound = false,
 )

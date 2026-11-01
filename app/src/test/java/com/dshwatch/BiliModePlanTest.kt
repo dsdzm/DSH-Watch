@@ -95,11 +95,48 @@ class BiliModePlanTest {
         // 逐次确认模式下也不例外：用户明确要求发评论不要弹窗，
         // 护栏改成模式 + 配额 + 判重 + 风格闸门
         val s = AppSettings(agentMode = AgentMode.ASK_EVERY_STEP)
-        listOf("bili_reply", "bili_dm").forEach { name ->
+        listOf("bili_reply", "bili_dm", "bili_dyn", "bili_coin").forEach { name ->
             assertThat(
                 ApprovalPolicy.needsApproval(s, name, ToolSafety.NETWORK, JsonObject(emptyMap()), emptySet())
             ).isFalse()
         }
+    }
+
+    // ---------------- 发动态 ----------------
+
+    @Test
+    fun `dynamic publishing is off by default`() {
+        val s = AppSettings()
+        assertThat(s.biliDynEnabled).isFalse()
+        assertThat(s.biliDynQuota).isEqualTo(1)
+        assertThat(BiliTools.DynTool.enabled(s)).isFalse()
+    }
+
+    @Test
+    fun `dynamic publishing needs both the master switch and its own toggle`() {
+        // 总开关关掉时，单独开动态也不该生效 —— 否则「关了刷B站」还能发动态
+        assertThat(
+            BiliTools.DynTool.enabled(AppSettings(biliEnabled = false, biliDynEnabled = true))
+        ).isFalse()
+        assertThat(
+            BiliTools.DynTool.enabled(AppSettings(biliEnabled = true, biliDynEnabled = true))
+        ).isTrue()
+    }
+
+    @Test
+    fun `dynamic publishing is independent of the three way mode`() {
+        // 「只总结」的用户同样可能想让鱼偶尔发一条，所以动态不挂在模式上。
+        // 这也是当初没把 dynamic 塞进 BiliMode 的原因。
+        val s = AppSettings(biliEnabled = true, biliDynEnabled = true, biliMode = "summary")
+        assertThat(BiliModes.of(s)).isEqualTo(BiliMode.SUMMARY)
+        assertThat(BiliTools.DynTool.enabled(s)).isTrue()
+    }
+
+    @Test
+    fun `dynamic tool is registered and network bound`() {
+        assertThat(BiliTools.all().map { it.name }).contains("bili_dyn")
+        assertThat(BiliTools.all().map { it.name }).contains("bili_coin")
+        assertThat(BiliTools.DynTool.safety).isEqualTo(ToolSafety.NETWORK)
     }
 
     @Test

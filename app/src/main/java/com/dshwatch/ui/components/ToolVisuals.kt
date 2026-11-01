@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -90,6 +91,8 @@ object ToolVisuals {
         "bili_report" -> Icons.Filled.Create
         "bili_reply" -> Icons.Filled.Send
         "bili_dm" -> Icons.Filled.Email
+        "bili_dyn" -> Icons.Filled.Edit
+        "bili_coin" -> Icons.Filled.Star
 
         // 执行与云端
         "run_script" -> Icons.Filled.PlayArrow

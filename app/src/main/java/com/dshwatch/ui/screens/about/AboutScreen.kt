@@ -2,6 +2,12 @@ package com.dshwatch.ui.screens.about
 
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,10 +41,14 @@ import com.dshwatch.ui.components.SettingCard
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.wearVerticalScroll
 
 /** 作者信息是专有名词，不参与多语言切换 */
 private const val AUTHOR_NAME = "东山の字幕"
 private const val AUTHOR_EMAIL = "2332184782@qq.com"
+
+/** 反馈群群号。同样不翻译：数字换了就不是同一个群了 */
+private const val GROUP_ID = "1087183734"
 
 /**
  * 关于页。
@@ -58,6 +67,19 @@ fun AboutScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
+    var groupCopied by remember { mutableStateOf(false) }
+
+    /*
+     * assets 里的群二维码只解码一次。
+     *
+     * 用 `remember` 而不是 `rememberSaveable`：Bitmap 没法序列化，
+     * 而且页面重建时重新解一张 250KB 的图代价很小。
+     */
+    val groupQr = remember {
+        runCatching {
+            context.assets.open("community/qq_group.jpg").use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
 
     val info = remember {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -82,7 +104,7 @@ fun AboutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .wearVerticalScroll(rememberScrollState())
                 .padding(bottom = 8.dp),
         ) {
             Spacer(Modifier.height(6.dp))
@@ -121,6 +143,52 @@ fun AboutScreen(
                         onClick = {
                             clipboard.setText(AnnotatedString(AUTHOR_EMAIL))
                             copied = true
+                        },
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+            }
+
+            // ---------------- 反馈群 ----------------
+            SectionHeader(s.communityTitle)
+            SettingCard {
+                Text(
+                    text = s.communityHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                // 直接显示 QQ 生成的原图，不重画：二维码重绘一遍容易扫不出来。
+                // 解码失败（assets 被裁剪）时整块跳过，留群号照样能加。
+                groupQr?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = s.communityTitle,
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp)),
+                    )
+                    Spacer(Modifier.height(3.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = s.communityGroup,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                        Text(
+                            text = GROUP_ID,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Chip(
+                        text = if (groupCopied) s.communityCopied else s.communityCopy,
+                        onClick = {
+                            clipboard.setText(AnnotatedString(GROUP_ID))
+                            groupCopied = true
                         },
                     )
                 }

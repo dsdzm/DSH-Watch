@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -38,6 +36,7 @@ import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.WearList
 import kotlinx.coroutines.launch
 
 @Composable
@@ -64,9 +63,9 @@ fun ProvidersScreen(
             EmptyState(title = s.addProvider, hint = s.typeOpenAiHint)
             return@WatchScaffold
         }
-        LazyColumn(
+        WearList(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp),
+            contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             item(key = "__hint__") {
@@ -77,7 +76,8 @@ fun ProvidersScreen(
                     modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
                 )
             }
-            items(settings.providers, key = { it.id }) { provider ->
+            items(settings.providers.size, key = { settings.providers[it].id }) { index ->
+                val provider = settings.providers[index]
                 ProviderRow(
                     provider = provider,
                     isActive = provider.id == activeId,
