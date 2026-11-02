@@ -108,6 +108,8 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.markdown.MarkdownText
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.screens.scene.ScenePickerDialog
+import com.dshwatch.ui.screens.scene.sceneIcon
 import com.dshwatch.ui.components.cornerSafe
 import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalPerf
@@ -166,6 +168,7 @@ fun ChatScreen(
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
     var showModelPicker by remember { mutableStateOf(false) }
     var showAgentDialog by remember { mutableStateOf(false) }
+    var showScenePicker by remember { mutableStateOf(false) }
 
     val approval by engine.approval.collectAsStateWithLifecycle()
     val pendingQuestion by engine.question.collectAsStateWithLifecycle()
@@ -269,8 +272,9 @@ fun ChatScreen(
         // 对话页是根：没有返回，靠右滑去设置
         onBack = null,
         actions = {
-            // 顶栏宽度经不起四个图标，这里只留最常用的三个。
+            // 顶栏只剩最常用的四颗（编程场景）：历史 / 新建 / 切换模式 / 设置。
             // 设置从「右滑第二页」改成显式入口：横滑在圆屏上会和系统返回手势打架。
+            // 酒馆与写作场景下 actions 里不会有「新建」（那是编程专属），只剩三颗。
             IconTap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
             if (codingScene) {
                 IconTap(Icons.Outlined.Add, s.newChat) {
@@ -278,6 +282,14 @@ fun ChatScreen(
                     // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
                     scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
                 }
+                // 场景切换。酒馆/写作两页顶栏都有这颗胶囊，编程页最初漏了 ——
+                // 结果进了编程模式就只能靠"重新运行引导"或去设置里改 useScene 才能出来。
+                //
+                // 这里用图标而不是文字胶囊：编程页顶栏已经有 历史 / 新建 / 设置 三颗，
+                // 再塞一个带文字的胶囊会把标题挤到放不下（圆屏尤其明显）。
+                // 切换语义与另外两页一致：改的是"模式"，跳到那个模式的根界面，
+                // 而不是把当前会话改造成另一种东西（会话的场景在创建时就定死了）。
+                IconTap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
             }
             IconTap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
@@ -625,6 +637,27 @@ fun ChatScreen(
                 scope.launch { engine.overrideModel(model) }
             },
             onDismiss = { showModelPicker = false },
+        )
+    }
+
+    if (showScenePicker) {
+        ScenePickerDialog(
+            current = settings.useScene,
+            onPick = { id ->
+                showScenePicker = false
+                if (id == Scenes.of(settings.useScene)) return@ScenePickerDialog
+                // 先落盘再跳转：useScene 决定 ChatScreen 与 RoleplayChatScreen 各自渲染哪一套界面，
+                // 顺序反了会出现"已经跳到酒馆列表、但列表里还是编程场景的标题"的一帧错位。
+                scope.launch { container.settingsRepo.update { it.copy(useScene = id) } }
+                when (id) {
+                    Scenes.TAVERN -> { nav.popToRoot(); nav.push(Screen.TavernHome) }
+                    Scenes.WRITING -> { nav.popToRoot(); nav.push(Screen.WritingHome) }
+                    // 编程就在当前页，popToRoot 即可 —— 若之前停在某个深层页面，
+                    // 这一下也顺手把栈收干净。
+                    else -> nav.popToRoot()
+                }
+            },
+            onDismiss = { showScenePicker = false },
         )
     }
 }

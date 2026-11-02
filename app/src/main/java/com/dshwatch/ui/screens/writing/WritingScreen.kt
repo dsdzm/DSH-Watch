@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,12 +46,14 @@ import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
 import com.dshwatch.ui.components.WatchGhostButton
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.scene.ScenePill
@@ -86,7 +89,13 @@ fun WritingScreen(
 
     WatchScaffold(
         title = "写作",
-        actions = { ScenePill(Scenes.WRITING) { showPicker = true } },
+        actions = {
+            ScenePill(Scenes.WRITING) { showPicker = true }
+            // 与酒馆页同理：场景根页面必须能直达设置，否则用户得先切回编程模式。
+            IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {
+                nav.push(Screen.Settings)
+            }
+        },
     ) {
         if (loaded && cards.isEmpty()) {
             EmptyState(title = "还没有作品", hint = "建一个设定：世界、人物、文风，然后直接开写")

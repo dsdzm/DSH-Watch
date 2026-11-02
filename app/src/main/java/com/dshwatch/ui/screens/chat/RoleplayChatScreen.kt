@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +48,7 @@ import com.dshwatch.domain.model.Role
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
@@ -147,6 +149,12 @@ fun RoleplayChatScreen(
                     container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
                 }
                 nav.popToRoot()
+            }
+            // 对话页也要能进设置：这一页是从角色列表 push 上来的，
+            // 如果只在列表页放设置，用户聊到一半想改模型/外观就得先退出去。
+            // 与 ChatScreen 顶栏保持同一组图标，避免"换个场景就找不到同一个功能"。
+            IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {
+                nav.push(Screen.Settings)
             }
         },
         bottom = {

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,6 +43,8 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
+import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
 import com.dshwatch.ui.components.WatchGhostButton
@@ -82,6 +85,12 @@ fun TavernScreen(
         title = "酒馆",
         actions = {
             ScenePill(Scenes.TAVERN) { showPicker = true }
+            // 设置入口。这三个场景页原先把「切换模式」放在了顶栏，却忘了设置 ——
+            // 结果是进了酒馆就出不去设置，只能先切回编程模式。设置是全局的
+            // （模型、外观、执行、联网都在里面），任何一个顶层页面都该能直达。
+            IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {
+                nav.push(Screen.Settings)
+            }
         },
     ) {
         if (loaded && cards.isEmpty()) {
