@@ -34,9 +34,10 @@ object TavernPrompt {
     /**
      * 完整系统提示。
      *
-     * @param memory 长期记忆文档的内容（可为空）。它放在设定**之前**，
-     *   因为记忆是"已经发生过的事"，模型读它的顺序应该先于性格设定 ——
-     *   先知道自己经历过什么，再用这个性格说话。
+     * @param memory 长期记忆文档的内容（可为空）。它放在设定**之后、世界书之前**：
+     *   模型先确认"我是谁"（设定），再看"我经历过什么"（记忆），
+     *   最后才是"这个世界是什么样"（世界书）。倒过来写会让模型拿早期摘要
+     *   去覆盖当前人设，改了卡也不生效。
      */
     fun build(card: RoleCard, memory: String = "", extraLore: String = ""): String = buildString {
         append(CORE_RULES)

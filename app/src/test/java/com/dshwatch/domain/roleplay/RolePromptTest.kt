@@ -43,11 +43,14 @@ class RolePromptTest {
         assertThat(p).contains("常来的客人")
         assertThat(p).contains("短句，不用敬语")
 
-        // 记忆排在设定**之前** —— 先知道自己经历过什么，再用这个性格说话
-        val memAt = p.indexOf("欠了我一碗面钱")
+        // 段落顺序：设定 → 记忆 → 世界书。
+        // 先确认"我是谁"，再看"我经历过什么"，最后才是"世界是什么样"。
+        // 记忆排在设定之前时，模型会拿早期摘要去覆盖当前人设，改卡也不生效。
         val personaAt = p.indexOf("只有六个座位")
-        assertThat(memAt).isGreaterThan(0)
-        assertThat(memAt).isLessThan(personaAt)
+        val memAt = p.indexOf("欠了我一碗面钱")
+        assertThat(personaAt).isGreaterThan(0)
+        assertThat(memAt).isGreaterThan(personaAt)
+        assertThat(p).contains("你记得的事")
     }
 
     @Test

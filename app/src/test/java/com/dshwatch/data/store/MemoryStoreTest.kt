@@ -128,6 +128,34 @@ class ParseLoreTest {
     }
 
     @Test
+    fun `multi section doc with blank lines between title and body`() {
+        // 从别处复制粘贴过来最常见的样子：标题独占一段、空行、正文。
+        // 空行既是"标题与正文的分隔"又是"条目之间的分隔"，解析器要能区分。
+        val out = parseLore(
+            """
+            旧城区
+
+            三十年前发过大水。
+
+            新城区
+
+            去年才通电。
+            """.trimIndent()
+        )
+        assertThat(out).hasSize(2)
+        assertThat(out[0].title).isEqualTo("旧城区")
+        assertThat(out[0].content).contains("三十年前发过大水")
+        assertThat(out[1].title).isEqualTo("新城区")
+    }
+
+    @Test
+    fun `key value pairs split by blank lines stay separate entries`() {
+        val out = parseLore("天气：常年下雨\n\n货币：贝壳")
+        assertThat(out).hasSize(2)
+        assertThat(out.map { it.title }).containsExactly("天气", "货币").inOrder()
+    }
+
+    @Test
     fun `blank input yields nothing`() {
         assertThat(parseLore("   \n\n  ")).isEmpty()
     }

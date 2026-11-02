@@ -323,7 +323,16 @@ internal fun parseLore(raw: String): List<LoreEntry> {
 
     val out = mutableListOf<LoreEntry>()
     // 先按空行分成段
-    val blocks = text.split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
+    var blocks = text.split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() }
+
+    /*
+     * 「标题 + 空行 + 正文」是最常见的写法（尤其从别处复制过来的），
+     * 但空行同时也是段间分隔符 —— 直接按空行切会把它拆成两条，
+     * 标题变成一条没有内容的常驻条目，正文变成另一条。
+     *
+     * 这里先合并一次：一个短句独占一段、且下一段不是键值对时，视为它的标题。
+     */
+    blocks = mergeLooseHeadings(blocks)
 
     blocks.forEach { block ->
         val lines = block.lines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -347,6 +356,49 @@ internal fun parseLore(raw: String): List<LoreEntry> {
             out.add(LoreEntry(title = lines[0], content = lines.drop(1).joinToString("\n")))
         } else {
             out.add(LoreEntry(title = "", content = block))
+        }
+    }
+    return out
+}
+
+/**
+ * 把「短标题独占一段 + 下一段是正文」合并成一段。
+ *
+ * 判定条件刻意保守：标题段只有一行、不超过 20 个字、不像句子（不以句号结尾）、
+ * 不以冒号结尾（那是键值对）、且下一段不是一整个键值对块。
+ * 宁可漏合并（退化成常驻条目，用户还能改），也不要错误吞掉一条真正的条目。
+ */
+private fun mergeLooseHeadings(blocks: List<String>): List<String> {
+    if (blocks.size < 2) return blocks
+    fun isKeyValueBlock(b: String): Boolean {
+        val lines = b.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) return false
+        return lines.all { line ->
+            val i = line.indexOfFirst { it == ':' || it == '：' }
+            i > 0 && i < line.length - 1
+        }
+    }
+    fun looksLikeHeading(b: String): Boolean {
+        val lines = b.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.size != 1) return false
+        val t = lines[0]
+        if (t.length > 20) return false
+        if (t.endsWith("。") || t.endsWith("！") || t.endsWith("？")) return false
+        if (t.endsWith(":") || t.endsWith("：")) return false
+        return true
+    }
+
+    val out = mutableListOf<String>()
+    var i = 0
+    while (i < blocks.size) {
+        val cur = blocks[i]
+        val next = blocks.getOrNull(i + 1)
+        if (next != null && looksLikeHeading(cur) && !isKeyValueBlock(next)) {
+            out.add(cur + "\n" + next)
+            i += 2
+        } else {
+            out.add(cur)
+            i += 1
         }
     }
     return out
