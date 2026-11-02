@@ -227,7 +227,15 @@ object WorkspaceTools {
                 )
             }
 
-            val hits = content.windowed(old.length, 1).count { it == old }
+            // 不要用 content.windowed(old.length, 1)：它会把全文切成 N 个子串，
+            // 256KB 文件 + 200 字符 old_string 就是约 26 万个临时 String（≈50MB 垃圾），
+            // 手表上一次 edit_file 要卡 1-2 秒，还容易把堆顶爆。indexOf 是原地扫描，零分配。
+            var hits = 0
+            var at = content.indexOf(old)
+            while (at >= 0) {
+                hits++
+                at = content.indexOf(old, at + old.length)
+            }
             if (hits == 0) {
                 return ToolResult.fail(
                     "在「" + path + "」里找不到 old_string。最常见的原因是缩进（空格/制表符）" +

@@ -1,5 +1,6 @@
 package com.dshwatch.domain.agent.exec
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -23,7 +24,8 @@ import java.util.concurrent.TimeUnit
  *    - 不持续排空会把子进程堵死在写管道上；
  *    - 超时杀掉 `sh` 之后，脚本起的子进程（`sleep 30` 之类）变成孤儿并继续持有写端，
  *      读线程会一直阻塞 —— 而且 JVM 在另一线程阻塞读时 `close()` 要等锁，救不回来。
- *    改成文件之后，孤儿进程爱跑多久跑多久，我们读完自己的文件就走。
+ *    改成文件之后，读线程不会再被孤儿进程拖住；超时时还会按 `/proc` 的 ppid 关系
+ *    杀掉整棵进程树（见 `killTree`），不让它们继续占 CPU 烧电。
  *
  * 3. **环境变量清空后重建**：脚本不该拿到 App 进程的任何变量，更不该拿到凭据。
  */
@@ -88,6 +90,9 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
                 .directory(workDir)
                 .redirectOutput(outFile)
                 .redirectError(errFile)
+                // stdin 必须显式关掉：默认是 PIPE 且永不关闭，脚本里一句 `cat` / `read x`
+                // 就会一直等输入，把整个超时窗口耗光
+                .redirectInput(File("/dev/null"))
             builder.environment().apply {
                 clear()
                 putAll(cleanEnv(workDir, scratch))
@@ -107,6 +112,10 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
                 currentCoroutineContext().ensureActive()
             }
             if (!exited) {
+                // destroyForcibly() 只作用于 `sh` 本身，脚本里起的 `sleep 9999 &`、
+                // `find /` 会变成孤儿继续跑 —— 在 1200mAh 的手表上足以把电耗光。
+                // 先把整棵子进程树按 /proc 的 ppid 关系杀掉，再收尸。
+                runCatching { killTree(process.pid()) }
                 process.destroyForcibly()
                 // 收尸，避免僵尸进程；拿不到退出码也没关系
                 runCatching { process.waitFor(2, TimeUnit.SECONDS) }
@@ -125,6 +134,11 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
                 elapsedMs = System.currentTimeMillis() - started,
                 note = if (!exited) "超时 ${limits.timeoutMs / 1000} 秒，已强制结束该进程。" else "",
             )
+        } catch (e: CancellationException) {
+            // 用户点「停止」走的是协程取消，必须原样抛出去：
+            // 被下面的 catch(Exception) 接住的话，工具会被记成「执行失败」，
+            // 还会被当成真实失败回灌给模型
+            throw e
         } catch (e: Exception) {
             ExecOutput.failure("执行 shell 失败：${e.message ?: e::class.simpleName}")
         } finally {
@@ -158,6 +172,53 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
             val files = scratch.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
                 ?: return
             files.drop(keep).forEach { it.delete() }
+        }
+    }
+
+    /**
+     * 按 /proc 里的 ppid 关系，把 [rootPid] 的整棵子进程树杀干净。
+     *
+     * 为什么需要：`Process.destroyForcibly()` 只能杀直接子进程（那个 `sh`），
+     * 脚本里 `cmd &` 起来的孙进程会脱离成孤儿继续占 CPU —— 手表上表现为发烫、掉电快。
+     * Android 没有进程组语义可用，只能自己爬一次进程树。
+     *
+     * 只用 `/system/bin/kill`，不依赖 setsid；`guard` 防止进程树异常导致死循环。
+     */
+    private fun killTree(rootPid: Long) {
+        if (rootPid <= 0L) return
+        val children: Map<Long, List<Long>> = runCatching {
+            File("/proc").listFiles()
+                ?.asSequence()
+                ?.filter { dir -> dir.isDirectory && dir.name.all { it.isDigit() } }
+                ?.mapNotNull { dir ->
+                    val stat = runCatching { File(dir, "stat").readText() }.getOrNull()
+                        ?: return@mapNotNull null
+                    // 格式：pid (comm) state ppid ...  —— comm 里可能有空格和括号，从最后一个 ')' 往后切
+                    val close = stat.lastIndexOf(')')
+                    if (close < 0) return@mapNotNull null
+                    val fields = stat.substring(close + 1).trim().split(' ')
+                    val ppid = fields.getOrNull(1)?.toLongOrNull() ?: return@mapNotNull null
+                    dir.name.toLongOrNull()?.let { it to ppid }
+                }
+                ?.groupBy({ it.second }, { it.first })
+                ?: emptyMap()
+        }.getOrDefault(emptyMap())
+
+        val stack = ArrayDeque<Long>()
+        stack.addLast(rootPid)
+        var guard = 0
+        while (stack.isNotEmpty() && guard++ < 512) {
+            val pid = stack.removeLast()
+            children[pid]?.let { kids -> kids.forEach { stack.addLast(it) } }
+            runCatching {
+                // 输出丢到 /dev/null：既避免管道写满阻塞，也不用 Java 9 的 Redirect.DISCARD
+                // （那是 API 33 才有的，本项目 minSdk 28）
+                ProcessBuilder("/system/bin/kill", "-9", pid.toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(File("/dev/null"))
+                    .start()
+                    .waitFor(1, TimeUnit.SECONDS)
+            }
         }
     }
 

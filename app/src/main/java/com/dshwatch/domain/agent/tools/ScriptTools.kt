@@ -15,6 +15,7 @@ import com.dshwatch.domain.agent.rawStrOf
 import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.agent.stringListOf
 import com.dshwatch.domain.model.AppSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import java.io.File
 
@@ -165,6 +166,9 @@ object ScriptTools {
                 } else {
                     ToolResult.fail(text)
                 }
+            } catch (e: CancellationException) {
+                // 用户点「停止」：原样抛出，别把它当成脚本执行失败写进历史
+                throw e
             } catch (e: Exception) {
                 return ToolResult.fail(
                     "执行 $language 脚本时出错：${e.message ?: e::class.simpleName}。" +

@@ -52,6 +52,11 @@ class StreamingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
@@ -68,14 +73,7 @@ class StreamingService : Service() {
              * 刷 B站 那种任务要跑好几分钟、几十次工具调用，用户早就把界面划走了。
              * 通知上一直写「正在生成」等于什么都没说 —— 至少让他看见「在读字幕」。
              */
-            ACTION_UPDATE -> {
-                runCatching {
-                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    nm.notify(NOTIFICATION_ID, buildNotification())
-                }
-                // 顺带续一次唤醒锁：长任务在这里被自然拉长，不会跑到一半 CPU 睡了
-                acquireWakeLock()
-            }
+            ACTION_UPDATE -> refreshNotification()
 
             ACTION_STOP_GENERATION -> {
                 AppContainer.of(this).engine.stop()
@@ -89,9 +87,29 @@ class StreamingService : Service() {
 
     override fun onDestroy() {
         running = false
+        instance = null
         renewHandler.removeCallbacks(renewTask)
         releaseWakeLock()
+        // 被 stopService() 直接收掉时也要把常驻通知摘掉，否则会留一条永远「正在生成」
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        }
         super.onDestroy()
+    }
+
+    /** 直接刷通知（不走 startService，后台调用不会被系统拦） */
+    private fun refreshNotification() {
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
+        }
+        // 顺带续一次唤醒锁：长任务在这里被自然拉长，不会跑到一半 CPU 睡了
+        acquireWakeLock()
     }
 
     /**
@@ -205,6 +223,15 @@ class StreamingService : Service() {
         var running: Boolean = false
             private set
 
+        /**
+         * 正在运行的服务实例。
+         *
+         * 更新通知不必再发一个 Intent 走 startService —— Android 8+ 明确禁止后台进程
+         * startService，异常会被 runCatching 吞掉，结果就是通知永远停在「正在生成」。
+         */
+        @Volatile
+        private var instance: StreamingService? = null
+
         fun start(context: Context) {
             if (running) return
             running = true
@@ -213,26 +240,35 @@ class StreamingService : Service() {
                     context,
                     Intent(context, StreamingService::class.java).setAction(ACTION_START),
                 )
-            }.onFailure { com.dshwatch.core.Logx.w(TAG, "启动失败：${it.message}") }
+            }.onFailure {
+                // 启动失败要回滚，否则 running 卡在 true，之后每次 start() 都变成空操作
+                running = false
+                com.dshwatch.core.Logx.w(TAG, "启动失败：${it.message}")
+            }
         }
 
         fun stop(context: Context) {
             running = false
             progressText = ""
-            runCatching {
-                context.startService(
-                    Intent(context, StreamingService::class.java).setAction(ACTION_STOP_SELF)
-                )
-            }
+            // 后台不能 startService（会抛 IllegalStateException 被吞掉，唤醒锁要拖到
+            // 15 分钟超时才释放）。stopService 没有这个限制，onDestroy 里会收尾。
+            runCatching { context.stopService(Intent(context, StreamingService::class.java)) }
+                .onFailure { com.dshwatch.core.Logx.w(TAG, "停止服务失败：${it.message}") }
         }
 
         /** 更新通知第二行（当前在做什么）。服务没在跑时静默忽略 */
         fun update(context: Context, text: String) {
             if (!running) return
             progressText = text.take(60)
+            // 服务就在本进程里跑着，直接刷比绕一圈 Intent 可靠得多
+            instance?.let { svc ->
+                svc.refreshNotification()
+                return
+            }
             runCatching {
-                context.startService(
-                    Intent(context, StreamingService::class.java).setAction(ACTION_UPDATE)
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, StreamingService::class.java).setAction(ACTION_UPDATE),
                 )
             }.onFailure { com.dshwatch.core.Logx.w(TAG, "更新通知失败：${it.message}") }
         }

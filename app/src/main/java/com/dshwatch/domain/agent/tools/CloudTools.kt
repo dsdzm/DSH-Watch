@@ -15,6 +15,7 @@ import com.dshwatch.domain.agent.boolOf
 import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.agent.stringListOf
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -292,6 +293,8 @@ object CloudTools {
                 }
             } catch (e: GitHubException) {
                 ToolResult.fail("云端编译失败：${e.message}")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 ToolResult.fail("云端编译出错：${e.message ?: e::class.simpleName}")
             }
@@ -399,6 +402,8 @@ object CloudTools {
                 }
             } catch (e: GitHubException) {
                 ToolResult.fail("查询失败：${e.message}")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 ToolResult.fail("查询出错：${e.message ?: e::class.simpleName}")
             }

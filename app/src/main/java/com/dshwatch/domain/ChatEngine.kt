@@ -119,6 +119,23 @@ class ChatEngine(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
+    /**
+     * 打开会话时被 [PerfProfile.historyLoadLimit] 裁掉的早期消息。
+     *
+     * [_messages] 只是「渲染窗口」，不是完整的会话真相。落盘时必须用
+     * `droppedPrefix + _messages`，否则老会话打开一次、回一句话，磁盘上就只剩最近
+     * limit 条 —— 前面的历史被静默删掉，用户完全不知道。
+     *
+     * 内存紧张的设备上仍然只渲染窗口内的消息，但数据一条都不丢。
+     */
+    private var droppedPrefix: List<ChatMessage> = emptyList()
+
+    /** 落盘入口：一律写完整历史，而不是被裁剪过的渲染窗口 */
+    private suspend fun persist(conv: Conversation, ui: List<ChatMessage> = _messages.value) {
+        val full = if (droppedPrefix.isEmpty()) ui else droppedPrefix + ui
+        store.save(StoredConversation(conv, full))
+    }
+
     private val _live = MutableStateFlow(LiveDelta())
     val live: StateFlow<LiveDelta> = _live.asStateFlow()
 
@@ -180,7 +197,13 @@ class ChatEngine(
         _banner.value = null
         _conversation.value = sc.meta
         val limit = perfProvider().historyLoadLimit
-        _messages.value = if (sc.messages.size > limit) sc.messages.takeLast(limit) else sc.messages
+        if (sc.messages.size > limit) {
+            droppedPrefix = sc.messages.dropLast(limit)
+            _messages.value = sc.messages.takeLast(limit)
+        } else {
+            droppedPrefix = emptyList()
+            _messages.value = sc.messages
+        }
     }
 
     /** 供 UI 使用：先停掉正在跑的生成，再开一个新会话 */
@@ -214,6 +237,7 @@ class ChatEngine(
         // 一个没说过话的会话本来也不该在列表里占位置。
         _conversation.value = conv
         _messages.value = emptyList()
+        droppedPrefix = emptyList()
         _live.value = LiveDelta()
         _banner.value = null
         // 新会话不继承上一个会话的 shell 放行
@@ -225,6 +249,7 @@ class ChatEngine(
         if (_conversation.value?.id == id) {
             _conversation.value = null
             _messages.value = emptyList()
+            droppedPrefix = emptyList()
             _live.value = LiveDelta()
         }
         store.delete(id)
@@ -235,7 +260,7 @@ class ChatEngine(
         val conv = _conversation.value ?: return
         val updated = conv.copy(model = model, updatedAt = System.currentTimeMillis())
         _conversation.value = updated
-        store.save(StoredConversation(updated, _messages.value))
+        persist(updated)
     }
 
     suspend fun deleteMessage(messageId: String) {
@@ -244,7 +269,7 @@ class ChatEngine(
         val list = _messages.value.filterNot { it.id == messageId }
         if (list.size == _messages.value.size) return
         _messages.value = list
-        store.save(StoredConversation(conv, list))
+        persist(conv, list)
     }
 
     suspend fun refreshConversation() {
@@ -439,7 +464,7 @@ class ChatEngine(
         // 持久化点：走到这里说明这是一次真实对话，会话该出现在列表里了。
         // 新建的会话就是靠这一句落盘的（startNew 刻意不落盘）。
         // 顺带把用户消息也立刻写进去 —— 以前要等 finalize，中途被杀就丢了。
-        runCatching { store.save(StoredConversation(conv, workingList)) }
+        runCatching { persist(conv, workingList) }
             .onFailure { Logx.e(TAG, "会话落盘失败", it) }
 
         // 3) Agent 开关
@@ -1038,7 +1063,7 @@ class ChatEngine(
             val updated = list.toMutableList().also { it[idx] = message.copy(toolCalls = calls) }
             _messages.value = updated
             _conversation.value?.let { conv ->
-                store.save(StoredConversation(conv, updated))
+                persist(conv, updated)
             }
         }
     }
@@ -1090,7 +1115,7 @@ class ChatEngine(
                 remoteSessionId = remoteSessionId ?: prevConv?.remoteSessionId.orEmpty(),
             )
             _conversation.value = conv
-            store.save(StoredConversation(conv, updated))
+            persist(conv, updated)
         }
     }
 
