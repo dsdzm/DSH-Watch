@@ -79,17 +79,24 @@ tools/                       check_python_harness.py（11 项 Python 验收）�
 
 ## 五、构建与测试
 
+> **v1.12 起没有 lite / full 两个包了。** 本地 Python 引擎（Chaquopy）整个移除，
+> 安装包只剩一个、约 8 MB。原 `-PwithPython=true` 参数已不存在，传了会被忽略。
+> 需要按架构裁剪时用 `-Pabi`（见下）。
+
 ```bash
 export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 
-# 全量单测（约 5 秒，521+ 用例）
-./gradlew :app:testDebugUnitTest --rerun --offline
+# 全量单测（647 用例）
+./gradlew :app:testDebugUnitTest --rerun
 
-# lite release（6.4 MB）
-./gradlew :app:assembleRelease --offline
+# release（约 8 MB，通用包：v7a / v8a / x86 / x86_64 全含）
+./gradlew :app:assembleRelease
 
-# full release（27 MB，含 CPython 3.11，仅 arm64-v8a）
-./gradlew :app:assembleRelease -PwithPython=true --offline
+# 只出 32 位（部分手表的安装器认这个）
+./gradlew :app:assembleRelease -Pabi=armeabi-v7a
+
+# 只出 64 位
+./gradlew :app:assembleRelease -Pabi=arm64-v8a
 
 # 产物在 app/build/outputs/apk/release/app-release.apk
 # 校验签名/版本
@@ -97,7 +104,7 @@ $ANDROID_HOME/build-tools/35.0.0/apksigner verify --print-certs <apk>
 $ANDROID_HOME/build-tools/35.0.0/aapt2 dump badging <apk> | head -1
 ```
 
-注意：lite 与 full 共用同一个输出路径，**构建完立刻改名归档**，否则会被下一次构建覆盖。
+输出路径只有一份，连续打不同 ABI 时**构建完立刻改名归档**，否则会被下一次覆盖。
 
 ---
 

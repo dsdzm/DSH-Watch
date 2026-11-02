@@ -142,28 +142,27 @@ cd dsh-watch
 # app/build/outputs/apk/debug/app-debug.apk
 ```
 
-#### 两种安装包：lite 与 full
+#### 只有一个安装包了（v1.12 起）
 
-Python 引擎（CPython 约 20MB）是**可选**的，所以从构建入口分两个包：
+v1.12 移除了本地 Python 引擎（Chaquopy 及 `libpython3.11.so`，约 20MB），
+所以早期「lite / full 两个包」的分法**已经取消**，构建入口也简化成一条：
 
 ```bash
-# lite：不含 Python，约 7MB（shell + JS 执行仍可用）
+# 通用包，约 8MB：v7a / v8a / x86 / x86_64 全含，什么设备都能装
 ./gradlew :app:assembleRelease
 
-# full：含 Python 引擎，约 30MB（仅 arm64-v8a）
-./gradlew :app:assembleRelease -PwithPython=true
+# 需要按架构裁剪时（部分手表的安装器挑 ABI）
+./gradlew :app:assembleRelease -Pabi=armeabi-v7a    # 只出 32 位
+./gradlew :app:assembleRelease -Pabi=arm64-v8a      # 只出 64 位
 ```
 
-两个包**同一包名、同一签名**，可以互相覆盖安装，数据不丢。
+要跑 Python / Java / C++ 时改走云端 `cloud_build`（GitHub Actions 自带 JDK 与 Android SDK），
+本地只保留设备自带的 shell 与 JavaScript，外加一层静态校验。
 
-> 实现上为什么用 Gradle 属性而不是 product flavor：Chaquopy 是模块级插件，
-> 一旦 apply 就会给**所有变体**塞进 libpython，官方没有「某个变体不打包」的开关。
-> 所以改成按属性条件 apply 插件，并且**对 Chaquopy 的调用全走反射**
-> （见 `domain/agent/exec/ReflectionPythonEngine.kt`）——
-> 这样同一份 main 源码集在两种构建下都能编过，不需要维护两套源码目录。
->
-> **首次构建 full 包时如果报「Could not find target-x.y.z-...zip」**：
-> 那是镜像对未缓存产物的首次请求失败（文件其实存在），加 `--refresh-dependencies` 重跑即可。
+> **历史说明（已失效）**：早期用 Gradle 属性 `-PwithPython=true` 条件 apply Chaquopy，
+> 并对 Chaquopy 的调用全走反射（`ReflectionPythonEngine.kt`），以便同一份 main 源码集
+> 在两种构建下都能编过。v1.12 删掉整个引擎后，这条构建路径、那个属性、以及
+> `ReflectionPythonEngine.kt` 都不存在了。保留这段是为了解释老版本文档里的命令。
 
 安装到手表（手表需开启开发者模式 + USB/Wi-Fi 调试）：
 
@@ -1241,6 +1240,10 @@ id 前缀一次生成就再也不变。
 > 真正的编译（编 apk、gradle、gcc）交给云端 GitHub Actions。
 > 也就是说「本机只能静态校验」这条结论已经被后面的版本推翻了一半，详见第十九节。
 > 下面保留原文，是为了记录当时的判断依据。
+>
+> **v1.12 再次推翻**：本地 Python 引擎整个移除，所以「本机只能静态校验」
+> 这条**又变回完全成立**了 —— 现在手表上确实没有任何解释器能跑 Python，
+> 连 full 包也不存在。这段补充只用于说明 1.3~1.11 期间的状态。
 
 先把话说清楚：**这台设备上没有真正的编译器** —— 没有 CPython、没有 JDK、没有 Kotlin 编译器。
 不是「没接」，是物理上装不下：Kotlin 编译器光堆就要几百 MB，编译一个文件在手表 CPU 上要几分钟，
@@ -1405,30 +1408,32 @@ Python 缩进混了 tab 和空格、`if` 后面忘了冒号。这些**全都能�
 
 ### 19.1 本机执行（`run_script`）
 
+> **v1.12 起 Python 一行已作废。** 本地引擎连同 Chaquopy 一起移除，
+> `run_script` 只剩 shell 与 JavaScript；`language` 枚举里也没有 `python` 了，
+> 传进来会被拒。要跑 Python 用云端 `cloud_build`。下表保留原貌以示对照。
+
 | 语言 | 引擎 | 能力 | 硬限制 |
 | --- | --- | --- | --- |
 | shell | 设备上真实的 `/system/bin/sh` | 管道、重定向、`grep`/`sed`/`awk` 全都能用 | 需要设备有这个二进制（会运行时探测） |
 | JavaScript | Rhino 1.9.1（纯 Java） | ES6 大部分语法 | **不支持 async/await**；无 DOM、无 `fetch` |
-| Python | CPython 3.11（Chaquopy，仅 full 包） | 真解释器，标准库可用 | 装不了第三方包 |
+| ~~Python~~ | ~~CPython 3.11（Chaquopy，仅 full 包）~~ | **v1.12 已移除** | — |
 
-三个引擎共用一套执行闸门与结果格式。
+两个引擎共用一套执行闸门与结果格式。
 
 **输出为什么保留「头 + 尾」而不是只留头**：一个脚本打印了两千行日志，
 最后三行才是 `Traceback`。只截头等于把最有用的信息扔掉。
 实现上是双缓冲（头一半、尾一半），内存占用恒定 —— 输出 100MB 也不会 OOM。
 
-**超时怎么做的（三种语言不一样）**：
+**超时怎么做的（现在只剩两种语言）**：
 
 - shell：`destroyForcibly()`，干脆利落
 - JavaScript：Rhino 只有在**解释模式**（`optimizationLevel = -1`）下才会回调指令观察者，
   观察者里抛异常才能真正打断 `while(true){}`。默认的编译模式跑字节码，观察者根本不触发 ——
   那样超时是假的。单元测试专门钉住了这条：超时后必须断言**线程真的结束了**
   （`stillRunning == false`），否则就是一个线程在后台空转烧 CPU，而用户只看到"超时了"。
-- Python：**Chaquopy 与 App 同进程，Kotlin 侧没有安全手段终止它**（官方文档明说）。
-  所以用两条兜底：Python 侧 `sys.settrace` 装死线守卫（能拦住纯 Python 死循环），
-  Kotlin 侧等不到就放弃等待并把结果标为「可能仍在后台运行」。
-  闸门会保持占用，设置页提供「强制释放」这个逃生口 —— 宁可挡住新任务，
-  也不让失控脚本叠加（那是手表上唯一能让用户开不了机的做法）。
+- ~~Python~~：原先靠 `sys.settrace` 装死线守卫 + Kotlin 侧放弃等待（Chaquopy 与 App 同进程，
+  没有安全手段终止）。v1.12 移除引擎后这段连同「强制释放」逃生口一起消失了 ——
+  这也是删掉 Python 的一个附带收益：**本机再没有"杀不掉的执行"这类状态**。
 
 **输出重定向到文件而不是管道**，这里踩过两个坑：管道不持续排空会把子进程堵死在写操作上；
 超时杀掉 `sh` 之后，脚本起的子进程（`sleep 30` 之类）变成孤儿并继续持有写端，
