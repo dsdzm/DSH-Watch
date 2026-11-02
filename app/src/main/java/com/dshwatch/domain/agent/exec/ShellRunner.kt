@@ -114,8 +114,8 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
             if (!exited) {
                 // destroyForcibly() 只作用于 `sh` 本身，脚本里起的 `sleep 9999 &`、
                 // `find /` 会变成孤儿继续跑 —— 在 1200mAh 的手表上足以把电耗光。
-                // 先把整棵子进程树按 /proc 的 ppid 关系杀掉，再收尸。
-                runCatching { killTree(process.pid()) }
+                // 先按脚本路径定位到那个 sh，再顺着 /proc 的 ppid 关系把整棵树杀掉。
+                runCatching { killTreeByScript(scriptFile.absolutePath) }
                 process.destroyForcibly()
                 // 收尸，避免僵尸进程；拿不到退出码也没关系
                 runCatching { process.waitFor(2, TimeUnit.SECONDS) }
@@ -173,6 +173,31 @@ class ShellRunner(private val shellPath: String = DEFAULT_SHELL) {
                 ?: return
             files.drop(keep).forEach { it.delete() }
         }
+    }
+
+    /**
+     * 按脚本路径找到那个 `sh <scriptPath>` 进程，杀掉它和它的整棵子树。
+     *
+     * 为什么要绕一圈找 pid：Android 的 `java.lang.Process` **没有** `pid()` 方法
+     * （编译期就是 Unresolved reference），反射读 `ProcessImpl.pid` 又踩隐藏 API。
+     * 这里改成扫 `/proc/<pid>/cmdline`，匹配我们自己的脚本路径 —— 脚本名带 nanoTime，
+     * 不会误伤别的进程，也不需要任何系统权限。
+     */
+    private fun killTreeByScript(scriptPath: String) {
+        if (scriptPath.isEmpty()) return
+        val roots = runCatching {
+            File("/proc").listFiles()
+                ?.asSequence()
+                ?.filter { dir -> dir.isDirectory && dir.name.all { it.isDigit() } }
+                ?.mapNotNull { dir ->
+                    val cmdline = runCatching { File(dir, "cmdline").readBytes() }
+                        .getOrNull() ?: return@mapNotNull null
+                    val text = String(cmdline, Charsets.UTF_8)
+                    if (text.contains(scriptPath)) dir.name.toLongOrNull() else null
+                }
+                ?.toList() ?: emptyList()
+        }.getOrDefault(emptyList())
+        roots.forEach { killTree(it) }
     }
 
     /**
