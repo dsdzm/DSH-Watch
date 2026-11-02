@@ -110,7 +110,7 @@ fun WritingScreen(
                                 roleCardId = card.id,
                                 title = card.displayName,
                             )
-                            nav.push(Screen.RoleplayChat())
+                            nav.push(Screen.RoleplayChat)
                         }
                     },
                     onEdit = { nav.push(Screen.CardEdit(Scenes.WRITING, card.id)) },

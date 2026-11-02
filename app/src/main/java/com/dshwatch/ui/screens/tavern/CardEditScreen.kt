@@ -102,7 +102,7 @@ fun CardEditScreen(
                     roleCardId = saved.id,
                     title = saved.displayName,
                 )
-                nav.replaceTop(Screen.RoleplayChat())
+                nav.replaceTop(Screen.RoleplayChat)
             } else {
                 nav.pop()
             }
