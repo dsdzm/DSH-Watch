@@ -116,13 +116,136 @@ jobs:
           echo "platforms:"; ls "$SDK_ROOT/platforms"
           echo "build-tools:"; ls "$SDK_ROOT/build-tools"
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      # 不用 actions/cache：它的 key 没有 restore-keys，改一行 build.gradle.kts
+      # 就会让整个 1.6GB 缓存失效。setup-gradle 会带 restore-keys 与 stale 清理。
+      # 注意 cache-provider：v6 默认 enhanced 是闭源商业组件，basic 才是 MIT 开源实现。
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
+          cache-provider: basic
+          # 旧版 actions/cache 手工缓存了 wrapper；这里显式带上，避免每次重下 Gradle
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            wrapper
+
+      # Gradle 缓存按仓库指纹隔离（descriptor 路径里的 hash），换源 = 旧缓存全部
+      # 不命中，那一次要全量重下约 470MB。所以这里先测速，只有上游快 1.5 倍以上
+      # 才把 google() 提到阿里云前面；两个源都测不到时保持原样。
+      - name: Probe Maven sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          SETTINGS="settings.gradle.kts"
+          if [ ! -f "$SETTINGS" ]; then
+            echo "没有 $SETTINGS，跳过测速"
+            exit 0
+          fi
+
+          AGP_VERSION="$(sed -n 's/^agp[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' gradle/libs.versions.toml 2>/dev/null | head -1 || true)"
+          AGP_VERSION="${AGP_VERSION:-8.7.3}"
+          POM_PATH="com/android/tools/build/gradle/${AGP_VERSION}/gradle-${AGP_VERSION}.pom"
+
+          # 一次请求同时拿状态码与耗时；三次取最小，单次抖动不影响结论。
+          # 404/5xx 不能算「快」——否则一个失败的源反而会被选中。
+          probe() {
+            local url="$1" best=99999 i out code t ms
+            for i in 1 2 3; do
+              out="$(curl -L -sS -o /dev/null --connect-timeout 4 --max-time 8 \
+                -w '%{http_code} %{time_total}' "$url" 2>/dev/null || true)"
+              code="${out%% *}"
+              t="${out##* }"
+              [ "$code" = "200" ] || continue
+              [ -z "$t" ] && continue
+              ms="$(awk -v t="$t" 'BEGIN { printf "%d", t * 1000 }')"
+              if [ "$ms" -lt "$best" ]; then best="$ms"; fi
+            done
+            echo "$best"
+          }
+
+          ALIYUN_RTT="$(probe "https://maven.aliyun.com/repository/google/$POM_PATH")"
+          UPSTREAM_RTT="$(probe "https://dl.google.com/dl/android/maven2/$POM_PATH")"
+          echo "RTT — 阿里云: ${ALIYUN_RTT}ms 上游: ${UPSTREAM_RTT}ms（99999 表示三次都失败）"
+
+          SWITCH="false"
+          if [ "$ALIYUN_RTT" -lt 99999 ] && [ "$UPSTREAM_RTT" -lt 99999 ]; then
+            if [ $((UPSTREAM_RTT * 3)) -lt $((ALIYUN_RTT * 2)) ]; then
+              SWITCH="true"
+            fi
+          fi
+
+          if [ "$SWITCH" = "true" ]; then
+            echo "上游快 1.5 倍以上，切换为 google() 优先"
+            python3 -c '
+          import re, sys
+          p = sys.argv[1]
+          text = open(p).read()
+          text, n = re.subn(
+              r"([ \t]*)(maven\(\"https://maven\.aliyun\.com/repository/google\"\)[^\n]*\n)((?:[^\n}]*\n)*?)([ \t]*google\(\)\n)",
+              r"\4\1\2\3",
+              text
+          )
+          open(p, "w").write(text)
+          print("仓库顺序已切换（%d 处）" % n)
+          ' "$SETTINGS"
+          else
+            echo "保持阿里云优先（未达到 1.5 倍差距）"
+          fi
+
+          {
+            echo "### Maven 源测速"
+            echo ""
+            echo "| 源 | 最小 RTT |"
+            echo "| --- | --- |"
+            echo "| 阿里云 | ${ALIYUN_RTT}ms |"
+            echo "| 上游 google | ${UPSTREAM_RTT}ms |"
+            echo "| 决定 | $([ "$SWITCH" = "true" ] && echo "google() 优先" || echo "阿里云优先") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Gradle 4G + Kotlin daemon 1.5G 在 7G 的私有 Runner 上只剩 1.4G 余量，
+      # R8 很容易把 daemon 撑死（日志里的 daemon disappeared）。按实际内存分配：
+      # Gradle 44%（2048–4096），Kotlin daemon 20%（1024–1536）。
+      - name: Tune JVM memory
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOTAL_MB="$(awk '/MemTotal/ { printf "%d", $2 / 1024 }' /proc/meminfo)"
+
+          GRADLE_MX=$(( TOTAL_MB * 44 / 100 ))
+          GRADLE_MX=$(( (GRADLE_MX / 50) * 50 ))
+          if [ "$GRADLE_MX" -lt 2048 ]; then GRADLE_MX=2048; fi
+          if [ "$GRADLE_MX" -gt 4096 ]; then GRADLE_MX=4096; fi
+
+          KOTLIN_MX=$(( TOTAL_MB * 20 / 100 ))
+          KOTLIN_MX=$(( (KOTLIN_MX / 100) * 100 ))
+          if [ "$KOTLIN_MX" -lt 1024 ]; then KOTLIN_MX=1024; fi
+          if [ "$KOTLIN_MX" -gt 1536 ]; then KOTLIN_MX=1536; fi
+
+          PROPS="$PROJECT_DIR/gradle.properties"
+          if [ ! -f "$PROPS" ]; then
+            : > "$PROPS"
+          fi
+
+          GRADLE_JVMARGS="-Xmx${GRADLE_MX}m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
+          if grep -q '^org\.gradle\.jvmargs=' "$PROPS"; then
+            sed -i -E "s#^org\.gradle\.jvmargs=.*#org.gradle.jvmargs=${GRADLE_JVMARGS}#" "$PROPS"
+          else
+            printf '%s\n' "org.gradle.jvmargs=${GRADLE_JVMARGS}" >> "$PROPS"
+          fi
+
+          if grep -q '^kotlin\.daemon\.jvmargs=' "$PROPS"; then
+            sed -i -E "s#^kotlin\.daemon\.jvmargs=.*#kotlin.daemon.jvmargs=-Xmx${KOTLIN_MX}m#" "$PROPS"
+          else
+            printf '%s\n' "kotlin.daemon.jvmargs=-Xmx${KOTLIN_MX}m" >> "$PROPS"
+          fi
+
+          echo "总内存 ${TOTAL_MB}MB → Gradle -Xmx${GRADLE_MX}m / Kotlin daemon -Xmx${KOTLIN_MX}m"
+          {
+            echo "### JVM 堆分配"
+            echo ""
+            echo "总内存 ${TOTAL_MB}MB → Gradle \`-Xmx${GRADLE_MX}m\`，Kotlin daemon \`-Xmx${KOTLIN_MX}m\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
         shell: bash
@@ -134,7 +257,44 @@ jobs:
             ARGS="$ARGS -PwithPython=true"
           fi
           chmod +x ./gradlew
-          ./gradlew $ARGS --no-daemon
+
+          START="$(date +%s)"
+          set +e
+          ./gradlew $ARGS --no-daemon --console=plain --profile 2>&1 | tee "$GITHUB_WORKSPACE/gradle-build.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          END="$(date +%s)"
+
+          echo "BUILD_EXIT=$RC" >> "$GITHUB_ENV"
+          echo "BUILD_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+          echo "构建耗时 $((END - START))s，退出码 $RC"
+          exit "$RC"
+
+      # 汇总放在独立步骤，构建失败也能跑（if: always），给下一次留下数据
+      - name: Summarize build
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="$GITHUB_WORKSPACE/gradle-build.log"
+          CACHE=0
+          FAILED=0
+          DURATION="${BUILD_SECONDS:-0}"
+          if [ -f "$LOG" ]; then
+            CACHE="$(grep -c 'FROM-CACHE' "$LOG" || true)"
+            FAILED="$(grep -c 'FAILED' "$LOG" || true)"
+          fi
+
+          {
+            echo "### Gradle 构建结果"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 退出码 | ${BUILD_EXIT:-unknown} |"
+            echo "| 耗时 | ${DURATION}s |"
+            echo "| FROM-CACHE | ${CACHE} |"
+            echo "| 失败任务 | ${FAILED} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Collect APKs
         if: always()
@@ -150,5 +310,16 @@ jobs:
         with:
           name: apk
           path: dsh-out
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build profile and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-profile
+          path: |
+            gradle-build.log
+            **/build/reports/profile/*.html
           if-no-files-found: warn
           retention-days: 14
