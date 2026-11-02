@@ -100,6 +100,9 @@ class WatchNavigator internal constructor(
     companion object {
         private const val SEP = "|"
 
+        /** 不参与状态恢复的页面：decode 时一律落回根屏 */
+        private const val UNRESTORABLE = "root"
+
         private fun encode(screen: Screen): String = when (screen) {
             Screen.Chat -> "chat"
             Screen.Sessions -> "sessions"
@@ -119,6 +122,14 @@ class WatchNavigator internal constructor(
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
             is Screen.SettingsGroup -> "sgroup${SEP}${screen.id}"
+            // 场景页（v1.13）。这几个是**过程页**，不该在进程被杀后恢复：
+            // 恢复出来的是一个没有任何会话上下文的空酒馆/空对话，比回到根屏更糟。
+            // 所以编码成一个不参与恢复的占位，decode 时统一落回根屏。
+            is Screen.CardEdit -> UNRESTORABLE
+            is Screen.MemoryDoc -> UNRESTORABLE
+            Screen.RoleplayChat -> UNRESTORABLE
+            Screen.TavernHome -> UNRESTORABLE
+            Screen.WritingHome -> UNRESTORABLE
         }
 
         private fun decode(raw: String): Screen {
@@ -142,6 +153,7 @@ class WatchNavigator internal constructor(
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())
                 "sgroup" -> Screen.SettingsGroup(parts.getOrNull(1).orEmpty())
+                UNRESTORABLE -> Screen.Chat
                 else -> Screen.Chat
             }
         }

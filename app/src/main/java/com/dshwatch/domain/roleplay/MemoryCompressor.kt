@@ -4,7 +4,7 @@ import com.dshwatch.core.Logx
 import com.dshwatch.data.store.MemoryStore
 import com.dshwatch.domain.ChatEngine
 import com.dshwatch.domain.model.ChatMessage
-import com.dshwatch.domain.model.ResponseProbe
+import com.dshwatch.domain.ResponseProbe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 

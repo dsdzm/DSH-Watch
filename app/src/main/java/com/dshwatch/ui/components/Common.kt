@@ -86,6 +86,7 @@ fun Modifier.cornerSafe(
 fun WatchScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
+    subtitle: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
     bottom: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
@@ -98,7 +99,7 @@ fun WatchScaffold(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        WatchTopBar(title = title, onBack = onBack, actions = actions)
+        WatchTopBar(title = title, onBack = onBack, subtitle = subtitle, actions = actions)
         Column(
             modifier = Modifier
                 .weight(1f)

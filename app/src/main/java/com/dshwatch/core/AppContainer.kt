@@ -54,8 +54,6 @@ class AppContainer(private val app: Context) {
      */
     val roleCardStore = com.dshwatch.data.store.RoleCardStore(File(app.filesDir, "rolecards"), json)
 
-    /** 长期记忆文档：落在工作空间 `memory/` 下，用户可见可编辑 */
-    val memoryStore = com.dshwatch.data.store.MemoryStore { workspaceStore.rootDir() }
 
     /** 工作空间默认放应用内部私有目录 */
     private val internalWorkspace = File(app.filesDir, "workspace")
@@ -69,6 +67,16 @@ class AppContainer(private val app: Context) {
         runCatching { app.getExternalFilesDir("workspace") }.getOrNull()
 
     val workspaceStore = WorkspaceStore(internalWorkspace)
+
+    /**
+     * 长期记忆文档：落在工作空间 `memory/` 下，用户可见可编辑。
+     *
+     * ⚠️ 必须声明在 [workspaceStore] **之后**：Kotlin 的属性按声明顺序初始化，
+     * 写在前面会拿到一个尚未赋值的 null 引用（NPE 在启动第一眼就炸）。
+     */
+    val memoryStore = com.dshwatch.data.store.MemoryStore(
+        workspaceRoot = { workspaceStore.rootDir() },
+    )
 
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
     val backends = BackendRegistry(json)
