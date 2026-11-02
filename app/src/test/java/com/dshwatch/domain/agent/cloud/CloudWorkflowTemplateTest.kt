@@ -84,4 +84,85 @@ class CloudWorkflowTemplateTest {
         assertThat(yaml).contains("git clone")
         assertThat(yaml).contains("cd \"\$PROJECT_DIR\"")
     }
+
+    // ------------------------------------------------------------------
+    // 构建耗时优化：这几条锁住「为什么这么配」，避免以后被"简化"回去
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `build template uses the official gradle action instead of hand-rolled cache`() {
+        val yaml = asset("dsh-build.yml")
+
+        // 手写 actions/cache 有两个真实缺陷：
+        //  ① key 用 hashFiles('**/*.gradle*') 且没有 restore-keys ——
+        //     改一行 build.gradle.kts 就 1.6GB 全额失效；
+        //  ② 缓存整个 ~/.gradle/caches，含 973MB 的 transforms。
+        // setup-gradle 自带分级 restore-keys 与 stale 清理。
+        assertThat(yaml).contains("gradle/actions/setup-gradle@")
+        assertThat(yaml).doesNotContain("uses: actions/cache")
+    }
+
+    @Test
+    fun `build template keeps caching on the open-source provider`() {
+        val yaml = asset("dsh-build.yml")
+
+        // v6 的 cache-provider 默认值是 enhanced —— 闭源的 gradle-actions-caching，
+        // 启用即接受 Gradle 的商业条款。开源项目用 basic（MIT）就够：
+        // 分级恢复、清理这些主要收益都在。
+        assertThat(yaml).contains("cache-provider: basic")
+    }
+
+    @Test
+    fun `build template sizes the JVM heap from the runner instead of hard-coding`() {
+        val yaml = asset("dsh-build.yml")
+
+        // 仓库里的 gradle.properties 写死 4G，那是给 8G 容器调的。
+        // 公开仓库 Runner 是 16G、私有仓库只有 7G —— 同一个数字一边浪费一边 OOM。
+        // 模板必须按 /proc/meminfo 算，并且不能出现"照着建议调大"的固定值。
+        assertThat(yaml).contains("MemTotal")
+        assertThat(yaml).contains("kotlin.daemon.jvmargs")
+        assertThat(yaml).doesNotContain("-Xmx6g")
+        assertThat(yaml).doesNotContain("-Xmx8g")
+    }
+
+    @Test
+    fun `build template reorders maven repos only after measuring`() {
+        val yaml = asset("dsh-build.yml")
+
+        // settings.gradle.kts 把阿里云排在最前（给国内网络）。GHA Runner 在海外，
+        // 理论上上游更快 —— 但 Gradle 的缓存按仓库隔离（descriptor 路径里那段 hash
+        // 就是仓库指纹），换源等于换 hash，已有缓存全部不命中、要全量重下 470MB。
+        // 所以必须先测速再决定，不能写死成 google() 优先。
+        assertThat(yaml).contains("RTT")
+        assertThat(yaml).contains("probe")
+        // 切换动作必须被 SWITCH 判断挡住 —— 没有这个闸门就等于无条件换源
+        assertThat(yaml).contains("SWITCH")
+        assertThat(yaml).contains("\"\$SWITCH\" = \"true\"")
+    }
+
+    @Test
+    fun `build template emits a profile for diagnosing slow builds`() {
+        val yaml = asset("dsh-build.yml")
+
+        // 没有 profile 就只能靠猜。--profile 出 HTML 各阶段耗时，
+        // --console=plain 才会打出 "> Task :x FROM-CACHE"，命中率才数得出来。
+        assertThat(yaml).contains("--profile")
+        assertThat(yaml).contains("--console=plain")
+        assertThat(yaml).contains("FROM-CACHE")
+    }
+
+    @Test
+    fun `repository copy of the template matches the bundled asset`() {
+        // 手表端「安装 workflow 模板」写入的是 assets 里这份，
+        // 而仓库自己 CI 跑的是 .github/workflows 那份。
+        // 两者必须一致，否则"手表上装的和仓库跑的不是同一个东西"，
+        // 排查时会对着两份不同的 YAML 互相矛盾。
+        val repoCopy = listOf(
+            File("../.github/workflows/dsh-build.yml"),
+            File(".github/workflows/dsh-build.yml"),
+        ).firstOrNull { it.exists() }
+
+        assertThat(repoCopy).isNotNull()
+        assertThat(repoCopy!!.readText()).isEqualTo(asset("dsh-build.yml"))
+    }
 }

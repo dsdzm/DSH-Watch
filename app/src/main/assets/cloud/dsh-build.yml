@@ -25,6 +25,11 @@ on:
         required: false
         type: string
         default: dsdzm/DSH-Watch
+      extra_tasks:
+        description: '额外 Gradle 任务（空格分隔），例如单元测试：:app:testDebugUnitTest'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -242,6 +247,11 @@ jobs:
           set -o pipefail
           cd "$PROJECT_DIR"
           ARGS=":app:assemble${{ inputs.variant == 'release' && 'Release' || 'Debug' }}"
+          # 额外任务：想顺手跑单元测试就用它，不必另建一条 workflow。
+          # 放在 assemble 之后 —— 先保证包能出，再让测试决定成败。
+          EXTRA="${{ inputs.extra_tasks }}"
+          if [ -n "$EXTRA" ]; then ARGS="$ARGS $EXTRA"; fi
+          echo "Gradle tasks: $ARGS"
           chmod +x ./gradlew
 
           START="$(date +%s)"

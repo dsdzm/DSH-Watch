@@ -519,7 +519,7 @@ export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 | `HARD_STEP_CEILING` | 200 | ChatEngine |
 | 停滞阈值 | 3 步无新指纹 | ProgressTracker |
 | 全失败阈值 | 2 步 | ProgressTracker |
-| 云端轮询间隔 | 8s | CloudTools |
+| 云端轮询间隔 | 90s | CloudTools |
 | 云端默认等待 | 否（v1.4 起） | CloudTools |
 | 云端字符上限 | 20,000（base64） | CloudPayload |
 | 执行超时 | 20s（可配） | AppSettings |

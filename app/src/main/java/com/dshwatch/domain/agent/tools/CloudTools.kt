@@ -52,9 +52,22 @@ object CloudTools {
 
     fun all(): List<AgentTool> = listOf(CloudBuildTool, CloudJobTool)
 
-    /** 轮询间隔：Actions 起步就要十几秒，8 秒一次既及时又不会刷爆速率限制 */
-    // 一分钟一次：云端构建本来就要 5–10 分钟，8 秒一查纯属浪费额度与电量
-    private const val POLL_INTERVAL_MS = 60_000L
+    /**
+     * 轮询间隔。
+     *
+     * 演进过程：8 秒 → 60 秒 → 90 秒。每次都是同一个理由的更彻底版本：
+     * 一次构建本来就要 3–8 分钟，而 Actions 的状态变化粒度就是分钟级 ——
+     * 排队 → running → success，中间那些秒级查询拿到的永远是"还在跑"。
+     *
+     * 算笔账：8 分钟的构建，8 秒一次是 60 次 API 调用，90 秒一次约 5 次。
+     * 手表上每次请求都要经蓝牙/WiFi 唤醒 CPU，这部分耗电与信息量完全不成比例；
+     * 而且频繁打同一端点容易撞上 GitHub 的二级速率限制，触发后要等更久。
+     *
+     * 90 而不是 60：云端构建的耗时提示本来就在 UI 上（3–8 分钟），
+     * 用户不会盯着秒级变化；多出的 30 秒只影响"刚好错过状态切换"那一次查询，
+     * 换来的是查询次数再降三分之一。
+     */
+    private const val POLL_INTERVAL_MS = 90_000L
 
     object CloudBuildTool : AgentTool {
         override val name = "cloud_build"
@@ -67,7 +80,8 @@ object CloudTools {
                 "没有 JDK / Android SDK**；产物写到 `dsh-out/`（为空时会自动从 app/build/outputs、" +
                 "build、dist、target/release 等目录收集常见产物）。\n" +
                 "· `dsh-build.yml`（构建本项目 APK）—— 自带 JDK 17 + Android SDK；参数是 " +
-                "`inputs.variant=debug|release`（可选 `with_python`），**它不接受 command**，传了会被拒绝。\n" +
+                "`inputs.variant=debug|release`（可选 `extra_tasks`，如 `:app:testDebugUnitTest` " +
+                "顺手跑一遍单测），**它不接受 command**，传了会被拒绝。\n" +
                 "所以：**要编 Android 就用 dsh-build.yml，不要用 dsh-run.yml 跑 gradle**。" +
                 "**默认触发后立刻返回**（不阻塞等待），拿到的 run 链接可以直接给用户；" +
                 "查进度用 `cloud_job(action=status)`，看日志用 `action=logs`，下产物用 `action=artifacts`。" +
