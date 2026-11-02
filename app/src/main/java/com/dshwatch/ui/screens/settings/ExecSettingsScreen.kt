@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.agent.cloud.CloudTargets
 import com.dshwatch.domain.agent.exec.ExecGuard
-import com.dshwatch.domain.agent.exec.PythonBridge
 import com.dshwatch.domain.agent.exec.ShellRunner
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.ui.components.GhostButton
@@ -63,7 +62,6 @@ fun ExecSettingsScreen(
     val busy = ExecGuard.shared.busy.collectAsState().value
 
     // 能力自检：这些是"这台设备现在到底能不能干"，与用户的开关无关
-    val pythonReady = remember { PythonBridge.classPresent() }
     val shellReady = remember { mutableStateOf<Boolean?>(null) }
     var cloudMessage by remember { mutableStateOf("") }
     var tokenDraft by remember { mutableStateOf(container.keyStore.getGithubToken().orEmpty()) }
@@ -122,22 +120,6 @@ fun ExecSettingsScreen(
                         checked = settings.allowJs,
                         onCheckedChange = { on -> persist { it.copy(allowJs = on) } },
                     )
-                    if (pythonReady) {
-                        SwitchRow(
-                            title = "Python",
-                            subtitle = s.execPythonReady,
-                            checked = settings.allowPython,
-                            onCheckedChange = { on -> persist { it.copy(allowPython = on) } },
-                        )
-                    } else {
-                        // lite 版没有解释器：摆一个永远跑不起来的开关只会让人以为能用
-                        Text(
-                            text = s.execPythonMissing,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                    }
                     StepperRow(
                         title = s.execTimeoutLabel,
                         value = "${settings.execTimeoutSec}${s.execSecondsSuffix}",
@@ -179,7 +161,7 @@ fun ExecSettingsScreen(
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
 
-            // 闸门被占住时给一个明确的逃生口：Python 超时后解释器可能仍在后台跑
+            // 闸门被占住时给一个明确的逃生口：脚本超时后执行器可能仍在后台跑
             if (busy) {
                 Spacer(Modifier.height(8.dp))
                 Text(

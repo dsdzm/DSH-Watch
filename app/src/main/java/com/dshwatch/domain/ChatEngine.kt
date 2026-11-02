@@ -17,7 +17,6 @@ import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolResultCompactor
 import com.dshwatch.domain.agent.ToolSafety
-import com.dshwatch.domain.agent.exec.PythonBridge
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
@@ -73,7 +72,7 @@ data class PendingApproval(
      * 是否支持「本会话允许」。
      *
      * 只有 shell 是 true：它每次都要问，但同一个任务里连着跑几条命令时，
-     * 每条都点一次太折磨人。js/python 与云端仍走「总是允许 / 允许一次」。
+     * 每条都点一次太折磨人。js 与云端仍走「总是允许 / 允许一次」。
      */
     val sessionScoped: Boolean = false,
 )
@@ -1137,16 +1136,6 @@ class ChatEngine(
         // Agent 模式下追加一段工具使用约定：
         // 不加的话模型经常把工具当装饰不用，或者凭记忆编造实时信息。
         //
-        // 能力清单必须按**本安装实际有的引擎**生成：lite 版没有 CPython，
-        // 若还告诉模型"可以跑 Python"，它就会去调、失败、再解释一遍 —— 用户看到的是
-        // "明明说支持却跑不了"。这里直接不给这个选项。
-        val pythonReady = PythonBridge.classPresent()
-        val pythonLine = if (pythonReady) {
-            "- language=python：真 CPython（仅标准库）。"
-        } else {
-            "- language=python：**本次安装不含 Python 引擎（lite 版），不要调用**；" +
-                "需要 Python 就交给 cloud_build 在云端跑。"
-        }
         val agentHint = if (settings.agentMode != AgentMode.OFF) {
             """
 
@@ -1184,11 +1173,10 @@ class ChatEngine(
             静态检查抓不出「变量名打错、索引越界、逻辑写反、路径不对」这类问题，
             只有执行才暴露。要验证结果对不对，用 run_script 真的跑一遍：
             - language=shell：设备上真实的 sh，可以 `ls`、`grep`、`sed`、跑已写好的 sh 脚本；
-            - language=js：JavaScript（ES6，**不支持 async/await**，无 DOM/fetch）；
-            $pythonLine
-            ⚠️ **shell 里没有 python / node / java / gcc** —— 手表上没有系统级运行时，
-            三种语言是彼此独立的执行路径。`language=shell` + `python main.py` 一定失败，
-            要跑 Python 就传 language=python、把源码放在 code 里（或先 write_file 再用 python 读它）。
+            - language=js：JavaScript（ES6，**不支持 async/await**，无 DOM/fetch）。
+            ⚠️ **本地只有 shell 和 js，没有 python / node / java / gcc**。
+            两种语言是彼此独立的执行路径，`language=shell` + `python main.py` 一定失败。
+            要跑 Python / Java / C++，一律交给 cloud_build 在云端执行。
             跑之前先想清楚脚本会输出什么，一次跑对；不要靠反复试错烧用户的时间。
             你每次调用的完整输出（包括很长的）都会回灌给你，前面做过什么都在上下文里 ——
             不要重跑已经执行过的命令；要定位长输出里的特定内容，用 grep 或 `read_file offset=...`。
@@ -1322,7 +1310,7 @@ class ChatEngine(
         /**
          * 每次都必须确认的工具（已迁到 [ApprovalPolicy.ALWAYS_CONFIRM]）。
          *
-         * shell 也仍然每次确认，但多了「本会话允许」；js/python 不再强制拦。
+         * shell 也仍然每次确认，但多了「本会话允许」；js 不再强制拦。
          * 具体规则见 [ApprovalPolicy]，那里可以单测。
          */
         val ALWAYS_CONFIRM_TOOLS = ApprovalPolicy.ALWAYS_CONFIRM

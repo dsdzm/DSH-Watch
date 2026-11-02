@@ -56,12 +56,6 @@
 -dontwarn javax.script.**
 -dontwarn org.mozilla.classfile.**
 
-# ---------- Chaquopy（仅 full 包含 Python 时存在）----------
-# 引擎通过反射调用（Class.forName / getMethod），类名是字符串字面量，
-# R8 看不到引用就会整包剥掉 —— 保留整个包。
--keep class com.chaquo.python.** { *; }
--dontwarn com.chaquo.python.**
-
 # ---------- 关闭日志（release 移除 android.util.Log）----------
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);

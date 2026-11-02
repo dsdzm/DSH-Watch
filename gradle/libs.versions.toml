@@ -13,8 +13,6 @@ securityCrypto = "1.1.0-alpha06"
 zxing = "3.5.3"
 # 本地脚本执行：JS 引擎（纯 Java，不引入原生库）
 rhino = "1.9.1"
-# 本地脚本执行：可选的 Python 引擎（MIT，仅 full 包打包）
-chaquopy = "17.1.0"
 # Wear Compose（手表专用组件库）：与 Compose 1.8.x 配套
 wearCompose = "1.5.6"
 junit = "4.13.2"
@@ -60,5 +58,3 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-# 只在 -PwithPython=true 时 apply（见 app/build.gradle.kts）
-chaquopy-python = { id = "com.chaquo.python", version.ref = "chaquopy" }

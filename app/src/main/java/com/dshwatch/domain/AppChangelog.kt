@@ -18,6 +18,18 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.12",
+            date = "2026-11-02",
+            highlights = listOf(
+                "安装包更小了：不再内置 Python 引擎，只保留设备自带的 shell 与 JavaScript，" +
+                    "以前 full 版那 30MB 的运行时没有了",
+                "要跑 Python / Java / C++ 时，直接交给云端执行；shell 里调 python 会明确提示" +
+                    "「本地没有，请用云端」，不再白跑一次",
+                "写完代码先做静态检查：Python 能查缩进层级、漏冒号、else if、Python 2 的 print；" +
+                    "Java 会核对 public 类名与文件名、package/import 分号；C/C++ 会查 #if/#endif 配对",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.11",
             date = "2026-11-01",
             highlights = listOf(

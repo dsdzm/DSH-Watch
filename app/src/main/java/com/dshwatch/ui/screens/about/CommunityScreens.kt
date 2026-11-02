@@ -260,7 +260,6 @@ fun ThanksScreen(nav: WatchNavigator) {
                 ThanksLine("Jetpack Compose", "整个界面的地基")
                 ThanksLine("Kotlin & kotlinx.serialization", "语言与序列化")
                 ThanksLine("OkHttp", "所有网络请求")
-                ThanksLine("Chaquopy / CPython", "full 版的 Python 运行时")
                 ThanksLine("ZXing", "扫码登录")
             }
 

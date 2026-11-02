@@ -5,37 +5,16 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    // Chaquopy 刻意不在这里 apply —— 见下方 withPython。
 }
 
 /**
- * 是否把 Python 引擎（Chaquopy）打进这个包。
- *
- * Chaquopy 是**模块级插件**：一旦 apply，所有变体都会带上 libpython（约 25MB）。
- * 它没有「某个变体不打包」的开关，所以只能从构建入口分：
- *
- *   ./gradlew :app:assembleRelease                 → lite（无 Python，约 7MB）
- *   ./gradlew :app:assembleRelease -PwithPython=true → full（含 Python，约 30MB）
- *
- * 两种构建共用同一套 main 源码集 —— 对 Chaquopy 的调用全走反射
- * （见 domain/agent/exec/ReflectionPythonEngine.kt），所以 lite 构建也能正常编译。
- */
-val withPython: Boolean = providers.gradleProperty("withPython")
-    .map { it.equals("true", ignoreCase = true) }
-    .getOrElse(false)
-
-/**
  * 可选的 ABI 过滤：-Pabi=armeabi-v7a 出 32 位包，-Pabi=arm64-v8a 出 64 位包。
- * 不传时保持原行为 —— full 默认 arm64-v8a，lite 不限制（仍然通用）。
+ * 不传时保持通用包（不限制 ABI）。
  */
 val targetAbi: String? = providers.gradleProperty("abi")
     .map { it.trim() }
     .filter { it.isNotEmpty() }
     .orNull
-
-if (withPython) {
-    apply(plugin = "com.chaquo.python")
-}
 
 /**
  * 发布签名：可选。
@@ -61,18 +40,15 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 19
-        versionName = "1.11"
+        versionCode = 20
+        versionName = "1.12"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
         resourceConfigurations += listOf("zh", "en")
 
-        // libpython 是原生库，必须指定 ABI；lite 带 androidx 的 .so，也可以用 -Pabi 裁成单 ABI。
-        // 不传 -Pabi 时：full 默认 arm64-v8a，lite 保持通用（不限制）。
-        if (withPython) {
-            ndk { abiFilters += (targetAbi ?: "arm64-v8a") }
-        } else if (targetAbi != null) {
+        // androidx 自带少量 .so；需要单 ABI 时用 -Pabi 裁掉其余架构。
+        if (targetAbi != null) {
             ndk { abiFilters += targetAbi }
         }
     }
@@ -101,10 +77,6 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             isMinifyEnabled = false
-            if (withPython) {
-                // full 的 debug 包额外带上模拟器架构，方便在桌面模拟器里调 Python 路径
-                ndk { abiFilters += "x86_64" }
-            }
         }
         release {
             isMinifyEnabled = true
@@ -156,23 +128,6 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
-    }
-}
-
-if (withPython) {
-    /*
-     * Chaquopy 配置。
-     *
-     * Python 版本显式钉死：默认值会随插件版本漂移，而「手表上跑的是哪个 Python」
-     * 是用户能感知的事（语法错误信息、可用标准库），不该由升级构建插件悄悄改变。
-     *
-     * 构建机需要能执行同大版本的 python3（用于把源码编译成 .pyc）。
-     * Chaquopy 会先找 python3.11、再找 python3；找不到时用 buildPython("/path/to/python3") 指定。
-     */
-    extensions.configure<com.chaquo.python.ChaquopyExtension>("chaquopy") {
-        defaultConfig {
-            version = "3.11"
-        }
     }
 }
 

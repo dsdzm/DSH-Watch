@@ -8,7 +8,7 @@ import java.io.File
  * workflow 的 `inputs` 声明解析。
  *
  * 这个解析器存在的理由是一次真机故障：用户用 `dsh-build.yml` 构建 APK，
- * 而工具无条件往 inputs 里塞 `command` —— 那个模板只认 `variant` / `with_python`，
+ * 而工具无条件往 inputs 里塞 `command` —— 那个模板只认 `variant` / `source_repo`，
  * 于是 GitHub 返回 422 `Unexpected inputs provided: ["command"]`。
  * 提示文案还说"通常是分支名不存在"，把人带到完全错误的方向。
  *
@@ -40,7 +40,7 @@ class CloudTargetsInputsTest {
         // 这条就是那次故障的核心：两个模板的参数集合完全不同
         val inputs = CloudTargets.parseDispatchInputs(asset("dsh-build.yml"))
 
-        assertThat(inputs).containsAtLeast("variant", "with_python")
+        assertThat(inputs).containsAtLeast("variant", "source_repo")
         assertThat(inputs).doesNotContain("command")
     }
 

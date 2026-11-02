@@ -356,8 +356,6 @@ interface AppStrings {
     val execSecondsSuffix: String
     val execForceRelease: String
     val execForceReleaseDesc: String
-    val execPythonReady: String
-    val execPythonMissing: String
     val execConfirmNotice: String
     val cloudEnable: String
     val cloudBuildEta: String
@@ -1000,14 +998,12 @@ object Zh : AppStrings {
     override val execSectionDesc = "在设备上真的跑代码，或交给云端编译"
     override val execScreenTitle = "执行与编译"
     override val execEnable = "启用本地执行"
-    override val execEnableDesc = "允许 AI 在本机运行 shell / JS / Python 脚本"
+    override val execEnableDesc = "允许 AI 在本机运行 shell / JS 脚本"
     override val execTimeoutLabel = "执行超时"
     override val execMaxOutputLabel = "输出上限"
     override val execSecondsSuffix = " 秒"
     override val execForceRelease = "强制释放执行闸门"
     override val execForceReleaseDesc = "上一次脚本卡住不动时用"
-    override val execPythonReady = "Python 引擎可用（full 版）"
-    override val execPythonMissing = "此安装不含 Python 引擎（lite 版）"
     override val execConfirmNotice =
         "本地执行权限很大：脚本能读写当前工作目录、能联网。" +
             "开启后每次执行仍会单独确认一次，不会因为你点过「总是允许」就永久放行。"
@@ -1589,14 +1585,12 @@ object En : AppStrings {
     override val execSectionDesc = "Run code on the device, or compile it in the cloud"
     override val execScreenTitle = "Run & build"
     override val execEnable = "Enable on-device execution"
-    override val execEnableDesc = "Let the AI run shell / JS / Python scripts on this device"
+    override val execEnableDesc = "Let the AI run shell / JS scripts on this device"
     override val execTimeoutLabel = "Timeout"
     override val execMaxOutputLabel = "Output cap"
     override val execSecondsSuffix = " s"
     override val execForceRelease = "Force release the run gate"
     override val execForceReleaseDesc = "Use when a previous script is stuck"
-    override val execPythonReady = "Python engine available (full build)"
-    override val execPythonMissing = "This build has no Python engine (lite)"
     override val execConfirmNotice =
         "On-device execution is powerful: scripts can read and write the current work " +
             "directory and use the network. Even when enabled, every run asks for " +

@@ -28,10 +28,12 @@ object LanguageValidators {
     // ---------------- Python ----------------
 
     /**
-     * Python 检查三件事：
+     * Python 检查五件事：
      *  1. **缩进里混用 tab 与空格** —— Python 3 直接抛 TabError，而且肉眼很难看出来；
      *  2. **括号没配对**；
-     *  3. **`if/for/def/class` 等之后漏了冒号** —— 这条是启发式的，下面单独说明它为什么必须保守。
+     *  3. **`if/for/def/class` 等之后漏了冒号** —— 这条是启发式的，下面单独说明它为什么必须保守；
+     *  4. **缩进结构**（该缩进的没缩进、不该缩进的缩进了、退回到不存在的层级）；
+     *  5. **`else if` / Python 2 的 `print x`** —— 这两类在 Python 3 里是硬错误，可以直接报。
      */
     fun validatePython(path: String, src: String): List<Issue> {
         val issues = ArrayList<Issue>()
@@ -71,13 +73,10 @@ object LanguageValidators {
         //
         // 括号恰恰是在 `if` 这一行闭合的，所以"看行末括号深度"会认为语句已结束，
         // 于是报"缺冒号"。真正该问的是：**这一行是不是续行**。
-        val needsColon = Regex(
-            "^\\s*(if|elif|else|for|while|def|class|try|except|finally|with|match|case)\\b.*"
-        )
         scan.codeLines.forEachIndexed { index, code ->
             val trimmed = code.trimEnd()
             if (trimmed.isBlank()) return@forEachIndexed
-            if (!needsColon.containsMatchIn(trimmed)) return@forEachIndexed
+            if (!PY_BLOCK_KEYWORD.containsMatchIn(trimmed)) return@forEachIndexed
             // 续行：这一行只是表达式的一部分，不该以冒号收尾。三种情形都要放过：
             if (isContinuation(scan, index)) return@forEachIndexed
             // 本行以反斜杠续行 → 语句还没写完，冒号在下一行
@@ -96,8 +95,191 @@ object LanguageValidators {
             }
         }
 
+        issues += checkPythonStructure(path, scan)
+        issues += checkPythonSyntaxTraps(path, scan)
+
         return issues
     }
+
+    /**
+     * Python 缩进结构。
+     *
+     * 只报三类**确定性**错误（Python 自己也会报同一件事）：
+     *  - 上一行以 `:` 开启代码块，下一行却没缩进；
+     *  - 上一行没有开块，下一行却比它多缩进；
+     *  - 退回到一个不存在的外层缩进层级。
+     *
+     * 续行（括号未闭合、行尾反斜杠）完全不参与缩进判断 ——
+     * 续行的缩进在 Python 里本来就是自由的，拿它做判断必然误报。
+     */
+    private fun checkPythonStructure(path: String, scan: PythonScan): List<Issue> {
+        val out = ArrayList<Issue>()
+
+        // 每行结束时的括号深度：用来识别「这一行只是续行」
+        val depths = IntArray(scan.codeLines.size)
+        var depth = 0
+        scan.codeLines.forEachIndexed { i, code ->
+            depth += code.count { it == '(' || it == '[' || it == '{' }
+            depth -= code.count { it == ')' || it == ']' || it == '}' }
+            depths[i] = depth
+        }
+
+        // 当前打开着的缩进层级；顶层是空字符串
+        val levels = ArrayList<String>().apply { add("") }
+        var lastIndent: String? = null
+        var pendingBlock = false
+        // 上一行看起来是块头（if/def/for…）但漏了冒号：
+        // 下一行缩进是「它本来想要的身体」，不应该再报一次「意外的缩进」——
+        // 否则同一个错误会报两遍，模型反而不知道先改哪个。
+        var suspectBlock = false
+        var blockLine = 0
+
+        scan.codeLines.forEachIndexed { i, rawCode ->
+            if (!scan.significantLines.getOrElse(i) { false }) return@forEachIndexed
+            val code = rawCode.trimEnd()
+            if (code.isBlank()) return@forEachIndexed
+            val lineNo = i + 1
+            val indent = scan.lines.getOrElse(i) { "" }.takeWhile { it == ' ' || it == '\t' }
+
+            // 续行：上一行括号还开着，或上一行以反斜杠结尾
+            val continuation = i > 0 && (
+                depths[i - 1] > 0 ||
+                    scan.codeLines[i - 1].trimEnd().endsWith("\\")
+                )
+            val opensBlock = code.endsWith(":") && depths[i] == 0
+
+            if (continuation) {
+                // 续行本身不改变缩进层级，但它可能是块头（`def f(\n ...\n):`）
+                if (opensBlock) {
+                    pendingBlock = true
+                    blockLine = lineNo
+                }
+                return@forEachIndexed
+            }
+
+            val prev = lastIndent
+            when {
+                prev == null -> {
+                    if (indent.isNotEmpty()) {
+                        out += Issue(
+                            path, lineNo,
+                            "文件第一行就带了缩进。Python 的顶层语句必须从第 1 列开始。",
+                        )
+                        levels.add(indent)
+                    }
+                    lastIndent = indent
+                }
+
+                pendingBlock && indent.length <= prev.length -> {
+                    out += Issue(
+                        path, lineNo,
+                        "第 $blockLine 行以 `:` 结尾、开启了代码块，但这一行没有缩进" +
+                            "（或者缩进回到了外层）—— 这里缺少缩进块。",
+                    )
+                    if (!dedentTo(levels, indent) && levels.last().length != indent.length) {
+                        levels.add(indent)
+                    }
+                    lastIndent = indent
+                }
+
+                pendingBlock -> {
+                    levels.add(indent)
+                    lastIndent = indent
+                }
+
+                // 漏冒号的块头：缩进变化照常维护层级，但不再报「意外的缩进」
+                suspectBlock -> {
+                    if (indent.length > prev.length) {
+                        levels.add(indent)
+                    } else if (indent.length < prev.length && !dedentTo(levels, indent)) {
+                        out += Issue(
+                            path, lineNo,
+                            "取消缩进后没有对齐到任何外层缩进层级 —— 请检查这一行的缩进宽度。",
+                        )
+                        levels.add(indent)
+                    }
+                    lastIndent = indent
+                }
+
+                indent.length > prev.length -> {
+                    out += Issue(
+                        path, lineNo,
+                        "意外的缩进：上一行并没有以 `:` 结尾，这一行却比它多缩进了。",
+                    )
+                    levels.add(indent)
+                    lastIndent = indent
+                }
+
+                indent.length < prev.length -> {
+                    if (!dedentTo(levels, indent)) {
+                        out += Issue(
+                            path, lineNo,
+                            "取消缩进后没有对齐到任何外层缩进层级 —— 请检查这一行的缩进宽度。",
+                        )
+                        levels.add(indent)
+                    }
+                    lastIndent = indent
+                }
+
+                else -> lastIndent = indent
+            }
+
+            pendingBlock = opensBlock
+            suspectBlock = !opensBlock && PY_BLOCK_KEYWORD.containsMatchIn(code)
+            if (opensBlock) blockLine = lineNo
+        }
+
+        return out
+    }
+
+    /** 弹出所有比目标更深的缩进层级；返回是否精确落在一个已有层级上 */
+    private fun dedentTo(levels: MutableList<String>, indent: String): Boolean {
+        while (levels.size > 1 && levels.last().length > indent.length) {
+            levels.removeAt(levels.lastIndex)
+        }
+        return levels.last().length == indent.length
+    }
+
+    private val PY_ELSE_IF = Regex("^else\\s+if\\b")
+
+    /**
+     * `print` 后跟空格再接字符串 / `>>` / 标识符 —— Python 2 的语句写法。
+     *
+     * 必须用**原始行**判断：字符串在词法剥离后变成了空格，
+     * `print "x"` 会被剥成 `print`，就分不出它是「空 print」还是 Python 2 的写法了。
+     */
+    private val PY2_PRINT = Regex("^\\s*print[ \\t]+(>>|['\"]|[A-Za-z_])")
+
+    private fun checkPythonSyntaxTraps(path: String, scan: PythonScan): List<Issue> {
+        val out = ArrayList<Issue>()
+        scan.codeLines.forEachIndexed { i, raw ->
+            if (!scan.significantLines.getOrElse(i) { false }) return@forEachIndexed
+            val code = raw.trim()
+            if (code.isEmpty()) return@forEachIndexed
+
+            if (PY_ELSE_IF.containsMatchIn(code)) {
+                out += Issue(
+                    path, i + 1,
+                    "Python 没有 `else if`，请改写成 `elif 条件:`。",
+                )
+                return@forEachIndexed
+            }
+
+            val original = scan.lines.getOrElse(i) { "" }
+            if (PY2_PRINT.containsMatchIn(original)) {
+                out += Issue(
+                    path, i + 1,
+                    "这是 Python 2 的 `print` 语句；Python 3 必须写成 `print(...)`。",
+                )
+            }
+        }
+        return out
+    }
+
+    /** Python 的块头关键字：出现在行首时，原则上必须以 `:` 结尾 */
+    private val PY_BLOCK_KEYWORD = Regex(
+        "^\\s*(if|elif|else|for|while|def|class|try|except|finally|with|match|case)\\b.*"
+    )
 
     /**
      * 这一行是不是「续行」—— 即上一行的语句还没结束。
@@ -125,6 +307,8 @@ object LanguageValidators {
         val lines: List<String>,
         /** 与 lines 一一对应，字符串与注释被替换成空格 */
         val codeLines: List<String>,
+        /** 这一行是否有「语句级内容」：代码、字符串字面量都算，注释与多行字符串内部不算 */
+        val significantLines: List<Boolean>,
         val bracketIssues: List<RawIssue>,
     )
 
@@ -137,6 +321,7 @@ object LanguageValidators {
     private fun scanPython(src: String): PythonScan {
         val lines = src.split("\n")
         val codeLines = ArrayList<String>(lines.size)
+        val significantLines = ArrayList<Boolean>(lines.size)
         val issues = ArrayList<RawIssue>()
         val stack = ArrayList<Pair<Char, Int>>() // 括号 + 行号
 
@@ -148,6 +333,8 @@ object LanguageValidators {
             val lineNo = lineIndex + 1
             val sb = StringBuilder(raw.length)
             var i = 0
+            // 代码、字符串字面量都算「这一行有内容」；注释和多行字符串内部不算
+            var lineHasContent = false
 
             if (inTriple != null) {
                 // 上一行留下的三引号还没结束，找本行的结束符
@@ -156,6 +343,7 @@ object LanguageValidators {
                 if (end < 0) {
                     sb.append(" ".repeat(raw.length))
                     codeLines += sb.toString()
+                    significantLines += false
                     return@forEachIndexed
                 }
                 sb.append(" ".repeat(end + 3))
@@ -173,6 +361,7 @@ object LanguageValidators {
 
                     // 三引号（含 r/f/b 前缀的情况也走这里，前缀本身不影响词法）
                     c == '"' || c == '\'' -> {
+                        lineHasContent = true
                         val triple = i + 2 < raw.length && raw[i + 1] == c && raw[i + 2] == c
                         if (triple) {
                             val end = raw.indexOf("$c$c$c", i + 3)
@@ -207,10 +396,12 @@ object LanguageValidators {
                     }
 
                     c == '(' || c == '[' || c == '{' -> {
+                        lineHasContent = true
                         stack.add(c to lineNo); sb.append(c); i++
                     }
 
                     c == ')' || c == ']' || c == '}' -> {
+                        lineHasContent = true
                         val expect = when (c) {
                             ')' -> '('
                             ']' -> '['
@@ -233,11 +424,13 @@ object LanguageValidators {
                     }
 
                     else -> {
+                        if (!c.isWhitespace()) lineHasContent = true
                         sb.append(c); i++
                     }
                 }
             }
             codeLines += sb.toString()
+            significantLines += lineHasContent
         }
 
         if (inTriple != null) {
@@ -247,7 +440,7 @@ object LanguageValidators {
             issues += RawIssue(it.second, "左括号 " + it.first + " 没有找到对应的右括号")
         }
 
-        return PythonScan(lines, codeLines, issues)
+        return PythonScan(lines, codeLines, significantLines, issues)
     }
 
     // ---------------- 括号型语言（Kotlin / Java / C / Go / Rust / Swift ...） ----------------
@@ -383,9 +576,227 @@ object LanguageValidators {
             issues += Issue(path, it.second, "左括号 " + it.first + " 没有找到对应的右括号")
         }
 
+        when (language) {
+            "java" -> issues += checkJava(path, src)
+            "c", "h", "cpp", "hpp", "cc", "cxx", "hh" -> issues += checkCpp(path, src)
+        }
+
         // 只在文件「明显不像完整文件」时提示，避免误报（片段代码经常只有半个类）
         issues += checkCasing(path, src, language)
         return issues
+    }
+
+    /**
+     * Java 独有的两个硬规则（javac 会直接报错）：
+     *  - 顶层 `public` 类型名必须与文件名一致；
+     *  - `package` / `import` 必须以 `;` 结尾。
+     *
+     * 只看「花括号深度为 0」的行，避免把嵌套类当成顶层类而误报。
+     */
+    private fun checkJava(path: String, src: String): List<Issue> {
+        val out = ArrayList<Issue>()
+        val lines = stripBraceCode(src)
+        val fileName = path.substringAfterLast('/').substringBeforeLast('.')
+        var depth = 0
+
+        lines.forEachIndexed { idx, raw ->
+            val line = raw.trim()
+            if (line.isBlank()) return@forEachIndexed
+
+            if (depth == 0) {
+                val m = JAVA_PUBLIC_TYPE.find(line)
+                val name = m?.groupValues?.get(1)
+                if (name != null && fileName.isNotEmpty() &&
+                    fileName != name && fileName != "package-info" && fileName != "module-info"
+                ) {
+                    out += Issue(
+                        path, idx + 1,
+                        "顶层 public 类型 `$name` 必须放在同名文件里（应为 `$name.java`），" +
+                            "当前文件是 `$fileName.java`。javac 会直接报 " +
+                            "\"class $name is public, should be declared in a file named $name.java\"。",
+                    )
+                }
+            }
+
+            if (JAVA_PACKAGE_OR_IMPORT.containsMatchIn(line) && !line.endsWith(";")) {
+                out += Issue(path, idx + 1, "package / import 语句必须以分号 `;` 结尾。")
+            }
+
+            depth += line.count { it == '{' } - line.count { it == '}' }
+            if (depth < 0) depth = 0
+        }
+        return out
+    }
+
+    private val JAVA_PUBLIC_TYPE = Regex(
+        "public\\s+" +
+            "(?:(?:final|abstract|static|strictfp|sealed|non-sealed)\\s+)*" +
+            "(?:class|interface|enum|record|@interface)\\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+    )
+
+    private val JAVA_PACKAGE_OR_IMPORT = Regex("^(package|import)\\b")
+
+    /**
+     * C/C++ 预处理指令配对。
+     *
+     * `#if` 少一个 `#endif` 时，编译器往往只报一堆莫名其妙的「unexpected end of file」，
+     * 定位不到真正的位置；这里把「哪一行的 #if 没关」直接指出来。
+     */
+    private fun checkCpp(path: String, src: String): List<Issue> {
+        val out = ArrayList<Issue>()
+        val lines = stripBraceCode(src)
+        val rawLines = src.split("\n")
+        val open = ArrayList<Pair<String, Int>>()
+
+        lines.forEachIndexed { idx, raw ->
+            val line = raw.trim()
+            if (line.isEmpty() || !line.startsWith("#")) return@forEachIndexed
+            val lineNo = idx + 1
+
+            CPP_DIRECTIVE.find(line)?.let { m ->
+                when (m.groupValues[1]) {
+                    "if", "ifdef", "ifndef" -> open.add(m.groupValues[1] to lineNo)
+                    "elif", "else" -> if (open.isEmpty()) {
+                        out += Issue(
+                            path, lineNo,
+                            "#${m.groupValues[1]} 前面没有对应的 #if。",
+                        )
+                    }
+                    "endif" -> if (open.isEmpty()) {
+                        out += Issue(path, lineNo, "多余的 #endif：前面没有对应的 #if。")
+                    } else {
+                        open.removeAt(open.lastIndex)
+                    }
+                }
+            }
+
+            // #include <...>：缺 `>` 是真实错误（注意不能看字符串，字符串已被剥离）
+            val angle = CPP_INCLUDE_ANGLE.find(line)
+            if (angle != null && !line.substring(angle.range.last + 1).contains('>')) {
+                out += Issue(path, lineNo, "#include <...> 没有闭合：缺少结尾的 `>`。")
+            }
+            // #include "..."：引号在剥离后变成空格，必须看原始行
+            val original = rawLines.getOrElse(idx) { "" }
+            val quoteStart = CPP_INCLUDE_QUOTE.find(original)
+            if (quoteStart != null &&
+                !original.substring(quoteStart.range.last + 1).contains('"')
+            ) {
+                out += Issue(path, lineNo, "#include \"...\" 没有闭合：缺少结尾的引号。")
+            }
+        }
+
+        open.forEach { (kind, lineNo) ->
+            out += Issue(path, lineNo, "#$kind 没有对应的 #endif。")
+        }
+        return out
+    }
+
+    private val CPP_DIRECTIVE = Regex("^#\\s*(if|ifdef|ifndef|elif|else|endif)\\b")
+    private val CPP_INCLUDE_ANGLE = Regex("^#\\s*include\\s*<")
+    private val CPP_INCLUDE_QUOTE = Regex("^#\\s*include\\s*\"")
+
+    /**
+     * 把注释、字符串、字符字面量挖成空格，**保留换行**，行号与原文一一对应。
+     *
+     * 与 [validateBraces] 内联扫描的目的相同：让后续的正则只看「纯代码」，
+     * 不会把字符串里的 `public class` 或注释里的 `#endif` 当真。
+     */
+    private fun stripBraceCode(src: String): List<String> {
+        val sb = StringBuilder(src.length)
+        var i = 0
+        var inBlockComment = false
+        var lineComment = false
+
+        while (i < src.length) {
+            val c = src[i]
+            val next = if (i + 1 < src.length) src[i + 1] else ' '
+
+            if (c == '\n') {
+                sb.append('\n')
+                lineComment = false
+                i++
+                continue
+            }
+            if (lineComment) {
+                sb.append(' ')
+                i++
+                continue
+            }
+            if (inBlockComment) {
+                if (c == '*' && next == '/') {
+                    inBlockComment = false
+                    sb.append("  ")
+                    i += 2
+                } else {
+                    sb.append(' ')
+                    i++
+                }
+                continue
+            }
+            if (c == '/' && next == '/') {
+                lineComment = true
+                sb.append("  ")
+                i += 2
+                continue
+            }
+            if (c == '/' && next == '*') {
+                inBlockComment = true
+                sb.append("  ")
+                i += 2
+                continue
+            }
+
+            if (c == '"' || c == '\'') {
+                val triple = c == '"' && i + 2 < src.length &&
+                    src[i + 1] == '"' && src[i + 2] == '"'
+                if (triple) {
+                    // Java 文本块 / Kotlin 原始字符串：跨行整体挖空
+                    sb.append("   ")
+                    var j = i + 3
+                    while (j + 2 < src.length &&
+                        !(src[j] == '"' && src[j + 1] == '"' && src[j + 2] == '"')
+                    ) {
+                        sb.append(if (src[j] == '\n') '\n' else ' ')
+                        j++
+                    }
+                    if (j + 2 < src.length) {
+                        sb.append("   ")
+                        i = j + 3
+                    } else {
+                        while (j < src.length) {
+                            sb.append(if (src[j] == '\n') '\n' else ' ')
+                            j++
+                        }
+                        i = j
+                    }
+                } else {
+                    sb.append(' ')
+                    var j = i + 1
+                    while (j < src.length) {
+                        if (src[j] == '\\') {
+                            sb.append("  ".take(minOf(2, src.length - j)))
+                            j += 2
+                            continue
+                        }
+                        if (src[j] == c) {
+                            sb.append(' ')
+                            j++
+                            break
+                        }
+                        if (src[j] == '\n') break
+                        sb.append(' ')
+                        j++
+                    }
+                    i = j
+                }
+                continue
+            }
+
+            sb.append(c)
+            i++
+        }
+
+        return sb.toString().split("\n")
     }
 
     /** Kotlin 的小坑：`fun`/`val` 写成大写不是错误但几乎总是笔误，给个警告 */

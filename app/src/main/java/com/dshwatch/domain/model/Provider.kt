@@ -245,7 +245,6 @@ data class AppSettings(
     val localExecEnabled: Boolean = false,
     val allowShell: Boolean = true,
     val allowJs: Boolean = true,
-    val allowPython: Boolean = true,
     /** 单次脚本执行的超时（秒）。手表 CPU 慢，超过这个时间基本就是写错了 */
     val execTimeoutSec: Int = 20,
     /** 单条输出流保留的字符数（头尾各一半） */

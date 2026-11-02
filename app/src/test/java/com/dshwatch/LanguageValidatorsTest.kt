@@ -128,6 +128,117 @@ class LanguageValidatorsTest {
         assertThat(errors("main.py", src).map { it.message }).isEmpty()
     }
 
+    @Test
+    fun `nested python blocks and decorators are fine`() {
+        val src = """
+            import functools
+
+            @functools.cache
+            def outer(items):
+                if items:
+                    for item in items:
+                        if item:
+                            yield item
+                elif not items:
+                    return
+                else:
+                    raise ValueError("empty")
+
+            class Box:
+                @property
+                def size(self):
+                    try:
+                        return self._size
+                    except AttributeError:
+                        return 0
+        """.trimIndent()
+        assertThat(errors("box.py", src)).isEmpty()
+    }
+
+    @Test
+    fun `multi line function header is fine`() {
+        val src = """
+            def add(
+                a,
+                b,
+            ):
+                return a + b
+        """.trimIndent()
+        assertThat(errors("add.py", src)).isEmpty()
+    }
+
+    @Test
+    fun `docstrings do not affect indentation checks`() {
+        val src = """
+            def f():
+                '''Summary.
+
+                More text here.
+                '''
+                return 1
+        """.trimIndent()
+        assertThat(errors("doc.py", src)).isEmpty()
+    }
+
+    @Test
+    fun `missing indented block is reported`() {
+        val src = """
+            def f():
+            return 1
+        """.trimIndent()
+        val found = errors("main.py", src)
+        assertThat(found.any { it.message.contains("缩进") }).isTrue()
+    }
+
+    @Test
+    fun `unexpected indent is reported`() {
+        val src = """
+            x = 1
+                y = 2
+        """.trimIndent()
+        val found = errors("main.py", src)
+        assertThat(found.any { it.message.contains("意外") }).isTrue()
+    }
+
+    @Test
+    fun `dedent to a nonexistent level is reported`() {
+        val src = "def f():\n    if True:\n        return 1\n  return 2\n"
+        val found = errors("main.py", src)
+        assertThat(found.any { it.message.contains("取消缩进") }).isTrue()
+    }
+
+    @Test
+    fun `else if is reported with elif suggestion`() {
+        val src = """
+            if x:
+                pass
+            else if y:
+                pass
+        """.trimIndent()
+        val found = errors("main.py", src)
+        assertThat(found.any { it.message.contains("elif") }).isTrue()
+    }
+
+    @Test
+    fun `python 2 print statement is reported`() {
+        fun reportsPy2(src: String) =
+            errors("old.py", src).any { it.message.contains("Python 2") }
+        assertThat(reportsPy2("print \"hi\"\n")).isTrue()
+        assertThat(reportsPy2("print x\n")).isTrue()
+        assertThat(reportsPy2("print >>sys.stderr, x\n")).isTrue()
+    }
+
+    @Test
+    fun `python 3 print is not reported`() {
+        val src = """
+            print("hi")
+            print (x)
+            print(*args)
+            print()
+        """.trimIndent()
+        assertThat(errors("new.py", src)).isEmpty()
+    }
+
     // ---------------- 花括号语言 ----------------
 
     @Test
@@ -185,6 +296,117 @@ class LanguageValidatorsTest {
         assertThat(errors("A.java", bad)).isNotEmpty()
         assertThat(errors("a.c", bad)).isNotEmpty()
         assertThat(errors("a.go", bad)).isNotEmpty()
+    }
+
+    @Test
+    fun `clean java file is fine`() {
+        val src = """
+            package demo;
+
+            import java.util.List;
+
+            public class Main {
+                public static void main(String[] args) {
+                    System.out.println("hi");
+                }
+
+                static class Helper {
+                    void run() { }
+                }
+            }
+        """.trimIndent()
+        assertThat(errors("Main.java", src)).isEmpty()
+    }
+
+    @Test
+    fun `java public class name must match file name`() {
+        val src = "public class Solution {\n    int f() { return 1; }\n}\n"
+        val found = errors("Main.java", src)
+        assertThat(found.any { it.message.contains("Solution") }).isTrue()
+        // 同名时不报
+        assertThat(errors("Solution.java", src)).isEmpty()
+    }
+
+    @Test
+    fun `nested public class is not checked against file name`() {
+        val src = """
+            public class Outer {
+                public static class Inner { }
+            }
+        """.trimIndent()
+        assertThat(errors("Outer.java", src)).isEmpty()
+    }
+
+    @Test
+    fun `java package and import need semicolons`() {
+        val src = "package demo\nimport java.util.List\n\nclass A { }\n"
+        val found = errors("A.java", src)
+        assertThat(found.any { it.message.contains("分号") }).isTrue()
+    }
+
+    @Test
+    fun `java type declaration inside string or comment is ignored`() {
+        val src = """
+            public class Main {
+                // public class Wrong
+                String s = "public class Str";
+            }
+        """.trimIndent()
+        assertThat(errors("Main.java", src)).isEmpty()
+    }
+
+    @Test
+    fun `clean cpp preprocessor is fine`() {
+        val src = """
+            #include <iostream>
+            #include "lib.h"
+
+            int main() {
+            #ifdef DEBUG
+                std::cout << "debug";
+            #elif RELEASE
+                std::cout << "release";
+            #else
+                std::cout << "other";
+            #endif
+                return 0;
+            }
+        """.trimIndent()
+        assertThat(errors("main.cpp", src)).isEmpty()
+    }
+
+    @Test
+    fun `unclosed cpp if is reported`() {
+        val src = "#ifdef DEBUG\nint main() { return 0; }\n"
+        val found = errors("main.cpp", src)
+        assertThat(found.any { it.message.contains("#endif") }).isTrue()
+    }
+
+    @Test
+    fun `cpp else without if is reported`() {
+        val src = "#else\n#endif\nint main() { return 0; }\n"
+        val found = errors("main.cpp", src)
+        assertThat(found.any { it.message.contains("没有对应的 #if") }).isTrue()
+    }
+
+    @Test
+    fun `unclosed cpp include is reported`() {
+        assertThat(errors("a.c", "#include <stdio.h\n").map { it.message })
+            .contains("#include <...> 没有闭合：缺少结尾的 `>`。")
+        assertThat(errors("a.c", "#include \"stdio.h\n").map { it.message })
+            .contains("#include \"...\" 没有闭合：缺少结尾的引号。")
+    }
+
+    @Test
+    fun `cpp directive inside comment is ignored`() {
+        val src = """
+            /*
+            #endif
+            */
+            // #if 0
+            int main() { return 0; }
+        """.trimIndent()
+        assertThat(errors("main.c", src)).isEmpty()
     }
 
     // ---------------- Shell ----------------

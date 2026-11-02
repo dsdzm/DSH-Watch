@@ -54,7 +54,7 @@ class ScriptToolsTest {
     @Test
     fun `refuses a single language that is off`() = runTest {
         val ctx = context(
-            AppSettings(localExecEnabled = true, allowShell = false, allowJs = true, allowPython = true)
+            AppSettings(localExecEnabled = true, allowShell = false, allowJs = true)
         )
         val result = ScriptTools.RunScriptTool.execute(args("shell"), ctx)
         assertThat(result.ok).isFalse()
@@ -89,12 +89,11 @@ class ScriptToolsTest {
     }
 
     @Test
-    fun `python on a lite build says to install the full apk`() = runTest {
-        // JVM 环境天然没有 Chaquopy 类，正好等价于 lite 包
-        val ctx = context(AppSettings(localExecEnabled = true, allowPython = true))
+    fun `python points at cloud build and never tries to execute`() = runTest {
+        val ctx = context(AppSettings(localExecEnabled = true))
         val result = ScriptTools.RunScriptTool.execute(args("python", "print(1)"), ctx)
         assertThat(result.ok).isFalse()
-        assertThat(result.content).contains("lite")
+        assertThat(result.content).contains("cloud_build")
     }
 
     @Test
@@ -191,20 +190,20 @@ class ScriptToolsTest {
         com.dshwatch.domain.agent.exec.ExecOutput(exitCode = exitCode, stdout = "", stderr = stderr)
 
     @Test
-    fun `python not found in shell points at language=python`() {
+    fun `python not found in shell points at cloud build`() {
         // 真机原样：/storage/.../run-12105891902032.sh[4]: python: not found
         val out = shellFailure("/x/.dsh-run/run-12105891902032.sh[4]: python: not found")
         val hint = ScriptTools.interpreterHint("shell", out)
-        assertThat(hint).contains("language 改成 python")
+        assertThat(hint).contains("cloud_build")
     }
 
     @Test
-    fun `python3 not found also points at language=python`() {
+    fun `python3 not found also points at cloud build`() {
         val hint = ScriptTools.interpreterHint(
             "shell",
             shellFailure("/x/run-12099304217229.sh[4]: python3: not found"),
         )
-        assertThat(hint).contains("language 改成 python")
+        assertThat(hint).contains("cloud_build")
     }
 
     @Test
@@ -252,7 +251,7 @@ class ScriptToolsTest {
             shellFailure("/x/.dsh-run/run.sh[4]: python: not found"),
         )
         assertThat(text).contains("python: not found")
-        assertThat(text).contains("language 改成 python")
+        assertThat(text).contains("cloud_build")
     }
 }
 

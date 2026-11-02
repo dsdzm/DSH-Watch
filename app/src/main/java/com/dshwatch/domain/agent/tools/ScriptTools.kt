@@ -9,8 +9,6 @@ import com.dshwatch.domain.agent.exec.ExecGuard
 import com.dshwatch.domain.agent.exec.ExecLimits
 import com.dshwatch.domain.agent.exec.ExecOutput
 import com.dshwatch.domain.agent.exec.JsRunner
-import com.dshwatch.domain.agent.exec.PythonBridge
-import com.dshwatch.domain.agent.exec.ReflectionPythonEngine
 import com.dshwatch.domain.agent.exec.ShellRunner
 import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.rawStrOf
@@ -32,13 +30,14 @@ import java.io.File
  * 前者能抓的都抓了，但"跑一遍"能抓的是另一类问题 ——
  * 变量名打错、索引越界、逻辑写反、读文件路径不对，这些只有执行才暴露。
  *
- * ## 三种语言的现实差异（工具描述里必须说清楚，否则模型会误判）
+ * ## 两种语言的现实差异（工具描述里必须说清楚，否则模型会误判）
  *
  * | 语言 | 能力 | 限制 |
  * | --- | --- | --- |
  * | shell | 设备上真实的 `sh`，管道/重定向/`sed`/`grep` 都能用 | 需设备有 `/system/bin/sh` |
  * | js | Rhino 引擎，ES6 大部分语法 | **不支持 async/await**；无 DOM、无 `fetch` |
- * | python | 真 CPython（仅 full 版包含） | 标准库可用，第三方包不可用 |
+ *
+ * 本地不嵌入 Python 引擎：需要 Python 时走 `cloud_build`，或先做静态校验。
  *
  * ## 安全
  *
@@ -52,12 +51,9 @@ object ScriptTools {
 
     fun all(): List<AgentTool> = listOf(RunScriptTool)
 
-    /** 进程内复用：shell 的探测结果要缓存，Python 解释器只启动一次 */
+    /** 进程内复用：shell 的探测结果要缓存 */
     @Volatile
     private var shell: ShellRunner? = null
-
-    @Volatile
-    private var python: ReflectionPythonEngine? = null
 
     private val js = JsRunner()
 
@@ -65,33 +61,16 @@ object ScriptTools {
         shell ?: ShellRunner().also { shell = it }
     }
 
-    private fun pythonEngine(ctx: ToolContext) = python ?: synchronized(this) {
-        python ?: ReflectionPythonEngine(ctx.appContext).also { python = it }
-    }
-
     object RunScriptTool : AgentTool {
         override val name = "run_script"
 
-        // 能力清单按本安装实际有的引擎生成：lite 版没有 CPython，
-        // 描述里就不该出现「可以跑 Python」—— 否则模型会一直试，用户只看到失败。
-        private val pythonReady = PythonBridge.classPresent()
-
-        private val pythonNote = if (pythonReady) {
-            "- language=python：真 CPython，仅标准库（full 版才有）。" +
-                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
-                "几种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
-                "要跑 Python 就用 language=python，要跑 JS 就用 language=js。"
-        } else {
-            "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时。" +
-                "本安装不含 Python 引擎，**不要用 language=python**；需要 Python 就交给 cloud_build。"
-        }
-
         override val description =
-            "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。" +
-                (if (pythonReady) "三种语言：" else "两种语言（lite 版没有 Python）：") +
+            "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。两种语言：" +
                 "- language=shell：设备上真实的 sh，管道、重定向、grep/sed/awk 都能用；" +
-                "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）；" +
-                pythonNote +
+                "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）。" +
+                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
+                "两种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
+                "需要 Python / Java / C++ 时交给 cloud_build 在云端执行。" +
                 "什么时候用：写完代码想验证**真的能跑通、结果对不对**时用。" +
                 "只想快速查语法错误用 build_project（更快、零风险）。" +
                 "需要「编译出东西」（apk、gcc、gradle）用 cloud_build —— 那些本机做不到。" +
@@ -103,13 +82,13 @@ object ScriptTools {
             properties = mapOf(
                 "language" to Schema.str(
                     "执行语言",
-                    enum = if (pythonReady) listOf("shell", "js", "python") else listOf("shell", "js"),
+                    enum = listOf("shell", "js"),
                 ),
                 "code" to Schema.str(
                     "脚本正文。不要写成文件路径 —— 这里直接放源码；" +
                         "需要多文件就先用 write_file 建好，再用 shell 调用。"
                 ),
-                "args" to Schema.arr("传给脚本的位置参数（shell 的 $1/$2，js 的全局 args 数组，python 的 sys.argv[1:]）"),
+                "args" to Schema.arr("传给脚本的位置参数（shell 的 $1/$2，js 的全局 args 数组）"),
                 "timeout_sec" to Schema.int("超时秒数，1..120，默认取设置里的值", min = 1, max = 120),
             ),
             required = listOf("language", "code"),
@@ -118,13 +97,13 @@ object ScriptTools {
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             val language = args.strOf("language")?.trim()?.lowercase()
                 ?: return ToolResult.fail(
-                    "缺少 language 参数。可选值：shell / js / python。" +
-                        "如果要跑的是你刚写的文件，用 shell + `python main.py` 或 `node main.js` 这样的命令。"
+                    "缺少 language 参数。可选值：shell / js。" +
+                        "如果要跑的是你刚写的 sh 文件，用 shell 执行它。"
                 )
             if (language !in SUPPORTED) {
                 return ToolResult.fail(
-                    "不支持的 language：$language。当前支持 shell / js / python。" +
-                        "其它语言（Java/Go/Rust 等）请用 cloud_build 交给云端编译。"
+                    "不支持的 language：$language。本机只支持 shell / js；" +
+                        "Python / Java / C++ / Go / Rust 等请用 cloud_build 交给云端执行。"
                 )
             }
 
@@ -171,8 +150,7 @@ object ScriptTools {
             try {
                 val output = when (language) {
                     "shell" -> shellRunner().run(code, workDir, limits, scriptArgs)
-                    "js" -> js.run(code, limits, scriptArgs)
-                    else -> pythonEngine(ctx).run(code, workDir, limits, scriptArgs)
+                    else -> js.run(code, limits, scriptArgs)
                 }
                 if (output.stillRunning) keepGate = true
 
@@ -209,29 +187,15 @@ object ScriptTools {
             val allowed = when (language) {
                 "shell" -> settings.allowShell
                 "js" -> settings.allowJs
-                "python" -> settings.allowPython
                 else -> false
             }
             if (!allowed) {
-                val label = when (language) {
-                    "shell" -> "Shell"
-                    "js" -> "JavaScript"
-                    else -> "Python"
-                }
+                val label = if (language == "shell") "Shell" else "JavaScript"
                 return "$label 执行未开启（总开关已开，但这一项没开）。" +
                     "请让用户到「设置 → 本地执行」勾选「$label」；也可以换用其它已开启的语言。"
             }
-            if (language == "python" && !PythonBridge.classPresent()) {
-                return pythonEngineUnavailable()
-            }
             return null
         }
-
-        private fun pythonEngineUnavailable(): String =
-            "当前安装的是 lite 版，不含 Python 引擎 —— 本地跑不了 Python。" +
-                "可选：① 用 language=js 或 shell 改写这段逻辑；" +
-                "② 让用户安装 full 版 APK 后再试；" +
-                "③ 用 cloud_build 把代码交给云端 Python 执行。"
 
         /** 执行后新出现的文件里挑一个最有代表性的当产物（界面会渲染成可点开的卡片） */
         private suspend fun detectArtifact(ctx: ToolContext, before: Set<String>): String? {
@@ -251,13 +215,13 @@ object ScriptTools {
         }
     }
 
-    private val SUPPORTED = setOf("shell", "js", "python")
+    private val SUPPORTED = setOf("shell", "js")
     private const val MAX_TIMEOUT_SEC = 120
 
     /**
      * 统一的结果文本。
      *
-     * 三种语言走同一个格式，模型不需要为每种语言学一套读法；
+     * 两种语言走同一个格式，模型不需要为每种语言学一套读法；
      * 而"超时/截断/仍在后台"这些**必须出现** —— 少写一句，
      * 模型就会把一次失败的执行当成成功的。
      */
@@ -267,11 +231,7 @@ object ScriptTools {
         /** 相对工作空间根的工作目录，失败时回显给模型看 */
         workDir: String = "",
     ): String = buildString {
-        val label = when (language) {
-            "shell" -> "shell"
-            "js" -> "JavaScript"
-            else -> "Python"
-        }
+        val label = if (language == "shell") "shell" else "JavaScript"
         if (out.ok) {
             append("$label 执行成功（退出码 ${out.exitCode}，用时 ${out.elapsedMs} ms）")
         } else if (out.timedOut) {
@@ -318,7 +278,7 @@ object ScriptTools {
      * `sh: python: not found` 这类失败要翻译成"下一步该怎么做"。
      *
      * 这不是锦上添花：模型非常容易假设 shell 里能调 `python main.py` / `node app.js`，
-     * 而**这台设备上根本没有这些系统级运行时** —— Python 和 JS 是另一种执行路径
+     * 而**这台设备上根本没有这些系统级运行时** —— JS 是另一条执行路径
      * （跑在 App 进程内），两者不能互相调用。
      * 不提示的话，模型往往会反复重试同一个死路，或者改去怀疑自己的代码写错了。
      */
@@ -327,9 +287,8 @@ object ScriptTools {
         val missing = missingCommand(out.stderr) ?: return ""
         return when (missing) {
             "python", "python3", "py", "pip", "pip3" ->
-                "提示：shell 里没有 python —— 手表上没有系统级 Python。" +
-                    "要跑 Python 请把 language 改成 python（需要 full 版 APK；" +
-                    "那条路径能拿到完整的 stdout/stderr，也不受 shell 限制）。"
+                "提示：shell 里没有 python —— 本地不嵌入 Python 引擎。" +
+                    "要跑 Python 请用 cloud_build 交给云端（代码会离开设备，需要用户确认）。"
             "node", "nodejs", "npm", "npx", "deno", "bun" ->
                 "提示：shell 里没有 node —— 要跑 JavaScript 请把 language 改成 js。"
             "java", "javac", "kotlinc", "gradle", "gcc", "g++", "clang", "go", "cargo", "rustc", "dotnet", "mvn" ->
