@@ -163,6 +163,24 @@ data class Conversation(
      * 空串表示直接用工作空间根目录（老会话就是这种，保持兼容）。
      */
     val workDir: String = "",
+    /**
+     * 使用场景：`coding` / `tavern` / `writing`。
+     *
+     * 会话创建时定死，之后不随设置里的「当前场景」变化 —— 一个会话就是一件事，
+     * 在角色扮演会话里切到编程场景不应该让这个会话长出工具面。
+     * 空串（老会话）按编程处理，与升级前行为一致。
+     */
+    val scene: String = "",
+    /** 角色卡 / 写作设定卡的 id；编程场景为空 */
+    val roleCardId: String = "",
+    /**
+     * 长期记忆压缩点：发给模型的历史从这个下标开始。
+     *
+     * 0 表示从未压缩。压缩后它等于当时的消息总数，于是更早的内容不再进请求，
+     * 由记忆文档（`memory/<cardId>.md`）承载。**对话记录本身一条都不删**，
+     * 用户往上翻照样看得见。
+     */
+    val tavernTurn: Int = 0,
 ) {
     val displayTitle: String get() = title.ifBlank { "新对话" }
 }

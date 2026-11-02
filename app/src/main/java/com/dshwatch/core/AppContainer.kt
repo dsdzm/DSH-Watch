@@ -45,6 +45,18 @@ class AppContainer(private val app: Context) {
     val keyStore = SecureKeyStore(app)
     val conversationStore = ConversationStore(File(app.filesDir, "conversations"), json)
 
+    /**
+     * 角色卡库（酒馆与写作共用一套结构，按 `kind` 分）。
+     *
+     * 放 filesDir 而不是工作空间：卡是"配置资产"，用户不该在「工作空间」里
+     * 误删它；而记忆文档恰好相反 —— 那是要能看见、能编辑、能导出的文本，
+     * 所以放在工作空间内（见 [MemoryStore]）。
+     */
+    val roleCardStore = com.dshwatch.data.store.RoleCardStore(File(app.filesDir, "rolecards"), json)
+
+    /** 长期记忆文档：落在工作空间 `memory/` 下，用户可见可编辑 */
+    val memoryStore = com.dshwatch.data.store.MemoryStore { workspaceStore.rootDir() }
+
     /** 工作空间默认放应用内部私有目录 */
     private val internalWorkspace = File(app.filesDir, "workspace")
 
@@ -151,7 +163,22 @@ class AppContainer(private val app: Context) {
         toolRegistry = { _toolRegistry.value },
         workspaceRoot = { workspaceStore.rootPath() },
         promptChannel = promptChannel,
+        roleCard = { id -> roleCardStore.load(id) },
+        memoryReader = { id -> memoryStore.read(id) },
         json = json,
+    )
+
+    /**
+     * 长期记忆压缩器。
+     *
+     * 单例：压缩是"后台悄悄发生"的事，每轮建一个新对象会让同一段时间内
+     * 多次触发重复压缩（同一段对话被写进记忆两遍）。
+     */
+    val memoryCompressor = com.dshwatch.domain.roleplay.MemoryCompressor(
+        scope = appScope,
+        engine = engine,
+        memory = memoryStore,
+        loadCard = { id -> roleCardStore.load(id) },
     )
 
     init {
@@ -174,6 +201,14 @@ class AppContainer(private val app: Context) {
             }
         }
         appScope.launch { usageRepo.ensureLoaded() }
+
+        appScope.launch {
+            // 首次启动铺一批内置角色卡：让用户点开「酒馆」就有东西能试，
+            // 而不是面对一张空列表先自己想一个人设。用户删光了就不再补（见 ensureBuiltins）。
+            runCatching {
+                roleCardStore.ensureBuiltins(com.dshwatch.domain.roleplay.BuiltinCards.all())
+            }
+        }
 
         appScope.launch {
             // MCP 连接对齐。

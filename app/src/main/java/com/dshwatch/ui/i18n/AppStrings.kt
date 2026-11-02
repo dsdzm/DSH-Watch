@@ -51,6 +51,10 @@ interface AppStrings {
 
     // 对话
     val chatEmptyTitle: String
+
+    /** 酒馆/写作场景下对话页的空态（正常不会出现，兜底用） */
+    val roleplayEmptyTitle: String
+    val roleplayEmptyHint: String
     val chatEmptyHint: String
     val inputHint: String
     val thinking: String
@@ -101,6 +105,9 @@ interface AppStrings {
     val fontSmall: String
     val fontNormal: String
     val fontLarge: String
+
+    /** 字号滑块下面那行实时预览文字 */
+    val fontPreview: String
     val language: String
     val langSystem: String
     val langZh: String
@@ -569,6 +576,8 @@ object Zh : AppStrings {
     override val back = "返回"
 
     override val chatEmptyTitle = "开始一段 vibe coding"
+    override val roleplayEmptyTitle = "还没有角色"
+    override val roleplayEmptyHint = "回上一页选一张角色卡，或者新建一个"
     override val chatEmptyHint = "点下方输入框说话，模型会直接给可运行的代码"
     override val inputHint = "说点什么…"
     override val thinking = "思考中"
@@ -617,6 +626,7 @@ object Zh : AppStrings {
     override val fontSmall = "小"
     override val fontNormal = "标准"
     override val fontLarge = "大"
+    override val fontPreview = "这段字会跟着上面的滑块变大变小"
     override val language = "界面语言"
     override val langSystem = "跟随系统"
     override val langZh = "中文"
@@ -1155,6 +1165,8 @@ object En : AppStrings {
     override val back = "Back"
 
     override val chatEmptyTitle = "Start vibe coding"
+    override val roleplayEmptyTitle = "No character yet"
+    override val roleplayEmptyHint = "Go back and pick a card, or create one"
     override val chatEmptyHint = "Tap the input below — you get runnable code, not small talk"
     override val inputHint = "Say something…"
     override val thinking = "Thinking"
@@ -1203,6 +1215,7 @@ object En : AppStrings {
     override val fontSmall = "S"
     override val fontNormal = "M"
     override val fontLarge = "L"
+    override val fontPreview = "This line resizes with the slider above"
     override val language = "Language"
     override val langSystem = "System"
     override val langZh = "中文"

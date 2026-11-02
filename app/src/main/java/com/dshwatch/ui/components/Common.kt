@@ -47,12 +47,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dshwatch.domain.model.TokenUsage
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 // ---------------------------------------------------------------------------
 // 页面骨架
@@ -165,7 +172,7 @@ fun IconTap(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = if (enabled) tint else tint.copy(alpha = 0.35f),
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(22.dp),
         )
     }
 }
@@ -191,9 +198,13 @@ fun withHaptic(onClick: () -> Unit): () -> Unit {
 fun SectionHeader(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelMedium,
+        // 12sp + 半粗：小屏上不靠字重加粗，标题和正文会长得一样
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        ),
         color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(top = 10.dp, bottom = 4.dp),
+        modifier = modifier.padding(top = 8.dp, bottom = 3.dp, start = 2.dp),
     )
 }
 
@@ -277,9 +288,9 @@ fun SettingRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 42.dp)
+                .heightIn(min = WatchDimens.touchMin)
                 .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
-                .padding(vertical = 6.dp),
+                .padding(vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -326,15 +337,15 @@ fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 40.dp)
+            .heightIn(min = WatchDimens.touchMin)
             .tap(onClick = withHaptic { onCheckedChange(!checked) })
-            .padding(vertical = 4.dp),
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (!subtitle.isNullOrBlank()) {
@@ -388,8 +399,8 @@ fun SegmentedRow(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(11.dp))
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
                     )
@@ -398,13 +409,17 @@ fun SegmentedRow(
             ) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
                     color = if (selected) {
                         MaterialTheme.colorScheme.onPrimaryContainer
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    maxLines = 1,
+                    // 只有两三个短选项时才用分段条；超过 4 项或文字长，调用方应改用 ChoiceRow。
+                    // 这里给两行兜底，避免中文被硬截成省略号。
+                    maxLines = 2,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 2.dp),
                 )
             }
         }
@@ -422,8 +437,8 @@ fun StepperRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 40.dp)
-            .padding(vertical = 3.dp),
+            .heightIn(min = WatchDimens.touchMin)
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -548,7 +563,7 @@ fun PrimaryButton(
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
             color = if (enabled) {
                 MaterialTheme.colorScheme.onPrimary
             } else {
@@ -575,7 +590,7 @@ fun GhostButton(
             .tap(onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = text, style = MaterialTheme.typography.labelLarge, color = tint)
+        Text(text = text, style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp), color = tint)
     }
 }
 
@@ -756,3 +771,94 @@ fun KeyValueRow(label: String, value: String, valueColor: Color? = null) {
 
 @Composable
 fun SpacerH(dp: Dp) = Spacer(Modifier.height(dp))
+
+/**
+ * 连续滑块。
+ *
+ * 手表圆屏宽度只有 ~200dp，三格分段条每格 60dp、还得挤下"标准"两个汉字 ——
+ * 结果是看上去有"标准"这一项，实际选中值和视觉位置对不上（旧的字号设置就是
+ * 滑块停在"标准"、写进去的却是 0.92）。滑块把所有取值放在同一条轴上，
+ * 点哪儿就是哪儿，右边常驻实时数值，配合 samples 让用户当场看到效果。
+ *
+ * 拖动过程只改本地状态（避免每一帧都写 DataStore 引发整棵树重组），
+ * 抬手或旋转表冠停下时才 [onChange] 一次。
+ */
+@Composable
+fun WatchSlider(
+    value: Float,
+    onChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    label: String,
+    modifier: Modifier = Modifier,
+    steps: Int = 0,
+    valueText: String? = null,
+    enabled: Boolean = true,
+    sample: String? = null,
+    sampleStyle: androidx.compose.ui.text.TextStyle? = null,
+) {
+    val span = (valueRange.endInclusive - valueRange.start).takeIf { it > 0f } ?: 1f
+    fun snap(raw: Float): Float {
+        val v = raw.coerceIn(valueRange.start, valueRange.endInclusive)
+        if (steps <= 0) return (Math.round(v * 100f) / 100f)
+        val gaps = steps + 1
+        val step = span / gaps
+        val snapped = valueRange.start + Math.round((v - valueRange.start) / step) * step
+        return (Math.round(snapped * 100f) / 100f).coerceIn(valueRange.start, valueRange.endInclusive)
+    }
+
+    var local by remember(value) { mutableFloatStateOf(value) }
+    val haptic = LocalHapticFeedback.current
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = valueText ?: ((local * 100).toInt().toString() + "%"),
+                style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (!sample.isNullOrBlank()) {
+            Text(
+                text = sample,
+                style = sampleStyle ?: MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+            )
+        }
+        Slider(
+            value = local,
+            onValueChange = { raw ->
+                val next = snap(raw)
+                // 每跳一档给一次触感，连续拖动时判断变化量避免刷屏
+                if (Math.abs(next - local) >= 0.049f) {
+                    runCatching { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+                }
+                local = next
+            },
+            onValueChangeFinished = { onChange(local) },
+            valueRange = valueRange,
+            steps = steps,
+            enabled = enabled,
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            // 圆屏两侧被切掉，轨道左右留出来才不会把滑块端点藏进黑边
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = WatchDimens.touchMin),
+        )
+    }
+}

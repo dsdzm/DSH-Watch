@@ -1,0 +1,423 @@
+package com.dshwatch.ui.screens.chat
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.TokenEstimator
+import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.model.ChatMessage
+import com.dshwatch.domain.model.MessageStatus
+import com.dshwatch.domain.model.Role
+import com.dshwatch.domain.roleplay.RoleCard
+import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.components.SectionHeader
+import com.dshwatch.ui.components.WatchButton
+import com.dshwatch.ui.components.WatchGhostButton
+import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.components.WatchSection
+import com.dshwatch.ui.components.tap
+import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.markdown.MarkdownText
+import com.dshwatch.ui.nav.Screen
+import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.screens.scene.ScenePill
+import com.dshwatch.util.Fmt
+import kotlinx.coroutines.launch
+
+/**
+ * 角色扮演 / 写作的对话页。
+ *
+ * ## 为什么不复用 [ChatScreen] 加一堆 if
+ *
+ * ChatScreen 有 1500 行，承担的是「Agent 工作台」：工作流卡片、工具审批、
+ * 产物、上下文条、B站快捷入口。而这里要的是**只有对话**：大字、说话人、
+ * 一个输入条，别的都不要。往 ChatScreen 里加 `if (isRoleplay)` 会让那 1500 行
+ * 里一半的分支都变成"可能不存在"，反而更容易出 bug。
+ *
+ * 两者共用的只有引擎（同一个 ChatEngine）与它暴露的 StateFlow，
+ * 所以拆开是零成本的。
+ */
+@Composable
+fun RoleplayChatScreen(
+    container: AppContainer,
+    settings: AppSettings,
+    nav: WatchNavigator,
+) {
+    val engine = container.engine
+    val scope = rememberCoroutineScope()
+    val conversation by engine.conversation.collectAsStateWithLifecycle()
+    val messages by engine.messages.collectAsStateWithLifecycle()
+    val live by engine.live.collectAsStateWithLifecycle()
+    val streaming by engine.streaming.collectAsStateWithLifecycle()
+    val banner by engine.banner.collectAsStateWithLifecycle()
+
+    val scene = Scenes.of(conversation?.scene)
+    val isWriting = scene == Scenes.WRITING
+    val listState = rememberLazyListState()
+
+    var card by remember { mutableStateOf<RoleCard?>(null) }
+    var showInfo by remember { mutableStateOf(false) }
+    var memoryText by remember { mutableStateOf("") }
+
+    val cardId = conversation?.roleCardId.orEmpty()
+    LaunchedEffect(cardId) {
+        card = if (cardId.isBlank()) null else runCatching { container.roleCardStore.load(cardId) }.getOrNull()
+        memoryText = if (cardId.isBlank()) "" else container.memoryStore.read(cardId)
+    }
+
+    // 流式期间只滚到底部，不做任何重排 —— 手表 CPU 弱，重排一次就掉帧
+    LaunchedEffect(messages.size, live.text.length, streaming) {
+        if (messages.isNotEmpty()) {
+            runCatching { listState.scrollToItem(messages.lastIndex) }
+        }
+    }
+
+    /*
+     * 长期记忆的触发点。
+     *
+     * 放在「流式结束」这一刻，而不是每轮开头：压缩本身要发一次请求，
+     * 放在开头会让用户等着；放在结尾则是"说完这句之后它在后台自己整理"。
+     */
+    LaunchedEffect(streaming, messages.size) {
+        if (streaming || messages.isEmpty()) return@LaunchedEffect
+        if (card?.longTermMemory != true || cardId.isBlank()) return@LaunchedEffect
+        val provider = settings.activeProvider ?: return@LaunchedEffect
+        val window = provider.contextWindow
+        if (window <= 0) return@LaunchedEffect
+        val used = messages.sumOf { TokenEstimator.estimatePair(it.role.wire, it.content) }
+        container.memoryCompressor.maybeCompress(
+            conversationId = conversation?.id.orEmpty(),
+            cardId = cardId,
+            scene = scene,
+            contextTokens = used,
+            contextWindow = window,
+        )
+    }
+
+    WatchScaffold(
+        title = card?.displayName ?: if (isWriting) "写作" else "酒馆",
+        onBack = { nav.popToRoot() },
+        actions = {
+            IconTap(Icons.Outlined.Memory, "记忆") {
+                scope.launch {
+                    memoryText = if (cardId.isBlank()) "" else container.memoryStore.read(cardId)
+                }
+                showInfo = !showInfo
+            }
+            ScenePill(scene) {
+                scope.launch {
+                    container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
+                }
+                nav.popToRoot()
+            }
+        },
+        bottom = {
+            RoleplayInputBar(
+                streaming = streaming,
+                hint = if (isWriting) "接着写，或说说你想怎么改" else "说点什么…",
+                onOpenInput = { nav.push(Screen.Input()) },
+                onSend = { nav.push(Screen.Input()) },
+                onStop = { engine.stop() },
+            )
+        },
+    ) {
+        banner?.let { b ->
+            Text(
+                text = b.text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+
+        if (showInfo) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (card != null) {
+                    com.dshwatch.ui.screens.tavern.CardDetailSheet(card = card!!, isWriting = isWriting)
+                }
+                Spacer(Modifier.height(8.dp))
+                WatchGhostButton(text = "编辑设定", onClick = {
+                    showInfo = false
+                    nav.push(Screen.CardEdit(scene, cardId))
+                })
+                if (card?.longTermMemory == true) {
+                    Spacer(Modifier.height(8.dp))
+                    WatchGhostButton(text = "立即压缩记忆", onClick = {
+                        scope.launch {
+                            val provider = settings.activeProvider
+                            container.memoryCompressor.maybeCompress(
+                                conversationId = conversation?.id.orEmpty(),
+                                cardId = cardId,
+                                scene = scene,
+                                contextTokens = 1,
+                                contextWindow = provider?.contextWindow ?: 8000,
+                                force = true,
+                            )
+                            memoryText = container.memoryStore.read(cardId)
+                        }
+                    })
+                    Spacer(Modifier.height(6.dp))
+                    // 预览只给前 300 字 —— 手表屏上再多也读不完。
+                    // 要看全的就点进记忆文档，那里是完整可编辑的原文。
+                    HintText(
+                        memoryText.ifBlank { "还没有写进记忆的内容" }.take(300) +
+                            if (memoryText.length > 300) "\n…（点下面「打开记忆文档」看全部）" else ""
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    WatchGhostButton(text = "打开记忆文档", onClick = {
+                        showInfo = false
+                        nav.push(Screen.MemoryDoc(cardId))
+                    })
+                }
+                Spacer(Modifier.height(8.dp))
+                WatchGhostButton(text = "返回对话", onClick = { showInfo = false })
+            }
+            return@WatchScaffold
+        }
+
+        if (messages.isEmpty()) {
+            OpeningHint(
+                card = card,
+                isWriting = isWriting,
+                onStart = {
+                    /*
+                     * 开场白已经显示在屏幕上了（见 OpeningHint），但**不能**当成一条
+                     * 助手消息写进历史 —— 写进去模型会以为"我刚说完话又说一句"，
+                     * 于是接着自说自话。
+                     *
+                     * 正确做法是把它作为模型可见的上下文：这里发一句极短的引导，
+                     * 模型会顺着开场白往下接。写作场景则要求它直接续写正文。
+                     * 这一句只在首次进入时发一次，之后对话正常进行。
+                     */
+                    val greet = card?.greeting.orEmpty().trim()
+                    val kickoff = when {
+                        isWriting && greet.isNotBlank() ->
+                            "（以上是我已经写好的开头，请接着往下写正文，不要复述开头）"
+                        isWriting -> "（从这一段开始写下去）"
+                        greet.isNotBlank() -> "（我看着你，等你先开口）"
+                        else -> "（你好）"
+                    }
+                    engine.send(kickoff)
+                },
+            )
+            return@WatchScaffold
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(messages, key = { it.id }) { m ->
+                RoleplayMessage(
+                    message = m,
+                    liveText = if (live.messageId == m.id) live.text else null,
+                    isWriting = isWriting,
+                    speakerName = card?.displayName.orEmpty(),
+                )
+            }
+            item(key = "__tail__") { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+/**
+ * 一条消息。
+ *
+ * 与 ChatScreen 的气泡比：没有工具卡片、没有思维链折叠、没有 token 角标、
+ * 没有产物入口。用户明确要求这两个场景里"不要出现除了对话以外的东西"。
+ */
+@Composable
+private fun RoleplayMessage(
+    message: ChatMessage,
+    liveText: String?,
+    isWriting: Boolean,
+    speakerName: String,
+) {
+    val isUser = message.role == Role.USER
+    val text = liveText ?: message.content
+    if (text.isBlank() && message.status != MessageStatus.STREAMING) return
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = if (isUser) "我" else speakerName.ifBlank { "对方" },
+            style = MaterialTheme.typography.labelSmall,
+            color = if (isUser) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+            modifier = Modifier.padding(start = 4.dp, bottom = 3.dp),
+        )
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (isUser) 0.88f else 1f)
+                    .clip(RoundedCornerShape(18.dp))
+                    .then(
+                        if (isWriting) Modifier
+                        else Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                if (isUser) MaterialTheme.colorScheme.surfaceContainerHigh
+                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                            )
+                    )
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+            ) {
+                if (message.status == MessageStatus.STREAMING && text.isBlank()) {
+                    Text(
+                        text = "……",
+                        style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    // 角色扮演里通常没有 Markdown，但写作场景会有分段与强调，
+                    // 所以仍走同一个解析器；字号由 LocalTextSize 决定。
+                    MarkdownText(text = text)
+                }
+            }
+        }
+        if (message.status == MessageStatus.ERROR) {
+            Text(
+                text = message.error.ifBlank { "出错了" },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 4.dp, top = 3.dp),
+            )
+        }
+    }
+}
+
+/** 空会话：把开场白亮出来，给一个明确的「开始」按钮 */
+@Composable
+private fun OpeningHint(card: RoleCard?, isWriting: Boolean, onStart: () -> Unit) {
+    val greet = card?.greeting.orEmpty().trim()
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        WatchSection {
+            SectionHeader(if (isWriting) "开头" else "开场白")
+            Text(
+                text = greet.ifBlank { "（这张卡没有写开场白，直接说话即可）" },
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 21.sp),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        WatchButton(
+            text = if (isWriting) "从这里接着写" else "开始对话",
+            onClick = onStart,
+        )
+        Spacer(Modifier.height(6.dp))
+        HintText(
+            if (isWriting) "模型会接着上面的文字往下写；想调整方向就直接说"
+            else "设定只在开始时生效，之后只带最近的对话（开了长期记忆则只带记忆摘要）"
+        )
+    }
+}
+
+/** 底栏：和编程页同尺寸，但去掉模型选择与 Agent 入口 */
+@Composable
+private fun RoleplayInputBar(
+    streaming: Boolean,
+    hint: String,
+    onOpenInput: () -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .tap(onClick = withHaptic(onOpenInput)),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(
+                    if (streaming) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.primary
+                )
+                .tap(onClick = withHaptic(if (streaming) onStop else onSend)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (streaming) Icons.Outlined.Stop else Icons.Filled.Send,
+                contentDescription = if (streaming) "停止" else "发送",
+                tint = if (streaming) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onPrimary
+                },
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}

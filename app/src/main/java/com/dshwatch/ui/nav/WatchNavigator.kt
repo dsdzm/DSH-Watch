@@ -36,6 +36,22 @@ sealed interface Screen {
 
     /** 特别感谢 */
     data object Thanks : Screen
+
+    // ---------------- 场景（v1.13） ----------------
+    /** 酒馆：角色卡列表 */
+    data object TavernHome : Screen
+
+    /** 写作：作品设定列表 */
+    data object WritingHome : Screen
+
+    /** 角色扮演 / 写作的对话页（场景由 Conversation.scene 决定） */
+    data object RoleplayChat : Screen
+
+    /** 卡编辑：kind = tavern / writing，cardId 为空表示新建 */
+    data class CardEdit(val kind: String, val cardId: String) : Screen
+
+    /** 长期记忆文档的只读预览 */
+    data class MemoryDoc(val cardId: String) : Screen
 }
 
 /**

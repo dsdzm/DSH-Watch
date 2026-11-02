@@ -168,8 +168,14 @@ data class AppSettings(
      * 但用户要的是中文。留一个显式出口，比去猜 ROM 的行为稳。
      */
     val appLanguage: String = "system",
-    /** 0.85 / 1.0 / 1.15，手表屏小，默认略缩一号 */
-    val fontScale: Float = 0.92f,
+    /**
+     * 界面字号倍率。滑块范围 0.85 ~ 1.30（0.05 一档），默认 1.0（标准）。
+     *
+     * v1.13 之前默认 0.92，且设置页用三格分段条选择 —— 0.92 落在"小"和"标准"
+     * 中间，用户看到滑块停在"标准"上、字却明显偏小，反馈为「滑块选不到标准大小」。
+     * 现在改成连续滑块、默认就是 1.0，所见即所得。
+     */
+    val fontScale: Float = 1.0f,
     val perfMode: PerfMode = PerfMode.AUTO,
     /** 覆盖性能档的渲染条数，0 = 跟随性能档 */
     val maxRenderedMessagesOverride: Int = 0,
@@ -203,6 +209,28 @@ data class AppSettings(
 
     /** 对话页布局 id，见 [ChatLayouts] */
     val chatLayout: String = ChatLayouts.BUBBLE,
+
+    /**
+     * 用户的主要使用场景：`coding` / `tavern` / `writing`。
+     *
+     * 引导页会让用户选一次，决定「进 App 落到哪个模式的界面」。
+     * 它只是**默认落点**，不影响已有会话的场景（那是会话自己的属性）。
+     */
+    val useScene: String = "coding",
+
+    /**
+     * 上次启动时看到的版本号（如 "1.12"）。
+     *
+     * 只用来判断「这条一次性说明还要不要再弹」。空串 = 从没记录过，
+     * 也就是从更老的版本升上来的用户 —— 该看到的说明都该看到。
+     */
+    val lastSeenVersion: String = "",
+
+    /** 上次用过的角色卡 / 写作卡，下次进对应场景直接续上 */
+    val lastTavernCardId: String = "",
+    val lastWritingCardId: String = "",
+    /** 酒馆与写作里是否显示思维链与工具调用（默认关闭：用户要的是"只有对话"） */
+    val roleplayShowReasoning: Boolean = false,
 
     /**
      * 主题预设 id。

@@ -110,6 +110,16 @@ class ChatEngine(
     private val workspaceRoot: () -> String = { "" },
     /** ask_user 工具与界面之间的通道 */
     private val promptChannel: com.dshwatch.domain.agent.UserPromptChannel? = null,
+    /**
+     * 角色扮演 / 写作场景下取卡的通道。
+     *
+     * 用 lambda 而不是直接持有 store：ChatEngine 在单测里被大量构造，
+     * 而单测既不关心卡库、也不该为了构造引擎去准备一套目录。
+     * 返回 null 时按「没有卡」处理，退化成普通对话。
+     */
+    private val roleCard: (suspend (String) -> com.dshwatch.domain.roleplay.RoleCard?)? = null,
+    /** 长期记忆文档（空实现即可，默认不读不写） */
+    private val memoryReader: (suspend (String) -> String)? = null,
     private val json: Json,
 ) {
 
@@ -130,10 +140,81 @@ class ChatEngine(
      */
     private var droppedPrefix: List<ChatMessage> = emptyList()
 
+    /**
+     * 长期记忆压缩后，发给模型的上下文从这里开始。
+     *
+     * 与 [droppedPrefix] 不是一回事：那个是「界面渲染窗口」的裁剪（数据还在磁盘上），
+     * 这个是「发给模型的历史」的裁剪（数据还在会话文件里、用户照样看得见，
+     * 只是不再每轮重复发给模型，改由记忆文档承载）。
+     *
+     * 持久化在 `Conversation.tavernTurn`，所以关掉 App 再进来不会失效 ——
+     * 否则每次冷启动都会把已经压过的几万字又发一遍，记忆等于白做。
+     */
+    private var contextStart: Int = 0
+
     /** 落盘入口：一律写完整历史，而不是被裁剪过的渲染窗口 */
     private suspend fun persist(conv: Conversation, ui: List<ChatMessage> = _messages.value) {
         val full = if (droppedPrefix.isEmpty()) ui else droppedPrefix + ui
         store.save(StoredConversation(conv, full))
+    }
+
+    // ---------------- 长期记忆（角色扮演 / 写作） ----------------
+
+    /** 完整消息（渲染窗口 + 被裁剪的前缀），供压缩器取原文 */
+    fun snapshotMessages(): List<ChatMessage> =
+        if (droppedPrefix.isEmpty()) _messages.value else droppedPrefix + _messages.value
+
+    /** 当前发给模型的历史起点（下标，相对于 [snapshotMessages]） */
+    fun contextStart(): Int = contextStart.coerceIn(0, snapshotMessages().size)
+
+    /**
+     * 把上下文切到「当前末尾」，并落盘。
+     *
+     * 只在压缩成功后调用。切完之后这一轮之前的内容不再发给模型，
+     * 记忆文档负责在系统提示里补上它。
+     */
+    suspend fun markContextCut() {
+        val size = snapshotMessages().size
+        contextStart = size
+        val conv = _conversation.value ?: return
+        val updated = conv.copy(tavernTurn = size)
+        _conversation.value = updated
+        runCatching { persist(updated) }
+            .onFailure { Logx.e(TAG, "上下文压缩落盘失败", it) }
+    }
+
+    /**
+     * 一次性摘要请求。
+     *
+     * 复用同一条后端通道，但**不带工具、不落盘、不进历史** —— 它就是一次
+     * 普通的 chat 请求，拿回纯文本。单开一条只会让取消/超时逻辑多一份。
+     */
+    suspend fun probe(req: ResponseProbe): String {
+        val settings = settingsRepo.current()
+        val provider = settings.activeProvider ?: return ""
+        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        if (model.isBlank()) return ""
+        val request = ChatRequest(
+            provider = provider,
+            baseUrl = provider.normalizedBaseUrl(),
+            apiKey = keyStore.getApiKey(provider.id).orEmpty(),
+            serverToken = keyStore.getServerToken(provider.id).orEmpty(),
+            model = model,
+            systemPrompt = req.systemPrompt,
+            history = listOf(ChatTurn(role = "user", content = req.userText)),
+            temperature = req.temperature,
+            topP = provider.topP,
+            maxTokens = req.maxTokens,
+            stream = false,
+            reasoningEffort = com.dshwatch.domain.model.ReasoningEffort.DEFAULT,
+            usageInStream = false,
+            tools = emptyList(),
+        )
+        val sb = StringBuilder()
+        backends.of(provider.type).streamChat(request).collect { ev ->
+            if (ev is ChatEvent.Text) sb.append(ev.delta)
+        }
+        return sb.toString()
     }
 
     private val _live = MutableStateFlow(LiveDelta())
@@ -204,12 +285,20 @@ class ChatEngine(
             droppedPrefix = emptyList()
             _messages.value = sc.messages
         }
+        // 记忆压缩点从会话里恢复：冷启动后不能把压过的历史再发一遍
+        contextStart = sc.meta.tavernTurn.coerceIn(0, sc.messages.size)
     }
 
+    /** 记忆压缩点（相对完整消息的下标），给界面显示"从第几条之后开始记" */
+    fun contextCut(): Int = contextStart
+
     /** 供 UI 使用：先停掉正在跑的生成，再开一个新会话 */
-    suspend fun newConversation(settings: AppSettings): Conversation {
+    suspend fun newConversation(
+        settings: AppSettings,
+        scene: String = com.dshwatch.domain.roleplay.Scenes.CODING,
+    ): Conversation {
         cancelRunning(silent = true)
-        return startNew(settings)
+        return startNew(settings, scene = scene)
     }
 
     /**
@@ -220,12 +309,28 @@ class ChatEngine(
      * 一旦取消就会把自己杀掉——表现为「全新安装后第一条消息点发送毫无反应」。
      * 这个 bug 真实存在过，删除前请先确认 [runSend] 的调用链。
      */
-    suspend fun startNew(settings: AppSettings): Conversation {
+    /**
+     * 创建一个新会话。
+     *
+     * [scene] / [roleCardId]：角色扮演与写作场景要把「这张卡」钉在会话上，
+     * 之后每次发消息都靠它重建系统提示。编程场景两者都留空。
+     * 用带默认值的追加参数，是为了不惊动现有的 15 处调用点与单测。
+     */
+    suspend fun startNew(
+        settings: AppSettings,
+        scene: String = com.dshwatch.domain.roleplay.Scenes.CODING,
+        roleCardId: String = "",
+        title: String = "",
+    ): Conversation {
         val p = settings.activeProvider
         val conv = ConversationStore.newConversation(
             providerId = p?.id.orEmpty(),
             model = p?.defaultModel.orEmpty(),
             presetId = p?.presetId ?: settings.activePresetId,
+        ).copy(
+            scene = com.dshwatch.domain.roleplay.Scenes.of(scene),
+            roleCardId = roleCardId,
+            title = title.ifBlank { "新对话" },
         )
         // ⚠️ 这里**不落盘**。
         //
@@ -238,6 +343,8 @@ class ChatEngine(
         _conversation.value = conv
         _messages.value = emptyList()
         droppedPrefix = emptyList()
+        // 新会话从头开始算上下文，否则上一轮的记忆压缩点会带着走
+        contextStart = 0
         _live.value = LiveDelta()
         _banner.value = null
         // 新会话不继承上一个会话的 shell 放行
@@ -430,6 +537,23 @@ class ChatEngine(
 
         val history = existingHistory ?: _messages.value
 
+        /*
+         * 场景：编程走完整 Agent，酒馆 / 写作走纯对话。
+         *
+         * 用 conv.scene 而不是 settings 里的当前场景 —— 会话的场景是**创建时定死的**，
+         * 用户在别的会话里切到编程，不应该让正在进行的角色扮演突然长出一堆工具。
+         * 场景字段为空的（老会话）一律按编程处理，行为与升级前完全一致。
+         */
+        val scene = com.dshwatch.domain.roleplay.Scenes.of(conv.scene)
+        val isRoleplay = !com.dshwatch.domain.roleplay.Scenes.usesAgent(scene)
+        val card = if (isRoleplay) {
+            conv.roleCardId.takeIf { it.isNotBlank() }?.let { id ->
+                runCatching { roleCard?.invoke(id) }.getOrNull()
+            }
+        } else {
+            null
+        }
+
         // 1) 追加用户消息（重新生成时不追加）
         val newUserMessage: ChatMessage?
         val workingList: List<ChatMessage>
@@ -469,7 +593,8 @@ class ChatEngine(
 
         // 3) Agent 开关
         val registry = toolRegistry()
-        val agentOn = settings.agentMode != AgentMode.OFF &&
+        val agentOn = !isRoleplay &&
+            settings.agentMode != AgentMode.OFF &&
             provider.type == ProviderType.OPENAI_COMPAT &&
             registry.tools.isNotEmpty()
         val toolSpecs = if (agentOn) registry.specs() else emptyList()
@@ -482,10 +607,34 @@ class ChatEngine(
 
         // 插件：常驻段在这里算一次，路由段每轮现算（风神只在首轮插手）
         val plugins = PluginRegistry.from(settings)
-        val baseSystemPrompt = buildSystemPrompt(provider, settings, conv.workDir)
-        val pluginPrompt = runCatching {
-            plugins.promptSuffix(PromptContext(settings = settings, workDir = conv.workDir))
-        }.getOrDefault("")
+        /*
+         * 系统提示的三种来源，从上到下优先级递减：
+         *  1. 角色扮演 / 写作：由卡面拼出来，**每轮重算**（改了卡立刻生效），
+         *     长期记忆与命中的世界书条目也在这里一并注入；
+         *  2. 编程：走原有的 buildSystemPrompt（预设 + 工具使用约定）；
+         *  3. 插件追加段：只有编程场景才生效 —— 风神那类插件是给 Agent 用的，
+         *     塞进角色对话只会污染人设。
+         */
+        val baseSystemPrompt = if (isRoleplay && card != null) {
+            val memory = conv.roleCardId.takeIf { it.isNotBlank() }?.let { id ->
+                runCatching { memoryReader?.invoke(id) }.getOrNull().orEmpty()
+            }.orEmpty()
+            val recent = workingList.takeLast(6).joinToString("\n") { it.content }
+            if (scene == com.dshwatch.domain.roleplay.Scenes.WRITING) {
+                com.dshwatch.domain.roleplay.TavernPrompt.buildWriting(card, memory, recent)
+            } else {
+                com.dshwatch.domain.roleplay.TavernPrompt.build(card, memory, recent)
+            }
+        } else {
+            buildSystemPrompt(provider, settings, conv.workDir)
+        }
+        val pluginPrompt = if (isRoleplay) {
+            ""
+        } else {
+            runCatching {
+                plugins.promptSuffix(PromptContext(settings = settings, workDir = conv.workDir))
+            }.getOrDefault("")
+        }
         val systemPrompt = if (pluginPrompt.isBlank()) {
             baseSystemPrompt
         } else {
@@ -497,7 +646,19 @@ class ChatEngine(
         val apiKey = keyStore.getApiKey(provider.id).orEmpty()
         val token = keyStore.getServerToken(provider.id).orEmpty()
 
-        var turns: List<ChatTurn> = workingList.flatMap { it.toTurns() }
+        /*
+         * 长期记忆压缩之后，只把「压缩点之后」的消息发给模型。
+         *
+         * contextStart 是相对**完整消息**的下标（含被渲染窗口裁掉的前缀），
+         * 而 workingList 末尾可能刚追加了这次的用户消息 —— 所以要把两者对齐：
+         * 前缀长度 + workingList 才是一次请求的真实消息序列。
+         *
+         * 只在角色扮演场景生效：编程场景的历史里混着 tool_calls 组，
+         * 从中间切会破坏配对（TurnSanitizer 虽能补占位，但那是兜底不是常态）。
+         */
+        val fullSeq = if (droppedPrefix.isEmpty()) workingList else droppedPrefix + workingList
+        val fromIndex = if (isRoleplay) contextStart.coerceIn(0, fullSeq.size) else 0
+        var turns: List<ChatTurn> = fullSeq.drop(fromIndex).flatMap { it.toTurns() }
         // 用户在这次任务里拒绝过的工具：后续同一工具不再弹窗，直接静默拒绝
         val deniedTools = mutableSetOf<String>()
         // 已经把「被拒绝」回灌给模型一次；如果再被拒一次就收手，避免无限循环
@@ -532,7 +693,10 @@ class ChatEngine(
             } else {
                 registry.tools.map { it.name }
             }
-            val roster = if (roundNames.isEmpty()) {
+            // 酒馆/写作：一句工具说明都不能出现在提示里。
+            // 模型看到"可用工具"就会想调用，哪怕 tools 数组是空的 ——
+            // 它会在正文里写"我需要先查一下文件"，戏就断了。
+            val roster = if (!agentOn || roundNames.isEmpty()) {
                 ""
             } else {
                 buildString {
@@ -549,15 +713,23 @@ class ChatEngine(
             }
             val roundPrompt = buildString {
                 append(systemPrompt)
-                overlay?.promptSuffix?.takeIf { it.isNotBlank() }?.let { append("\n\n").append(it) }
-                append(roster)
+                if (agentOn) {
+                    overlay?.promptSuffix?.takeIf { it.isNotBlank() }?.let { append("\n\n").append(it) }
+                    append(roster)
+                }
             }
-            val roundSpecs = overlay?.allowedTools?.let { allowed ->
-                val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
-                // 收窄后一个都不剩就别收窄了 —— 否则模型没有任何工具可用，
-                // 表现为"这轮它什么都不做，只回一段文字"
-                narrowed.ifEmpty { toolSpecs }
-            } ?: toolSpecs
+            // agentOn=false 时 toolSpecs 本来就是空的，这里再加一道保险：
+            // overlay（风神）是编程场景的插件，角色扮演场景不该被它插一手。
+            val roundSpecs = if (!agentOn) {
+                emptyList()
+            } else {
+                overlay?.allowedTools?.let { allowed ->
+                    val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
+                    // 收窄后一个都不剩就别收窄了 —— 否则模型没有任何工具可用，
+                    // 表现为"这轮它什么都不做，只回一段文字"
+                    narrowed.ifEmpty { toolSpecs }
+                } ?: toolSpecs
+            }
 
             val placeholder = ChatMessage(
                 id = Ids.new(),

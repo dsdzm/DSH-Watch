@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.DeviceProfile
@@ -61,6 +62,7 @@ import com.dshwatch.ui.components.StepperRow
 import com.dshwatch.ui.components.SwitchRow
 import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.components.WatchSlider
 import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
@@ -398,30 +400,21 @@ private fun AppearanceGroup(
             onCheckedChange = { v -> update { it.copy(dynamicColor = v) } },
         )
         Spacer(Modifier.height(2.dp))
-        Text(
-            text = s.fontSize,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(Modifier.height(4.dp))
-        SegmentedRow(
-            options = listOf(s.fontSmall, s.fontNormal, s.fontLarge),
-            selectedIndex = when {
-                settings.fontScale < 0.96f -> 0
-                settings.fontScale > 1.06f -> 2
-                else -> 1
-            },
-            onSelect = { index ->
-                update {
-                    it.copy(
-                        fontScale = when (index) {
-                            0 -> 0.85f
-                            2 -> 1.12f
-                            else -> 0.92f
-                        }
-                    )
-                }
-            },
+        // 字号：连续滑块 + 实时预览。
+        // 旧版是三格分段条，且"标准"写进去的是 0.92 —— 用户看到停在标准上、
+        // 字却明显偏小，反馈成"滑块选不到标准大小"。现在 1.00 就是标准，
+        // 拖动时上面那行示例文字会跟着变，所见即所得。
+        WatchSlider(
+            value = settings.fontScale,
+            onChange = { v -> update { it.copy(fontScale = v) } },
+            valueRange = 0.85f..1.30f,
+            steps = 8,  // 0.05 一档：0.85, 0.90 ... 1.30
+            label = s.fontSize,
+            sample = s.fontPreview,
+            sampleStyle = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = (15f * settings.fontScale).sp,
+                lineHeight = (21f * settings.fontScale).sp,
+            ),
         )
         Spacer(Modifier.height(6.dp))
         // 语言单独给一个显式开关：跟随系统在部分手表上会判成英文，
@@ -526,11 +519,13 @@ private fun AppearanceGroup(
                 onClick = { update { it.copy(cornerInsetDp = -1) } },
             )
         }
-        SettingRow(
+        // 开关就该长成开关。以前这里是 SettingRow + "✓/—" 文本，
+        // 跟同一页其它 SwitchRow 完全不一个东西，用户得先分辨"这行能不能点"。
+        SwitchRow(
             title = s.showMascot,
             subtitle = s.mascotHint,
-            trailing = if (settings.showMascot) "✓" else "—",
-            onClick = { update { it.copy(showMascot = !it.showMascot) } },
+            checked = settings.showMascot,
+            onCheckedChange = { v -> update { it.copy(showMascot = v) } },
         )
         Spacer(Modifier.height(4.dp))
     }

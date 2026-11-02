@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.ui.theme.WatchDimens
 
 /**
  * 截图风格的「胶囊条目」—— 深灰胶囊、左侧线性图标、文字紧随其后。
@@ -52,8 +53,8 @@ fun PillItem(
     Row(
         modifier = modifier
             .wrapContentWidth(Alignment.Start)
-            .widthIn(min = 132.dp)
-            .heightIn(min = 48.dp)
+            .widthIn(min = 140.dp)
+            .heightIn(min = WatchDimens.touchMin)
             .alpha(if (enabled) 1f else 0.42f)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -65,7 +66,7 @@ fun PillItem(
             imageVector = icon,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(14.dp))
         Text(
@@ -140,14 +141,14 @@ fun WearCardRow(
             .clip(RoundedCornerShape(24.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(22.dp),
         )
         Spacer(Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {

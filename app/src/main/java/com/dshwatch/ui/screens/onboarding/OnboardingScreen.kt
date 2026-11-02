@@ -53,6 +53,13 @@ import com.dshwatch.ui.theme.Accents
 import com.dshwatch.ui.theme.ThemePresets
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.ui.screens.scene.sceneIcon
 
 /**
  * 首次启动的三步引导：屏幕形状 → 对话布局 → 主题。
@@ -87,7 +94,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
     }
 
     fun goNext() {
-        if (step >= 2) {
+        if (step >= 3) {
             update {
                 it.copy(
                     onboardingDone = true,
@@ -124,13 +131,13 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = "${step + 1} / 3",
+            text = "${step + 1} / 4",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
         Spacer(Modifier.height(4.dp))
         PageDots(
-            count = 3,
+            count = 4,
             current = step,
             activeColor = MaterialTheme.colorScheme.primary,
             inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
@@ -149,7 +156,15 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                     selected = settings.screenShape,
                     onPick = { choice -> update { it.copy(screenShape = choice) } },
                 )
-                1 -> LayoutStep(
+                1 -> SceneStep(
+                    selected = settings.useScene,
+                    onPick = { id ->
+                        // 场景顺便影响"进 App 看到什么"，所以立刻落盘；
+                        // 布局保持用户已在第一步之外的选择，不在这里改。
+                        update { it.copy(useScene = id) }
+                    },
+                )
+                2 -> LayoutStep(
                     layouts = layouts,
                     selected = ChatLayouts.of(settings.chatLayout),
                     onPick = { id -> update { it.copy(chatLayout = id) } },
@@ -180,7 +195,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 )
             }
             PrimaryButton(
-                text = if (step >= 2) s.onboardingStart else s.onboardingNext,
+                text = if (step >= 3) s.onboardingStart else s.onboardingNext,
                 modifier = Modifier.weight(if (step > 0) 1.4f else 1f),
                 onClick = ::goNext,
             )
@@ -292,6 +307,79 @@ private fun ShapeCard(
         )
     }
 }
+
+/**
+ * 第二步：主要用这台手表做什么。
+ *
+ * 为什么放在**布局之前**：用户选了"角色扮演"，第三步的布局就有了默认答案
+ * （简化气泡 + 不开鱼眼），不必让他自己再想一遍。这也是这一步存在的唯一理由 ——
+ * 如果它不影响后面任何选择，那它就只是多按一次。
+ */
+@Composable
+private fun SceneStep(selected: String, onPick: (String) -> Unit) {
+    StepHeader("主要用来做什么？", "决定进 App 先进哪个界面，之后随时能在顶栏切换")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SceneChoices.forEach { (id, label, hint) ->
+            val active = Scenes.of(selected) == id
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    .tap(onClick = withHaptic { onPick(id) })
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = sceneIcon(id),
+                    contentDescription = null,
+                    tint = if (active) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (active) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private val SceneChoices = listOf(
+    Triple(Scenes.CODING, "编程 / 干活", "写代码、跑脚本、查资料、做任务"),
+    Triple(Scenes.TAVERN, "角色扮演", "和角色聊天，看剧情怎么走"),
+    Triple(Scenes.WRITING, "写作", "写小说、续写、整理设定"),
+)
 
 @Composable
 private fun LayoutStep(

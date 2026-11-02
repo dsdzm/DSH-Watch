@@ -77,6 +77,7 @@ import com.dshwatch.domain.LiveDelta
 import com.dshwatch.domain.TokenEstimator
 import com.dshwatch.domain.ApprovalDecision
 import com.dshwatch.domain.model.AgentMode
+import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatLayouts
 import com.dshwatch.domain.model.ChatMessage
@@ -134,6 +135,18 @@ fun ChatScreen(
     }
     val engine = container.engine
     val scope = rememberCoroutineScope()
+
+    /*
+     * 场景裁剪。
+     *
+     * 编程场景是"干活"：要看到思维链、工具调用、Token 账、Agent 档位，这些信息都有用。
+     * 酒馆/写作是"聊天"：用户只想知道对方说了什么。思维链和工具卡在这里不是信息，
+     * 是噪音 —— 角色说着话突然弹一段"思考中：我应该保持人设"，戏就断了。
+     *
+     * ChatScreen 是全 App 唯一一处编程场景的入口（酒馆/写作走 RoleplayChatScreen），
+     * 所以这里只按 useScene 一个开关收敛，不用管会话自己带什么 scene。
+     */
+    val codingScene = Scenes.usesAgent(settings.useScene)
 
     val conversation by engine.conversation.collectAsStateWithLifecycle()
     val messages by engine.messages.collectAsStateWithLifecycle()
@@ -259,8 +272,12 @@ fun ChatScreen(
             // 顶栏宽度经不起四个图标，这里只留最常用的三个。
             // 设置从「右滑第二页」改成显式入口：横滑在圆屏上会和系统返回手势打架。
             IconTap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
-            IconTap(Icons.Outlined.Add, s.newChat) {
-                scope.launch { engine.newConversation(settings) }
+            if (codingScene) {
+                IconTap(Icons.Outlined.Add, s.newChat) {
+                    // 显式写死 scene：默认值 "" 在引擎里等同 coding，
+                    // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
+                    scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
+                }
             }
             IconTap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
@@ -277,6 +294,8 @@ fun ChatScreen(
         },
     ) {
         // 顶部信息条：模型 + 上下文占用
+        // 非编程场景只留一行"生成中"提示，模型名/Agent 档/上下文条全部收掉 ——
+        // 圆屏顶栏本来就只有三行位置，塞满就别指望用户读到正文。
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
@@ -284,6 +303,24 @@ fun ChatScreen(
                     .padding(vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (!codingScene) {
+                    Text(
+                        text = conversation?.displayTitle ?: s.appName,
+                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (streaming) {
+                        Text(
+                            text = s.generating,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                if (codingScene) {
                 Chip(
                     text = provider?.let { p ->
                         val model = conversation?.model?.ifBlank { p.defaultModel }.orEmpty()
@@ -315,8 +352,9 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.secondary,
                     )
                 }
+                }
             }
-            if (perf.enableAnimations) {
+            if (perf.enableAnimations && codingScene) {
                 // 上下文条只在动画档显示，省电档下省略这块重绘
                 ContextBar(
                     used = contextTokens,
@@ -373,10 +411,13 @@ fun ChatScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                 }
-                EmptyState(title = s.chatEmptyTitle, hint = s.chatEmptyHint)
+                EmptyState(
+                    title = if (codingScene) s.chatEmptyTitle else s.roleplayEmptyTitle,
+                    hint = if (codingScene) s.chatEmptyHint else s.roleplayEmptyHint,
+                )
                 // 手表上打字是最贵的一步操作。刷 B站 是个固定流程，
                 // 给它一个一句话就能触发的入口，比让用户敲「帮我刷一遍B站」现实得多。
-                if (settings.biliEnabled) {
+                if (settings.biliEnabled && codingScene) {
                     val loggedIn = remember(settings.biliUserName) {
                         container.keyStore.getBiliCookie().orEmpty().isNotBlank()
                     }
@@ -467,6 +508,7 @@ fun ChatScreen(
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
                                 onExportArtifact = exportArtifact,
+                                showWork = codingScene,
                             )
                         } else {
                             // 多步 Agent 回合：连续助手消息合成一条，只显示一条工作流程卡片
@@ -483,10 +525,11 @@ fun ChatScreen(
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
                                 onExportArtifact = exportArtifact,
+                                showWork = codingScene,
                             )
                         }
 
-                        if (settings.showTokenBadge) {
+                        if (settings.showTokenBadge && codingScene) {
                             val usage = msgs.mapNotNull { it.usage }
                                 .fold(TokenUsage.ZERO) { acc, u -> acc + u }
                             if (!usage.isEmpty) {
@@ -896,6 +939,8 @@ private fun MessageItem(
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
     onExportArtifact: (String) -> Unit,
+    // 编程场景才画思维链/工具卡。酒馆/写作场景下这些都是噪音。
+    showWork: Boolean = true,
 ) {
     val s = LocalStrings.current
     val body = live?.text ?: message.content
@@ -944,7 +989,9 @@ private fun MessageItem(
         },
     ) {
         // 思考与工具调用收进同一个「工作块」：执行中展开、完成后折叠成摘要
-        if (!isUser && (message.toolCalls.isNotEmpty() || (settings.showReasoning && reasoning.isNotBlank()))) {
+        if (showWork && !isUser &&
+            (message.toolCalls.isNotEmpty() || (settings.showReasoning && reasoning.isNotBlank()))
+        ) {
             AgentWorkBlock(
                 blockKey = message.id,
                 calls = message.toolCalls,
@@ -1030,6 +1077,7 @@ private fun AgentTurnItem(
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
     onExportArtifact: (String) -> Unit,
+    showWork: Boolean = true,
 ) {
     val s = LocalStrings.current
     val last = messages.last()
@@ -1079,16 +1127,25 @@ private fun AgentTurnItem(
             }
         },
     ) {
-        AgentWorkBlock(
-            blockKey = messages.first().id,
-            calls = calls,
-            reasoning = reasoning,
-            isStreaming = isStreaming,
-            showReasoning = settings.showReasoning,
-            sizeOf = sizeOf,
-            onOpenArtifact = onOpenArtifact,
-            onExportArtifact = onExportArtifact,
-        )
+        if (showWork) {
+            AgentWorkBlock(
+                blockKey = messages.first().id,
+                calls = calls,
+                reasoning = reasoning,
+                isStreaming = isStreaming,
+                showReasoning = settings.showReasoning,
+                sizeOf = sizeOf,
+                onOpenArtifact = onOpenArtifact,
+                onExportArtifact = onExportArtifact,
+            )
+        } else {
+            // 非编程场景：多步回合也只把最后那段正文当回答，
+            // 中间步骤的"我先看看……"不展示 —— 那是过程，不是结果。
+            val plain = messages.lastOrNull {
+                it.content.isNotBlank() && it.status != MessageStatus.PENDING
+            }?.content.orEmpty()
+            if (plain.isNotBlank()) MarkdownText(text = plain)
+        }
 
         if (answer.isNotBlank()) {
             Spacer(Modifier.height(6.dp))

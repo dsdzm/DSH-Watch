@@ -51,17 +51,29 @@ object WatchDimens {
     val gapM: Dp = 8.dp
     val gapL: Dp = 12.dp
 
-    val topBarHeight: Dp = 38.dp
-    val bottomBarHeight: Dp = 46.dp
+    /*
+     * v1.13 整体放大一档。
+     *
+     * 起因是用户反馈「按键、文字都太小，不适合手表操作」。原来 34dp 的图标按钮
+     * 和 40dp 的行高，在 410×502 的屏上大致相当于手机上的 32dp —— 手指按下去
+     * 要瞄，转表冠时焦点框也几乎看不见。
+     *
+     * 尺寸按 Wear OS Material 3 的建议值对齐（按钮 48dp、列表项 48dp、图标 24dp）。
+     * 代价是每屏能放的内容少了一行左右，对"看一眼就走"的手表场景反而更合适。
+     */
+    val topBarHeight: Dp = 48.dp
+    val bottomBarHeight: Dp = 56.dp
 
-    val touchMin: Dp = 40.dp
-    val iconButton: Dp = 34.dp
-    val buttonHeight: Dp = 38.dp
+    /** Material 3 建议的最小可点区域。所有可点元素都不低于它 */
+    val touchMin: Dp = 48.dp
+    val iconButton: Dp = 44.dp
+    /** 主按钮高度：够大、但仍能在圆屏底栏里留出左右切角空间 */
+    val buttonHeight: Dp = 48.dp
 
     // 圆角整体调大一档：手表屏幕小、信息密度高，圆一点更松弛，也和大 R 角屏幕更协调
-    val cardRadius: Dp = 18.dp
+    val cardRadius: Dp = 20.dp
     val bubbleRadius: Dp = 16.dp
-    val chipHeight: Dp = 26.dp
+    val chipHeight: Dp = 32.dp
 
     val hairline: Dp = 1.dp
 
@@ -79,7 +91,7 @@ fun DshWatchTheme(
     dynamicColor: Boolean = true,
     themePreset: String = "oled",
     accentColor: String = "blue",
-    fontScale: Float = 0.92f,
+    fontScale: Float = 1.0f,
     appLanguage: String = AppLanguage.SYSTEM,
     perf: PerfProfile = PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID),
     profile: DeviceProfile = DeviceProfileDefaults.fallback,
