@@ -24,6 +24,15 @@ val withPython: Boolean = providers.gradleProperty("withPython")
     .map { it.equals("true", ignoreCase = true) }
     .getOrElse(false)
 
+/**
+ * 可选的 ABI 过滤：-Pabi=armeabi-v7a 出 32 位包，-Pabi=arm64-v8a 出 64 位包。
+ * 不传时保持原行为 —— full 默认 arm64-v8a，lite 不限制（仍然通用）。
+ */
+val targetAbi: String? = providers.gradleProperty("abi")
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+    .orNull
+
 if (withPython) {
     apply(plugin = "com.chaquo.python")
 }
@@ -59,10 +68,12 @@ android {
         // 只保留中英资源，减小安装包体积（手表存储紧张）
         resourceConfigurations += listOf("zh", "en")
 
+        // libpython 是原生库，必须指定 ABI；lite 带 androidx 的 .so，也可以用 -Pabi 裁成单 ABI。
+        // 不传 -Pabi 时：full 默认 arm64-v8a，lite 保持通用（不限制）。
         if (withPython) {
-            // libpython 是原生库，必须指定 ABI。
-            // 手表基本全是 arm64-v8a；armeabi-v7a 只支持 Python ≤3.11、体积多几 MB，收益为零，不做。
-            ndk { abiFilters += "arm64-v8a" }
+            ndk { abiFilters += (targetAbi ?: "arm64-v8a") }
+        } else if (targetAbi != null) {
+            ndk { abiFilters += targetAbi }
         }
     }
 
