@@ -38,6 +38,7 @@ import com.dshwatch.domain.roleplay.CardPlugin
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.M3Switch
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
 import com.dshwatch.ui.components.WatchGhostButton
@@ -518,7 +519,9 @@ private fun SwitchLine(
                 )
             }
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        // 统一走 M3Switch：玻璃主题下它会自动换成 GlassSwitch，
+        // 不再是一块 M3 纯色塑料贴在玻璃卡片上
+        M3Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

@@ -79,6 +79,14 @@ tools/                       check_python_harness.py（11 项 Python 验收）�
 
 ## 五、构建与测试
 
+> **给作者的包一律是 release，不给 debug。**（2026-11-03 明确要求）
+>
+> 原因不只是体积：debug 包约 **74 MB**，release 约 **8 MB**，差 9 倍 ——
+> 手表上装 74 MB 的包既占空间又慢。另外 debug 的 `applicationIdSuffix = ".debug"`
+> 会让它变成**另一个 App**（`com.dshwatch.debug`），覆盖安装会失败、数据也不通。
+>
+> 自查一条：交付前 `ls -lh` 看体积，8 MB 量级才是对的；70 MB 一定是拿错包了。
+
 > **v1.12 起没有 lite / full 两个包了。** 本地 Python 引擎（Chaquopy）整个移除，
 > 安装包只剩一个、约 8 MB。原 `-PwithPython=true` 参数已不存在，传了会被忽略。
 > 需要按架构裁剪时用 `-Pabi`（见下）。
@@ -86,7 +94,7 @@ tools/                       check_python_harness.py（11 项 Python 验收）�
 ```bash
 export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 
-# 全量单测（647 用例）
+# 全量单测（664 用例）
 ./gradlew :app:testDebugUnitTest --rerun
 
 # release（约 8 MB，通用包：v7a / v8a / x86 / x86_64 全含）
@@ -105,6 +113,69 @@ $ANDROID_HOME/build-tools/35.0.0/aapt2 dump badging <apk> | head -1
 ```
 
 输出路径只有一份，连续打不同 ABI 时**构建完立刻改名归档**，否则会被下一次覆盖。
+
+### 版本号节奏（硬约定）
+
+**不盲目升版本号。** 一轮迭代里改十次、打十个包，版本号都还是同一个 ——
+只有「这一摊功能确实做稳了、要交给用户长期用」时才 `+1`。
+
+原因很实际：
+
+- 用户是覆盖安装（同证书），**versionCode 不变也能装**，升了只是把「同一个东西」
+  在系统里记成两个版本，以后排查时反而要多问一句「你装的是哪一版」
+- 版本号一旦升上去就回不来：用户装过 24，再给 23 只能卸载重装，数据丢了
+- 「改一次升一次」会让 CHANGELOG 变成一堆 `1.15.1 / 1.15.2`，读起来没人分得清哪版好
+
+所以现在的做法：**同版本号重发**，CHANGELOG 里在原版本条目下加一个
+「崩溃已修（同版本号重发）」这样的子段落，写清楚这一轮修了什么。
+等玻璃质感这摊稳定了，再统一升到 1.16。
+
+判断「稳了」的标准：连续两轮用户反馈里没有「崩溃 / 明显不对」这一类，只有效果微调。
+
+### 崩溃取证（v1.15 起）
+
+release 包开 R8，系统崩溃对话框只给「屡次停止运行」，**拿不到堆栈**。
+所以 v1.15 加了三个东西，排查崩溃时按顺序用：
+
+| 位置 | 内容 |
+|---|---|
+| `app/build/outputs/mapping/release/mapping.txt` | R8 映射表，拿到混淆后的堆栈要先用它反混淆（`retrace`） |
+| App 里「上次崩溃了」弹窗 | 崩溃后重新打开就能看到堆栈，一键复制 |
+| 设置 → 诊断 → 底部 | 「上次崩溃的报告」+「最近的问题」（最近 8 条 warn/error） |
+
+`mapping.txt` 每次 `assembleRelease` 都会重新生成，**它和 APK 是一对**：
+换了包就得用同一轮的 mapping，旧的对不上。
+
+实在拿不到报告时，退回二分法：把 `isMinifyEnabled` 临时改成 `false` 再打一版，
+崩溃消失 → 是 R8 规则缺；仍崩 → 是代码逻辑。一次就能把问题面切一半。
+
+### 反混淆怎么跑
+
+```bash
+/opt/android-sdk/cmdline-tools/latest/bin/retrace \
+  app/build/outputs/mapping/release/mapping.txt crash.txt
+```
+
+v1.15 那次崩溃就是这么定位的：`CheckScrollableContainerConstraints` +
+`AndroidDialog$DialogLayout` 两条，直接指向「弹窗里套了滚动容器」。
+
+### 踩过的坑：GlassDialog 的 content 里不能再放滚动容器
+
+`GlassDialog` 默认会在正文外包一层 `heightIn(max) + verticalScroll`。
+滚动容器量高度时传下去的是**无限约束**，所以 content 里如果还有
+`verticalScroll` / `wearVerticalScroll` / `LazyColumn`，里层就会抛：
+
+```
+IllegalStateException: Vertically scrollable component was measured with an
+infinity maximum height constraints, which is disallowed.
+```
+
+**规则：content 自己滚，就传 `scrollable = false`，并给内容 `heightIn(max = ...)`。**
+
+JVM 单测查不出这类问题（没有测量阶段），所以补了一条静态规则测试
+`app/src/test/java/com/dshwatch/ui/components/GlassDialogScrollRuleTest.kt`：
+扫所有 `GlassDialog(` 调用点，调用段内有滚动修饰符却没有 `scrollable = false` 就红。
+加新弹窗前跑一遍全量单测即可。
 
 ---
 

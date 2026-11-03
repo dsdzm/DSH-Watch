@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.data.settings.SecureKeyStore
@@ -180,6 +181,33 @@ fun DiagnosticsScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
+            }
+
+            /*
+             * 崩溃报告。
+             *
+             * 放在诊断页而不是别处：用户「某页崩了」时，最自然的动作是去设置里
+             * 找出口，而诊断页正是那个「把问题交出去」的地方。
+             * 这里同时给出两个入口 ——
+             *   · 本进程留下的最后一次未捕获异常（跨进程存活的那份文件）
+             *   · 最近几条 warn/error（很多问题不崩，只是失败）
+             */
+            Spacer(Modifier.height(4.dp))
+            com.dshwatch.ui.components.CrashReportCard(title = "上次崩溃的报告")
+
+            val recent = remember { com.dshwatch.core.Logx.recent() }
+            if (recent.isNotEmpty()) {
+                SectionHeader("最近的问题")
+                SettingCard {
+                    recent.asReversed().take(8).forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(10.dp))
         }

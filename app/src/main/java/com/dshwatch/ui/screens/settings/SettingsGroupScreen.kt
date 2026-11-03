@@ -48,6 +48,7 @@ import com.dshwatch.domain.bili.BiliMode
 import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTones
 import com.dshwatch.domain.plugin.PluginRegistry
+import com.dshwatch.domain.model.Appearances
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatLayouts
 import com.dshwatch.domain.model.PerfMode
@@ -63,6 +64,8 @@ import com.dshwatch.ui.components.SwitchRow
 import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.WatchSlider
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
 import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
@@ -336,6 +339,7 @@ private fun AppearanceGroup(
     s: AppStrings,
 ) {
     var editingPreset by remember { mutableStateOf(false) }
+    var editingAppearance by remember { mutableStateOf(false) }
     var editingAccent by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
     val dark = when (settings.themeMode) {
@@ -378,6 +382,19 @@ private fun AppearanceGroup(
             },
         )
         Spacer(Modifier.height(2.dp))
+        // 外观风格排在配色之前：先定材质（纯色 / 玻璃），再在它上面选颜色。
+        // 反过来会出现「挑完樱花，再问要不要玻璃」，像是把刚选的颜色弄丢了。
+        SettingRow(
+            title = "外观风格",
+            subtitle = if (Appearances.isGlass(settings.appearance)) {
+                "质感玻璃 · 卡片半透明，能透出底色"
+            } else {
+                "M3E 纯色 · 卡片不透明"
+            },
+            trailing = if (Appearances.isGlass(settings.appearance)) "玻璃 ›" else "M3E ›",
+            showDivider = true,
+            onClick = { editingAppearance = true },
+        )
         // 预设与强调色正交：预设定底色层级，强调色定主色。
         // 选任一项都会关掉动态取色 —— 不然用户挑的颜色会被系统色直接盖掉。
         SettingRow(
@@ -540,11 +557,43 @@ private fun AppearanceGroup(
         )
     }
 
+    if (editingAppearance) {
+        GlassDialog(
+            onDismissRequest = { editingAppearance = false },
+            title = "外观风格",
+            maxContentHeight = 220,
+            content = {
+                PickRow(
+                    title = "M3E 纯色 · 卡片不透明",
+                    selected = !Appearances.isGlass(settings.appearance),
+                    onClick = {
+                        update { it.copy(appearance = Appearances.M3E) }
+                        editingAppearance = false
+                    },
+                )
+                PickRow(
+                    title = "质感玻璃 · 半透明，透出底色",
+                    selected = Appearances.isGlass(settings.appearance),
+                    onClick = {
+                        // 选玻璃时关掉动态取色：动态色板会把底色晕替换掉，
+                        // 玻璃会变成一块没有底色的灰片（见 DshWatchTheme）
+                        update { it.copy(appearance = Appearances.GLASS, dynamicColor = false) }
+                        editingAppearance = false
+                    },
+                )
+            },
+            buttons = { GlassDialogButton(s.close, onClick = { editingAppearance = false }) },
+        )
+    }
+
     if (editingPreset) {
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingPreset = false },
-            title = { Text(text = s.themePreset, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.themePreset,
+            maxContentHeight = 260,
+            // 内容自带 verticalScroll，这里不能再套一层
+            scrollable = false,
+            content = {
                 Column(
                     modifier = Modifier
                         .heightIn(max = 240.dp)
@@ -574,17 +623,18 @@ private fun AppearanceGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingPreset = false }) { Text(s.close) }
-            },
+            buttons = { GlassDialogButton(s.close, onClick = { editingPreset = false }) },
         )
     }
 
     if (editingAccent) {
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingAccent = false },
-            title = { Text(text = s.accentColor, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.accentColor,
+            maxContentHeight = 260,
+            // 内容自带 verticalScroll，这里不能再套一层
+            scrollable = false,
+            content = {
                 Column(
                     modifier = Modifier
                         .heightIn(max = 240.dp)
@@ -612,17 +662,16 @@ private fun AppearanceGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingAccent = false }) { Text(s.close) }
-            },
+            buttons = { GlassDialogButton(s.close, onClick = { editingAccent = false }) },
         )
     }
 
     if (editingLayout) {
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingLayout = false },
-            title = { Text(text = s.chatLayout, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.chatLayout,
+            maxContentHeight = 260,
+            content = {
                 Column {
                     layouts.forEach { id ->
                         PickRow(
@@ -637,9 +686,7 @@ private fun AppearanceGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingLayout = false }) { Text(s.close) }
-            },
+            buttons = { GlassDialogButton(s.close, onClick = { editingLayout = false }) },
         )
     }
 }
@@ -1319,10 +1366,11 @@ private fun BiliGroup(
             Triple(BiliMode.DM.id, s.biliModeDm, s.biliModeDmHint),
         )
         val current = BiliModes.of(settings).id
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingMode = false },
-            title = { Text(text = s.biliMode, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.biliMode,
+            maxContentHeight = 280,
+            content = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     options.forEach { (id, label, hint) ->
                         val picked = current == id
@@ -1368,8 +1416,8 @@ private fun BiliGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingMode = false }) { Text(s.cancel) }
+            buttons = {
+                GlassDialogButton(s.cancel, onClick = { editingMode = false })
             },
         )
     }
@@ -1381,10 +1429,11 @@ private fun BiliGroup(
             Triple("local", s.biliImageLocal, s.biliImageLocalHint),
             Triple("none", s.biliImageNone, s.biliImageNoneHint),
         )
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingImage = false },
-            title = { Text(text = s.biliImage, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.biliImage,
+            maxContentHeight = 280,
+            content = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     options.forEach { (id, label, hint) ->
                         val picked = settings.biliImage == id
@@ -1433,8 +1482,8 @@ private fun BiliGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingImage = false }) { Text(s.cancel) }
+            buttons = {
+                GlassDialogButton(s.cancel, onClick = { editingImage = false })
             },
         )
     }
@@ -1442,10 +1491,11 @@ private fun BiliGroup(
     if (editingTime) {
         var hour by remember { mutableStateOf(settings.biliAutoHour) }
         var minute by remember { mutableStateOf(settings.biliAutoMinute) }
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingTime = false },
-            title = { Text(text = s.biliAutoTime, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.biliAutoTime,
+            maxContentHeight = 280,
+            content = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = BiliClock.hhmm(hour, minute),
@@ -1480,14 +1530,12 @@ private fun BiliGroup(
                     )
                 }
             },
-            confirmButton = {
-                TextButton(onClick = {
+            buttons = {
+                GlassDialogButton(s.cancel, onClick = { editingTime = false })
+                GlassDialogButton(s.save, primary = true, onClick = {
                     update { it.copy(biliAutoHour = hour, biliAutoMinute = minute) }
                     editingTime = false
-                }) { Text(s.save) }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingTime = false }) { Text(s.cancel) }
+                })
             },
         )
     }
@@ -1528,10 +1576,11 @@ private fun BiliGroup(
             "deadpan" to s.biliToneDeadpan,
             "custom" to s.biliToneCustom,
         )
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { editingTone = false },
-            title = { Text(text = s.biliTone, style = MaterialTheme.typography.titleSmall) },
-            text = {
+            title = s.biliTone,
+            maxContentHeight = 280,
+            content = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     options.forEach { (id, label) ->
                         val picked = settings.biliTone == id
@@ -1565,8 +1614,8 @@ private fun BiliGroup(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { editingTone = false }) { Text(s.cancel) }
+            buttons = {
+                GlassDialogButton(s.cancel, onClick = { editingTone = false })
             },
         )
     }
@@ -1597,25 +1646,21 @@ private fun SimpleEditDialog(
     onDismiss: () -> Unit,
 ) {
     val s = LocalStrings.current
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = title, style = MaterialTheme.typography.titleSmall) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                TextRow(
-                    label = title,
-                    value = value,
-                    onValueChange = onChange,
-                    placeholder = placeholder,
-                    singleLine = false,
-                )
-            }
+        title = title,
+        content = {
+            TextRow(
+                label = title,
+                value = value,
+                onValueChange = onChange,
+                placeholder = placeholder,
+                singleLine = false,
+            )
         },
-        confirmButton = {
-            TextButton(onClick = onConfirm) { Text(s.save) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
+        buttons = {
+            GlassDialogButton(s.cancel, onClick = onDismiss)
+            GlassDialogButton(s.save, primary = true, onClick = onConfirm)
         },
     )
 }

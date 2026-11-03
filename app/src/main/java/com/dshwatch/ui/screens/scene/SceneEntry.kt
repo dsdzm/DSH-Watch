@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.TheaterComedy
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +34,10 @@ import com.dshwatch.ui.components.ChoiceRow
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
+import com.dshwatch.ui.components.GlassDialogRow
+import com.dshwatch.ui.components.glassSurface
 
 /**
  * 场景切换入口。
@@ -58,9 +61,7 @@ fun ScenePill(
 ) {
     Row(
         modifier = modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .tap(onClick = withHaptic(onClick))
+            .glassSurface(shape = CircleShape, onClick = withHaptic(onClick))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -88,28 +89,21 @@ fun ScenePickerDialog(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text("切换模式", style = MaterialTheme.typography.titleSmall) },
-        text = {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Column {
-                    SectionHeader("选一个场景")
-                    Scenes.all.forEach { id ->
-                        ChoiceRow(
-                            title = Scenes.label(id),
-                            subtitle = Scenes.desc(id),
-                            selected = id == Scenes.of(current),
-                            badge = if (id == Scenes.of(current)) "当前" else null,
-                            onClick = { onPick(id) },
-                        )
-                    }
-                }
+        title = "切换模式",
+        maxContentHeight = 280,
+        content = {
+            Scenes.all.forEach { id ->
+                GlassDialogRow(
+                    title = Scenes.label(id),
+                    subtitle = Scenes.desc(id),
+                    selected = id == Scenes.of(current),
+                    onClick = { onPick(id) },
+                )
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
+        buttons = { GlassDialogButton("取消", onClick = onDismiss) },
     )
 }
 

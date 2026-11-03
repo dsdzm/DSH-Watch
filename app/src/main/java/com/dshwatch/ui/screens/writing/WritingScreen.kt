@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.core.AppContainer
+import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.roleplay.LoreEntry
 import com.dshwatch.domain.roleplay.CardPlugin
@@ -59,6 +61,9 @@ import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.scene.ScenePill
 import com.dshwatch.ui.screens.scene.ScenePickerDialog
 import com.dshwatch.ui.wear.wearVerticalScroll
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
 import kotlinx.coroutines.launch
 
 /**
@@ -83,7 +88,9 @@ fun WritingScreen(
     var importTarget by remember { mutableStateOf<RoleCard?>(null) }
 
     LaunchedEffect(Unit) {
-        cards = runCatching { container.roleCardStore.index(Scenes.WRITING) }.getOrDefault(emptyList())
+        cards = runCatching { container.roleCardStore.index(Scenes.WRITING) }
+            .onFailure { Logx.e("Writing", "读取作品列表失败", it) }
+            .getOrDefault(emptyList())
         loaded = true
     }
 
@@ -185,8 +192,7 @@ private fun WritingCardRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .glassSurface(shape = RoundedCornerShape(20.dp), cornerRadius = 20.dp)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -255,13 +261,18 @@ private fun ImportDialog(
     var text by remember { mutableStateOf("") }
     var pluginName by remember { mutableStateOf("") }
 
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (mode == 0) "导入世界书" else "导入插件", style = MaterialTheme.typography.titleSmall) },
-        text = {
+        title = if (mode == 0) "导入世界书" else "导入插件",
+        maxContentHeight = 300,
+        // 内容自己滚（下面有 wearVerticalScroll）。不关掉这一层的话，
+        // 里层滚动容器会拿到无限高，一打开弹窗就 IllegalStateException
+        scrollable = false,
+        content = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 300.dp)
                     .wearVerticalScroll(rememberScrollState()),
             ) {
                 SectionHeader("类型")
@@ -308,15 +319,15 @@ private fun ImportDialog(
                 )
             }
         },
-        confirmButton = {
+        buttons = {
+            GlassDialogButton("取消", onClick = onDismiss)
             TextButton(
                 enabled = text.isNotBlank(),
                 onClick = {
                     if (mode == 0) onImportWorld(text) else onImportPlugin(pluginName.ifBlank { "导入的插件" }, text)
                 },
-            ) { Text("导入") }
+            ) { Text("导入", color = MaterialTheme.colorScheme.primary) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 

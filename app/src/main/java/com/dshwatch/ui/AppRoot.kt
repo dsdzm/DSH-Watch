@@ -91,8 +91,18 @@ fun AppRoot(
     // 对话页是唯一的根屏，其余页面一律 push 进来、用系统返回退出。
     // 1.10 之前这里是「对话 / 设置」两页横滑；在 Wear 上那条横滑手势会和
     // 系统的边缘返回打架（圆屏边缘右滑 = 返回上一级），所以改成标准的层级导航。
-    Box(modifier = Modifier.fillMaxSize()) {
-    when (val screen = nav.current) {
+    // 页面切换**不做任何转场动画**。
+    //
+    // v1.15 试过一版「新页从下方弹入、旧页缩小淡出」，在手表上直接崩 —— 而且就算不崩，
+    // 手表屏幕一共就 200dp 宽，把两页同时放进组合再互相错位、缩放，
+    // 换来的不是「灵动」，是「慢半拍」。这一版整段撤掉，页面直接换。
+    //
+    // 但**弹窗要糊背景**这件事必须在这一层做：Dialog 画在另一个 Window 里，
+    // 它模糊不了自己背后那个 Activity。所以整块页面交给 GlassBackdropHost，
+    // 由它读一个闸（GlassDialog 打开时置 1），把页面子树整体糊掉。详见 Backdrop.kt。
+    val screen = nav.current
+    com.dshwatch.ui.components.GlassBackdropHost {
+    when (screen) {
         // 根屏按「用户的主要使用场景」分发：编程进工作台，酒馆/写作进各自的列表。
         // 这样用户选了"角色扮演"，进 App 直接看到角色，而不是先看一张编程界面。
         Screen.Chat -> when (Scenes.of(settings.useScene)) {
@@ -163,6 +173,12 @@ fun AppRoot(
         )
     }
 
+    // 浮层单独一层 Box：页面自己没有变换，但浮层仍然要和页面的布局分开，
+    // 否则 CrashNotice 会被页面的 padding / 滚动根卷进去
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 崩溃报告：上次进程被未捕获异常带走时，这次启动把报告摆到用户面前
+        com.dshwatch.ui.components.CrashNotice()
+
         // 顶部浮层：只盖住上沿，不挡下面的滑动与返回手势
         if (showPythonNotice) {
             Box(
@@ -187,6 +203,7 @@ fun AppRoot(
                 )
             }
         }
+    }
     }
 }
 

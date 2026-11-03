@@ -62,7 +62,9 @@ import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.scene.ScenePill
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.components.glassSurface
 import kotlinx.coroutines.launch
+import com.dshwatch.ui.theme.LocalGlass
 
 /**
  * 角色扮演 / 写作的对话页。
@@ -180,8 +182,9 @@ fun RoleplayChatScreen(
             Column(
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (card != null) {
-                    com.dshwatch.ui.screens.tavern.CardDetailSheet(card = card!!, isWriting = isWriting)
+                val shown = card
+                if (shown != null) {
+                    com.dshwatch.ui.screens.tavern.CardDetailSheet(card = shown, isWriting = isWriting)
                 }
                 Spacer(Modifier.height(8.dp))
                 WatchGhostButton(text = "编辑设定", onClick = {
@@ -304,13 +307,23 @@ private fun RoleplayMessage(
                     .fillMaxWidth(if (isUser) 0.88f else 1f)
                     .clip(RoundedCornerShape(18.dp))
                     .then(
-                        if (isWriting) Modifier
-                        else Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(
-                                if (isUser) MaterialTheme.colorScheme.surfaceContainerHigh
-                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                        when {
+                            isWriting -> Modifier
+                            LocalGlass.current && isUser -> Modifier.glassSurface(
+                                shape = RoundedCornerShape(18.dp), cornerRadius = 18.dp,
                             )
+                            LocalGlass.current -> Modifier.glassSurface(
+                                shape = RoundedCornerShape(18.dp),
+                                cornerRadius = 18.dp,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            else -> Modifier
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isUser) MaterialTheme.colorScheme.surfaceContainerHigh
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                )
+                        }
                     )
                     .padding(horizontal = 14.dp, vertical = 11.dp),
             ) {
@@ -381,8 +394,11 @@ private fun RoleplayInputBar(
             .padding(horizontal = 12.dp)
             .fillMaxWidth()
             .height(56.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .glassSurface(
+                shape = RoundedCornerShape(20.dp),
+                cornerRadius = 20.dp,
+                tint = MaterialTheme.colorScheme.surfaceContainerLow,
+            )
             .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -391,9 +407,12 @@ private fun RoleplayInputBar(
             modifier = Modifier
                 .weight(1f)
                 .height(44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .tap(onClick = withHaptic(onOpenInput)),
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    cornerRadius = 14.dp,
+                    tint = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = withHaptic(onOpenInput),
+                ),
             contentAlignment = Alignment.CenterStart,
         ) {
             Text(
@@ -408,12 +427,17 @@ private fun RoleplayInputBar(
         Box(
             modifier = Modifier
                 .size(44.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(
-                    if (streaming) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.primary
-                )
-                .tap(onClick = withHaptic(if (streaming) onStop else onSend)),
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    cornerRadius = 14.dp,
+                    tint = if (streaming) {
+                        MaterialTheme.colorScheme.errorContainer
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    onClick = withHaptic(if (streaming) onStop else onSend),
+                    solid = true,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

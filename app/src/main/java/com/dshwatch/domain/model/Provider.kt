@@ -240,6 +240,32 @@ data class AppSettings(
      */
     val themePreset: String = "oled",
 
+    /**
+     * 外观风格：M3E 纯色 还是 质感玻璃。
+     *
+     * ## 为什么单独一个字段，而不是继续当主题预设
+     *
+     * 以前 `themePreset = "glass"` 是七套预设里的一套，和「深海」「樱花」平级。
+     * 这是错的：预设是**换颜色**，玻璃是**换材质** —— 两者不是同一个维度。
+     * 把材质塞进颜色的列表里，会出现「深海蓝 + 玻璃」这种本该存在、
+     * 却在 UI 上无从选起的组合，而「玻璃 + 强调色」又看着像别的预设。
+     *
+     * 现在拆成两层：
+     *
+     * | 字段 | 决定 | 取值 |
+     * |---|---|---|
+     * | [appearance] | 材质：纯色还是玻璃 | [Appearances.M3E] / [Appearances.GLASS] |
+     * | [themePreset] | 颜色：哪套色板 | oled / ocean / sakura / … |
+     * | [accentColor] | 主色 | blue / teal / violet / … |
+     *
+     * 玻璃风格下预设仍然生效 —— 它决定底色晕的主色与副色，所以「玻璃 + 樱花」
+     * 是粉调玻璃，「玻璃 + 深海」是蓝调玻璃。强调色照样可以换。
+     *
+     * 默认 M3E：绝大多数用户第一次打开时不该被一个不熟悉的材质接管界面。
+     * 引导页会问一次，用户选了什么就是什么。
+     */
+    val appearance: String = Appearances.M3E,
+
     /** 强调色 id：在预设色板之上换主色，不改背景与正文层次 */
     val accentColor: String = "blue",
 

@@ -57,11 +57,15 @@
 -dontwarn org.mozilla.classfile.**
 
 # ---------- 关闭日志（release 移除 android.util.Log）----------
+# 只砍 d/i 这类纯调试输出。
+#
+# w/e 必须保留：从 v1.15 起 Logx 的 warn/error 同时进一个内存环形缓冲，
+# 崩溃时由 CrashLog 一起写进报告 —— 这几行往往是定位问题的唯一线索
+# （「角色卡解析失败」「记忆文档读不出来」都只在这里出现）。
+# 它们不在热路径上，正常使用一条都不会触发。
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);
     public static int d(...);
     public static int i(...);
-    public static int w(...);
-    public static int e(...);
 }

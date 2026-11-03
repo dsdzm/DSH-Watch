@@ -39,6 +39,8 @@ import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.MonoSmall
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
 
 /**
  * Markdown 渲染组件。
@@ -202,8 +204,15 @@ private fun CodeBlock(key: Int, block: MdBlock.Code, onCopyCode: ((String) -> Un
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(9.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .then(
+                if (LocalGlass.current) {
+                    Modifier.glassSurface(shape = RoundedCornerShape(9.dp), cornerRadius = 9.dp)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                },
+            )
             .padding(horizontal = 6.dp, vertical = 5.dp),
     ) {
         Row(
@@ -281,8 +290,15 @@ private fun TableBlock(block: MdBlock.Table, colors: InlineColors) {
     ) {
         Column(
             modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .then(
+                    if (LocalGlass.current) {
+                        Modifier.glassSurface(shape = RoundedCornerShape(6.dp), cornerRadius = 6.dp)
+                    } else {
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    },
+                )
                 .padding(4.dp),
         ) {
             if (block.header.isNotEmpty()) {

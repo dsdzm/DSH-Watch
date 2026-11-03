@@ -52,6 +52,9 @@ import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
+import com.dshwatch.ui.components.GlassDialogRow
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
@@ -59,6 +62,8 @@ import com.dshwatch.util.Fmt
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import java.util.Locale
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -210,9 +215,23 @@ fun ProviderEditScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                            RoundedCornerShape(8.dp),
+                        .then(
+                            if (LocalGlass.current) {
+                                Modifier.glassSurface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    cornerRadius = 8.dp,
+                                    tint = if (resultIsError) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.secondary
+                                    },
+                                )
+                            } else {
+                                Modifier.background(
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    RoundedCornerShape(8.dp),
+                                )
+                            },
                         )
                         .padding(8.dp),
                 )
@@ -506,42 +525,24 @@ fun ProviderEditScreen(
     }
 
     if (showPresetPicker) {
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { showPresetPicker = false },
-            title = { Text(s.preset, style = MaterialTheme.typography.titleSmall) },
-            text = {
-                Column(modifier = Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
-                    PromptPresets.all.forEach { preset ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .tap(onClick = withHaptic {
-                                    draft = draft.copy(presetId = preset.id)
-                                    showPresetPicker = false
-                                })
-                                .padding(vertical = 7.dp),
-                        ) {
-                            Text(
-                                text = preset.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (preset.id == draft.presetId) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                            )
-                            Text(
-                                text = preset.description,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+            title = s.preset,
+            maxContentHeight = 240,
+            content = {
+                PromptPresets.all.forEach { preset ->
+                    GlassDialogRow(
+                        title = preset.name,
+                        subtitle = preset.description,
+                        selected = preset.id == draft.presetId,
+                        onClick = {
+                            draft = draft.copy(presetId = preset.id)
+                            showPresetPicker = false
+                        },
+                    )
                 }
             },
-            confirmButton = { TextButton(onClick = { showPresetPicker = false }) { Text(s.cancel) } },
+            buttons = { GlassDialogButton(s.cancel, onClick = { showPresetPicker = false }) },
         )
     }
 

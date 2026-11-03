@@ -40,6 +40,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.model.Appearances
+import androidx.compose.foundation.layout.heightIn
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatLayouts
 import com.dshwatch.domain.model.ScreenShapes
@@ -61,6 +63,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.screens.scene.sceneIcon
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
 
 /**
  * 首次启动的三步引导：屏幕形状 → 对话布局 → 主题。
@@ -173,6 +179,16 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 else -> ThemeStep(
                     settings = settings,
                     dark = dark,
+                    onPickAppearance = { id ->
+                        // 选风格时顺带关掉动态取色：动态取色会整块替换色板，
+                        // 玻璃的底色晕就没了依据（见 DshWatchTheme 的说明）
+                        update {
+                            it.copy(
+                                appearance = id,
+                                dynamicColor = if (id == Appearances.GLASS) false else it.dynamicColor,
+                            )
+                        }
+                    },
                     onPickPreset = { id ->
                         update { it.copy(themePreset = id, dynamicColor = false) }
                     },
@@ -249,6 +265,8 @@ private fun ShapeCard(
     active: Boolean,
     onClick: () -> Unit,
 ) {
+    val glass = LocalGlass.current
+    val src = remember { MutableInteractionSource() }
     val border = if (active) MaterialTheme.colorScheme.primary else Color.Transparent
     val bg = if (active) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
@@ -257,9 +275,24 @@ private fun ShapeCard(
     }
     Column(
         modifier = modifier
-            .tap(onClick = withHaptic(onClick))
-            .background(bg, RoundedCornerShape(18.dp))
-            .border(1.dp, border, RoundedCornerShape(18.dp))
+            .then(
+                if (glass) {
+                    // 玻璃主题：选中卡染色玻璃，未选中的就是一块中性玻璃
+                    Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(18.dp),
+                            cornerRadius = 18.dp,
+                            tint = if (active) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                            interaction = src,
+                        )
+                        .tap(quiet = true, interaction = src, onClick = withHaptic(onClick))
+                } else {
+                    Modifier
+                        .tap(onClick = withHaptic(onClick))
+                        .background(bg, RoundedCornerShape(18.dp))
+                        .border(1.dp, border, RoundedCornerShape(18.dp))
+                },
+            )
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -322,21 +355,36 @@ private fun SceneStep(selected: String, onPick: (String) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         SceneChoices.forEach { (id, label, hint) ->
             val active = Scenes.of(selected) == id
+            val src = remember(id) { MutableInteractionSource() }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 3.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                    .then(
+                        if (LocalGlass.current) {
+                            Modifier
+                                .glassSurface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    cornerRadius = 16.dp,
+                                    tint = if (active) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                    interaction = src,
+                                )
+                                .tap(quiet = true, interaction = src, onClick = withHaptic { onPick(id) })
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(16.dp),
+                                )
+                                .tap(onClick = withHaptic { onPick(id) })
+                        },
                     )
-                    .border(
-                        width = 1.dp,
-                        color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-                        shape = RoundedCornerShape(16.dp),
-                    )
-                    .tap(onClick = withHaptic { onPick(id) })
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -472,11 +520,30 @@ private fun LayoutThumb(layout: String, tint: Color) {
 private fun ThemeStep(
     settings: AppSettings,
     dark: Boolean,
+    onPickAppearance: (String) -> Unit,
     onPickPreset: (String) -> Unit,
     onPickAccent: (String) -> Unit,
 ) {
     val s = LocalStrings.current
     StepHeader(s.onboardingThemeTitle, s.onboardingThemeHint)
+
+    // ---- 第一步：先选材质，再选颜色 ----
+    //
+    // 顺序是有讲究的：材质决定了「卡片长什么样」，颜色只是在它上面换一套色。
+    // 反过来问（先选颜色）会出现「挑完樱花，下一屏突然问你要不要玻璃」——
+    // 用户会以为是把刚选的颜色弄丢了。
+    AppearanceRow(
+        selected = Appearances.of(settings.appearance),
+        onPick = onPickAppearance,
+    )
+    Spacer(Modifier.height(8.dp))
+
+    Text(
+        text = s.themePreset,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(Modifier.height(4.dp))
 
     ThemePresets.all.forEach { preset ->
         val active = preset.id == settings.themePreset
@@ -574,3 +641,103 @@ private fun StepHeader(title: String, hint: String) {
     )
 }
 
+
+/**
+ * 两种外观风格并排。
+ *
+ * 左边的卡片**当场用该风格画**：M3E 是不透明的容器色，玻璃是半透明 + 描边。
+ * 只给文字说明「质感玻璃」是不够的 —— 用户没法想象，一定会随手选第一个。
+ * 让他看见差别，选择才有意义。
+ */
+@Composable
+private fun AppearanceRow(selected: String, onPick: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        AppearanceCard(
+            modifier = Modifier.weight(1f),
+            id = Appearances.M3E,
+            title = "M3E",
+            hint = "纯色卡片",
+            active = selected == Appearances.M3E,
+            onClick = { onPick(Appearances.M3E) },
+        )
+        AppearanceCard(
+            modifier = Modifier.weight(1f),
+            id = Appearances.GLASS,
+            title = "质感玻璃",
+            hint = "半透明 · 透出底色",
+            active = selected == Appearances.GLASS,
+            onClick = { onPick(Appearances.GLASS) },
+        )
+    }
+}
+
+@Composable
+private fun AppearanceCard(
+    modifier: Modifier = Modifier,
+    id: String,
+    title: String,
+    hint: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val isGlass = id == Appearances.GLASS
+    Column(
+        modifier = modifier
+            .heightIn(min = 62.dp)
+            .background(
+                if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                RoundedCornerShape(14.dp),
+            )
+            .border(
+                width = if (active) 1.5.dp else 1.dp,
+                color = if (active) MaterialTheme.colorScheme.primary
+                else Color.White.copy(alpha = 0.10f),
+                shape = RoundedCornerShape(14.dp),
+            )
+            .tap(onClick = withHaptic(onClick))
+            .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        // 小样：两种风格各画一次自己的「卡片」
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(22.dp)
+                .then(
+                    if (isGlass) {
+                        Modifier
+                            .background(Color.White.copy(alpha = 0.30f), RoundedCornerShape(7.dp))
+                            .border(
+                                1.dp,
+                                Color.White.copy(alpha = 0.55f),
+                                RoundedCornerShape(7.dp),
+                            )
+                    } else {
+                        Modifier.background(
+                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                            RoundedCornerShape(7.dp),
+                        )
+                    },
+                ),
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        Text(
+            text = hint,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
+}

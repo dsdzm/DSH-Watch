@@ -31,7 +31,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.theme.WatchDimens
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
 
 /**
  * 手表上「够大、够统一」的一组基础控件。
@@ -77,9 +80,14 @@ fun WatchButton(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(if (enabled) container else container.copy(alpha = 0.38f))
-            .then(if (enabled) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
+            .glassSurface(
+                shape = RoundedCornerShape(WatchDimens.cardRadius),
+                cornerRadius = WatchDimens.cardRadius,
+                tint = if (enabled) container else container.copy(alpha = 0.38f),
+                enabled = enabled,
+                onClick = withHaptic(onClick),
+                solid = true,
+            )
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -113,17 +121,35 @@ fun WatchGhostButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val glass = LocalGlass.current
+    val src = remember { MutableInteractionSource() }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight)
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(WatchDimens.cardRadius),
+            .then(
+                // 玻璃主题下「次要按钮」就是一块更淡的玻璃：有底、有边、能按，
+                // 但仍明显弱于主按钮。非玻璃主题保持原来的纯描边样式。
+                if (glass) {
+                    Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(WatchDimens.cardRadius),
+                            cornerRadius = WatchDimens.cardRadius,
+                            enabled = enabled,
+                            interaction = src,
+                        )
+                        .tap(enabled = enabled, quiet = true, onClick = withHaptic(onClick))
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(WatchDimens.cardRadius))
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            shape = RoundedCornerShape(WatchDimens.cardRadius),
+                        )
+                        .then(if (enabled) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
+                },
             )
-            .then(if (enabled) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -267,8 +293,10 @@ fun WatchSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .glassSurface(
+                shape = RoundedCornerShape(WatchDimens.cardRadius),
+                cornerRadius = WatchDimens.cardRadius,
+            )
             .padding(contentPadding),
         content = content,
     )

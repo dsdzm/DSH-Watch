@@ -37,6 +37,11 @@ import com.dshwatch.ui.components.cornerSafe
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
 
 /**
  * 手表上的输入页。
@@ -80,8 +85,7 @@ fun InputScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .cornerSafe()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    .cornerSafe(),
 
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -100,12 +104,26 @@ fun InputScreen(
             Spacer(Modifier.height(5.dp))
         }
 
+        // 输入框本身做成玻璃卡片：OutlinedTextField 的描边框在玻璃主题下
+        // 是一条突兀的主色细线（圆屏上尤其明显），所以这里去掉描边，
+        // 只用玻璃的边与底色来界定「这是一个可输入的框」。
+        val glass = LocalGlass.current
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .then(
+                    if (glass) {
+                        Modifier.glassSurface(
+                            shape = RoundedCornerShape(18.dp),
+                            cornerRadius = 18.dp,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
                 .focusRequester(focusRequester),
             placeholder = {
                 Text(s.inputHint, style = MaterialTheme.typography.bodySmall)
@@ -113,6 +131,18 @@ fun InputScreen(
             textStyle = MaterialTheme.typography.bodyMedium,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { submit() }),
+            // 玻璃主题：容器透明、无描边、无指示线 —— 框的形状由玻璃自己给
+            colors = if (glass) {
+                OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                OutlinedTextFieldDefaults.colors()
+            },
         )
 
         Spacer(Modifier.height(6.dp))

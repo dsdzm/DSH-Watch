@@ -68,6 +68,15 @@ class WatchNavigator internal constructor(
 
     val canGoBack: Boolean get() = stack.size > 1
 
+    /**
+     * 栈的只读快照。页面转场要同时渲染「上一页」和「当前页」，
+     * 需要知道 `size - 2` 那一层是谁。
+     *
+     * 返回新建的 List 而不是内部 SnapshotStateList：调用方在动画里持有它时，
+     * 不应该因为后续 push/pop 而被改写（否则转场中途会看到两份当前页）。
+     */
+    fun snapshot(): List<Screen> = stack.toList()
+
     val depth: Int get() = stack.size
 
     fun push(screen: Screen) {
@@ -103,6 +112,22 @@ class WatchNavigator internal constructor(
         /** 不参与状态恢复的页面：decode 时一律落回根屏 */
         private const val UNRESTORABLE = "root"
 
+        /*
+         * 场景页（v1.13）为什么要**自己**编码而不是一律 UNRESTORABLE
+         * ------------------------------------------------------------
+         * 之前酒馆 / 写作 / 对话页 / 卡编辑全部编码成 `UNRESTORABLE`，
+         * 于是「进酒馆 → 进对话 → 被系统回收」之后恢复出来的是 `Chat`。
+         * 而 `Screen.Chat` 会按 `settings.useScene` 分发 —— 用户明明在写作场景里，
+         * 回来却可能落在别的根页上，看起来就像「退出后跳到了别的界面」。
+         *
+         * 现在各记各的：恢复出来还是原来那一页，只是参数（卡 id）能带就带。
+         * 卡 id 参与编码是安全的：它就是个目录名，`RoleCardStore` 读不到会回退索引摘要。
+         */
+        private const val TAVERN = "tavern"
+        private const val WRITING = "writing"
+        private const val ROLEPLAY = "roleplay"
+        private const val CARD_EDIT = "cardedit"
+
         private fun encode(screen: Screen): String = when (screen) {
             Screen.Chat -> "chat"
             Screen.Sessions -> "sessions"
@@ -122,18 +147,18 @@ class WatchNavigator internal constructor(
             is Screen.ProviderEdit -> "pedit${SEP}${screen.providerId.orEmpty()}"
             is Screen.Input -> "input${SEP}${screen.initial}"
             is Screen.SettingsGroup -> "sgroup${SEP}${screen.id}"
-            // 场景页（v1.13）。这几个是**过程页**，不该在进程被杀后恢复：
-            // 恢复出来的是一个没有任何会话上下文的空酒馆/空对话，比回到根屏更糟。
-            // 所以编码成一个不参与恢复的占位，decode 时统一落回根屏。
-            is Screen.CardEdit -> UNRESTORABLE
+            Screen.TavernHome -> TAVERN
+            Screen.WritingHome -> WRITING
+            Screen.RoleplayChat -> ROLEPLAY
+            // 卡编辑页要带 kind 与 cardId：新建卡（cardId 为空）恢复后就是空表单，
+            // 不丢用户已经输入的内容 —— 因为内容此刻还在内存里，没被系统回收。
+            is Screen.CardEdit -> "$CARD_EDIT$SEP${screen.kind}$SEP${screen.cardId}"
+            // 记忆文档是只读预览，恢复到根屏没有损失，也不必重建上下文
             is Screen.MemoryDoc -> UNRESTORABLE
-            Screen.RoleplayChat -> UNRESTORABLE
-            Screen.TavernHome -> UNRESTORABLE
-            Screen.WritingHome -> UNRESTORABLE
         }
 
         private fun decode(raw: String): Screen {
-            val parts = raw.split(SEP, limit = 2)
+            val parts = raw.split(SEP, limit = 3)
             return when (parts[0]) {
                 "chat" -> Screen.Chat
                 "sessions" -> Screen.Sessions
@@ -153,6 +178,13 @@ class WatchNavigator internal constructor(
                 "pedit" -> Screen.ProviderEdit(parts.getOrNull(1)?.ifBlank { null })
                 "input" -> Screen.Input(parts.getOrNull(1).orEmpty())
                 "sgroup" -> Screen.SettingsGroup(parts.getOrNull(1).orEmpty())
+                TAVERN -> Screen.TavernHome
+                WRITING -> Screen.WritingHome
+                ROLEPLAY -> Screen.RoleplayChat
+                CARD_EDIT -> Screen.CardEdit(
+                    kind = com.dshwatch.domain.roleplay.Scenes.of(parts.getOrNull(1)),
+                    cardId = parts.getOrNull(2).orEmpty(),
+                )
                 UNRESTORABLE -> Screen.Chat
                 else -> Screen.Chat
             }

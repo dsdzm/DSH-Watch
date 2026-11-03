@@ -67,6 +67,10 @@ import com.dshwatch.ui.wear.WearList
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.ui.graphics.Color
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
  * 本地工作空间。
@@ -187,8 +191,22 @@ fun WorkspaceScreen(
                 color = if (buildOk) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .then(
+                        if (LocalGlass.current) {
+                            Modifier.glassSurface(
+                                shape = RoundedCornerShape(8.dp), cornerRadius = 8.dp,
+                                tint = if (buildOk) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                            )
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        },
+                    )
                     .padding(6.dp),
             )
             Spacer(Modifier.height(4.dp))
@@ -261,18 +279,33 @@ private fun FileRow(
     onDelete: () -> Unit,
 ) {
     val s = LocalStrings.current
+    val src = remember { MutableInteractionSource() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                if (isArtifact) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+            .then(
+                if (LocalGlass.current) {
+                    Modifier
+                        .glassSurface(
+                            shape = RoundedCornerShape(10.dp),
+                            cornerRadius = 10.dp,
+                            tint = if (isArtifact) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                            interaction = src,
+                        )
+                        .tap(quiet = true, interaction = src, onClick = withHaptic(onOpen))
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainer
-                }
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isArtifact) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainer
+                            }
+                        )
+                        .tap(onClick = withHaptic(onOpen))
+                },
             )
-            .tap(onClick = withHaptic(onOpen))
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Text(

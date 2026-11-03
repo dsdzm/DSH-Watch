@@ -49,6 +49,8 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.MonoSmall
 import com.dshwatch.util.Fmt
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalGlass
 
 @Composable
 fun toolStatusLabel(status: ToolStatus): String {
@@ -101,8 +103,15 @@ fun ToolCallCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
+            .then(
+                if (LocalGlass.current) {
+                    Modifier.glassSurface(shape = RoundedCornerShape(12.dp), cornerRadius = 12.dp)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
+                },
+            )
             .padding(horizontal = 7.dp, vertical = 6.dp),
     ) {
         Row(
@@ -350,31 +359,34 @@ fun ToolApprovalDialog(
     onDecision: (ApprovalDecision) -> Unit,
 ) {
     val s = LocalStrings.current
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = { onDecision(ApprovalDecision.DENY) },
-        title = {
-            Column {
-                Text(text = s.toolCall, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                Text(text = pending.toolName, style = MaterialTheme.typography.titleSmall)
-            }
+        title = pending.toolName,
+        maxContentHeight = 200,
+        content = {
+            Text(
+                text = s.toolCall,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            Text(
+                text = pending.summary.ifBlank { pending.arguments.take(200) },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "副作用：${pending.safety.label}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
         },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                Text(
-                    text = pending.summary.ifBlank { pending.arguments.take(200) },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "副作用：${pending.safety.label}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
-            }
-        },
-        confirmButton = {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // 三个动作做成一列整宽按钮 —— 手表上并排三个会小到点不准
+        buttons = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
                 // shell 不给「总是允许」：它的风险与 cloud 不同，永久放行等于把
                 // 设备上的任意文件交给模型。改为「本会话允许」，换会话即失效。
                 if (pending.sessionScoped) {
@@ -408,10 +420,13 @@ private fun ApprovalButton(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(38.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(color.copy(alpha = 0.14f))
-            .tap(onClick = withHaptic(onClick)),
+            .height(40.dp)
+            .glassSurface(
+                shape = RoundedCornerShape(12.dp),
+                cornerRadius = 12.dp,
+                tint = if (primary || danger) color else androidx.compose.ui.graphics.Color.Unspecified,
+                onClick = withHaptic(onClick),
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = text, style = MaterialTheme.typography.labelLarge, color = color)
@@ -431,44 +446,26 @@ fun AgentModeDialog(
     onDismiss: () -> Unit,
 ) {
     val s: AppStrings = LocalStrings.current
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.groupAgent, style = MaterialTheme.typography.titleSmall) },
-        text = {
-            Column(modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-                AgentMode.entries.forEach { mode ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .tap(onClick = withHaptic { onPickMode(mode) })
-                            .padding(vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = mode.label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (mode == current) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        Text(
-                            text = mode.desc,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = s.entryAgentStepsDesc,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+        title = s.groupAgent,
+        maxContentHeight = 250,
+        content = {
+            AgentMode.entries.forEach { mode ->
+                GlassDialogRow(
+                    title = mode.label,
+                    subtitle = mode.desc,
+                    selected = mode == current,
+                    onClick = { onPickMode(mode) },
                 )
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = s.entryAgentStepsDesc,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(s.done) }
-        },
+        buttons = { GlassDialogButton(s.done, primary = true, onClick = onDismiss) },
     )
 }

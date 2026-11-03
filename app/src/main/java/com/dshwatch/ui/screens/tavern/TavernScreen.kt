@@ -56,6 +56,7 @@ import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.scene.ScenePill
 import com.dshwatch.ui.screens.scene.ScenePickerDialog
 import com.dshwatch.ui.wear.wearVerticalScroll
+import com.dshwatch.ui.components.glassSurface
 import kotlinx.coroutines.launch
 
 /**
@@ -77,7 +78,9 @@ fun TavernScreen(
     var showPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        cards = runCatching { container.roleCardStore.index(Scenes.TAVERN) }.getOrDefault(emptyList())
+        cards = runCatching { container.roleCardStore.index(Scenes.TAVERN) }
+            .onFailure { com.dshwatch.core.Logx.e("Tavern", "读取角色列表失败", it) }
+            .getOrDefault(emptyList())
         loaded = true
     }
 
@@ -163,8 +166,7 @@ private fun TavernCardRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .glassSurface(shape = RoundedCornerShape(20.dp), cornerRadius = 20.dp)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

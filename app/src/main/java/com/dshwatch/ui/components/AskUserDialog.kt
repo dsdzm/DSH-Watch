@@ -1,6 +1,5 @@
 package com.dshwatch.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.dshwatch.domain.agent.PendingQuestion
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.WatchDimens
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 /**
  * `ask_user` 的提问弹窗。
@@ -58,83 +57,66 @@ fun AskUserDialog(
         if (v.isNotEmpty()) onAnswer(v)
     }
 
-    AlertDialog(
-        onDismissRequest = { /* 必须明确选择，点外部不关闭（关了任务就卡住了） */ },
-        title = {
+    // 必须明确选择，点外部不关闭（关了任务就卡住了）
+    GlassDialog(
+        onDismissRequest = { },
+        title = s.agentAsking,
+        maxContentHeight = 250,
+        content = {
             Text(
-                text = s.agentAsking,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+                text = question.question,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 260.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Text(
-                    text = question.question,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
 
-                if (question.options.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    question.options.forEachIndexed { index, option ->
-                        OptionRow(
-                            index = index + 1,
-                            text = option,
-                            onClick = { submit(option) },
-                        )
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-
-                if (question.allowFreeText) {
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = {
-                            Text(s.agentAskPlaceholder, style = MaterialTheme.typography.labelSmall)
-                        },
-                        textStyle = MaterialTheme.typography.bodySmall,
-                        maxLines = 3,
+            if (question.options.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                question.options.forEachIndexed { index, option ->
+                    OptionRow(
+                        index = index + 1,
+                        text = option,
+                        onClick = { submit(option) },
                     )
                 }
             }
+
+            if (question.allowFreeText) {
+                Spacer(Modifier.height(6.dp))
+                TextRow(
+                    label = "",
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = s.agentAskPlaceholder,
+                )
+            }
         },
-        confirmButton = {
+        buttons = {
+            // 「跳过」不是「取消」：它会明确告诉模型「你自己定一个默认值继续」，
+            // 而不是让任务停在这里。所以措辞上也要区分开。
+            GlassDialogButton(s.agentAskSkip, onClick = onSkip)
             if (question.allowFreeText) {
                 TextButton(
                     enabled = text.isNotBlank(),
                     onClick = { submit(text) },
                 ) { Text(s.agentAskSubmit) }
-            } else {
-                // 只能选选项时，确认按钮就没什么可确认的了，留个跳过的出口
-                TextButton(onClick = onSkip) { Text(s.agentAskSkip) }
             }
-        },
-        dismissButton = {
-            // 「跳过」不是「取消」：它会明确告诉模型「你自己定一个默认值继续」，
-            // 而不是让任务停在这里。所以措辞上也要区分开。
-            TextButton(onClick = onSkip) { Text(s.agentAskSkip) }
         },
     )
 }
 
 @Composable
 private fun OptionRow(index: Int, text: String, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .tap(onClick = withHaptic(onClick))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .glassSurface(
+                shape = RoundedCornerShape(WatchDimens.cardRadius),
+                cornerRadius = WatchDimens.cardRadius,
+                interaction = src,
+            )
+            .tap(quiet = true, interaction = src, onClick = withHaptic(onClick))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
     ) {

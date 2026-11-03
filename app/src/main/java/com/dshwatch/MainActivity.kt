@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = settings.dynamicColor,
                 themePreset = settings.themePreset,
                 accentColor = settings.accentColor,
+                appearance = settings.appearance,
                 fontScale = settings.fontScale,
                 appLanguage = settings.appLanguage,
                 perf = perf,

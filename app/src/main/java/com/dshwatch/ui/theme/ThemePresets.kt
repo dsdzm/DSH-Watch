@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
  * 强调色。
  *
  * 只覆盖「主色」一组（primary / container），背景与正文层级由主题预设决定 ——
- * 两者正交，所以 6 套预设 × 6 种强调色 = 36 种组合，而不需要写 36 套完整色板。
+ * 两者正交，所以 7 套预设 × 6 种强调色 = 42 种组合，而不需要写 42 套完整色板。
  */
 data class Accent(
     val id: String,
@@ -156,7 +156,42 @@ private fun presetLight(
     scrim = Color(0x99000000),
 )
 
-// ---- 预设：OLED 黑 / 深海 / 森林（其余在文件后半）----
+// ---- 预设：质感玻璃 / OLED 黑 / 深海 ----
+
+/**
+ * 质感玻璃。
+ *
+ * 色板本身要**足够暗但不死黑**：玻璃卡片是半透明的，底下必须有东西可透。
+ * 纯 0x000000 的底会让半透明层叠出来仍然是一块灰砖，看不到层次；
+ * 所以这里在近黑里掺了一点点蓝（0x06070A），层级之间也确实拉开了距离。
+ *
+ * 这套预设真正的观感来自 [com.dshwatch.ui.components.glassSurface] 的多层自绘，
+ * 色板只负责「底色与文字层级」这两件事。
+ */
+private val GlassPreset = ThemePreset(
+    id = "glass", labelZh = "质感玻璃", labelEn = "Glass",
+    /*
+     * 背景设为**全透明**，这是玻璃能成立的前提。
+     *
+     * 各页面的根布局都会 `background(colorScheme.background)`；只要它不透明，
+     * 就会盖掉 DshWatchTheme 画在最底下的那两团色晕 —— 玻璃卡片下面什么都没有，
+     * 叠三层还是纯黑，跟实心灰块的唯一区别就只剩描边。
+     *
+     * 透明之后，页面背景这一层等于「让位」，真正的不透明底由 DshWatchTheme
+     * 用一个 Box 连同色晕一起画（surface 保持近黑，组件的默认表面色不受影响）。
+     * 这个做法依赖 Window 背景是黑色（themes.xml 里已设），否则会闪一帧白。
+     */
+    dark = presetDark(
+        bg = Color.Transparent, low = Color(0xFF181D29), container = Color(0xFF1F2534),
+        high = Color(0xFF2A3142), highest = Color(0xFF363E52), onBg = Color(0xFFF3F5F9),
+        variant = Color(0xFF363E52), onVariant = Color(0xFFBFC6D4), outline = Color(0xFF7C8698),
+    ).copy(surface = Color(0xFF101420)),
+    light = presetLight(
+        bg = Color.Transparent, low = Color(0xFFF1F4FA), container = Color(0xFFF7F9FD),
+        high = Color(0xFFFFFFFF), highest = Color(0xFFFFFFFF), onBg = Color(0xFF0E131B),
+        variant = Color(0xFFE2E7F0), onVariant = Color(0xFF475061), outline = Color(0xFF7A8494),
+    ).copy(surface = Color(0xFFE9EDF4)),
+)
 
 private val Oled = ThemePreset(
     id = "oled", labelZh = "OLED 黑", labelEn = "OLED black",
@@ -243,10 +278,32 @@ private val Forest = ThemePreset(
 )
 
 object ThemePresets {
-    /** 顺序即引导页与设置页的显示顺序 */
-    val all = listOf(Oled, Ocean, Forest, Sakura, Sunset, Graphite)
+    /**
+     * 「质感玻璃」预设的 id。
+     *
+     * 它**仍然是一个正常的主题预设**，和 OLED / 深海 / 樱花并列。
+     * 曾经我把它从这里删掉、当成独立的材质，那是错的 —— 用户明确说过：
+     * 「玻璃主题的背景怎么换了？不要换，不然纯白色背景无法体现出玻璃的透明」。
+     * 玻璃的底就该是它原来那套（近黑 / 近白的浅色底）：
+     * 透过去的颜色越亮，半透明的白才越像玻璃；底一黑，玻璃就成灰板。
+     */
+    const val GLASS_ID = "glass"
 
-    fun of(id: String): ThemePreset = all.firstOrNull { it.id == id } ?: all.first()
+    const val OLED_ID = "oled"
+
+    /**
+     * 全部预设，玻璃在**第一位**（它是默认预设）。
+     *
+     * 预设负责「底是什么颜色」，外观风格负责「卡片透不透」—— 两个维度正交，
+     * 所以「玻璃预设 + 玻璃材质」和「玻璃预设 + M3E 卡片」都是合法组合。
+     */
+    val all = listOf(GlassPreset, Oled, Ocean, Forest, Sakura, Sunset, Graphite)
+
+    fun of(id: String): ThemePreset =
+        all.firstOrNull { it.id == id } ?: GlassPreset
+
+    @Deprecated("用 Appearances.isGlass(settings.appearance)")
+    fun isGlass(id: String): Boolean = id == GLASS_ID
 
     /**
      * 最终色板 = 预设的明暗层级 + 强调色的主色组。
@@ -262,6 +319,9 @@ object ThemePresets {
     /** 主题卡上的三色预览（背景 / 主色 / 正文） */
     fun swatch(presetId: String, accentId: String, dark: Boolean): List<Color> {
         val s = scheme(presetId, accentId, dark)
-        return listOf(s.background, s.primary, s.tertiary)
+        // 玻璃预设的 background 是透明的（见 GlassPreset），色卡上要换成 surface，
+        // 否则第一个圆点直接消失，看着像少了一个颜色
+        val bg = if (s.background.alpha < 0.05f) s.surface else s.background
+        return listOf(bg, s.primary, s.tertiary)
     }
 }

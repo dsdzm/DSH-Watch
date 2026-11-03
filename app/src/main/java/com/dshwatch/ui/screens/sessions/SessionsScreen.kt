@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.model.Conversation
 import com.dshwatch.ui.components.Chip
@@ -52,6 +53,10 @@ import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.data.store.ConversationStore
 import com.dshwatch.util.Fmt
 import com.dshwatch.ui.wear.WearList
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
+import com.dshwatch.ui.components.TextRow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -114,18 +119,12 @@ fun SessionsScreen(
     }
 
     menuTarget?.let { conv ->
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { menuTarget = null },
-            title = {
-                Text(
-                    text = conv.displayTitle,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            text = {
-                Column {
+            title = conv.displayTitle,
+            maxContentHeight = 280,
+            content = {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     MenuItem(s.renameSession) {
                         menuTarget = null
                         renameTarget = conv
@@ -147,28 +146,25 @@ fun SessionsScreen(
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { menuTarget = null }) { Text(s.cancel) }
-            },
+            buttons = { GlassDialogButton(s.cancel, onClick = { menuTarget = null }) },
         )
     }
 
     renameTarget?.let { conv ->
         var value by remember(conv.id) { mutableStateOf(conv.displayTitle) }
-        AlertDialog(
+        GlassDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text(s.renameSession, style = MaterialTheme.typography.titleSmall) },
-            text = {
-                OutlinedTextField(
+            title = s.renameSession,
+            content = {
+                TextRow(
+                    label = "",
                     value = value,
                     onValueChange = { value = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             },
-            confirmButton = {
-                TextButton(onClick = {
+            buttons = {
+                GlassDialogButton(s.cancel, onClick = { renameTarget = null })
+                GlassDialogButton(s.save, primary = true) {
                     val title = value.trim().ifBlank { "新对话" }
                     scope.launch {
                         container.conversationStore.rename(conv.id, title)
@@ -176,10 +172,7 @@ fun SessionsScreen(
                         reloadKey++
                     }
                     renameTarget = null
-                }) { Text(s.save) }
-            },
-            dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text(s.cancel) }
+                }
             },
         )
     }
@@ -241,9 +234,11 @@ private fun ConversationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .tap(onClick = withHaptic(onClick))
+            .glassSurface(
+                shape = RoundedCornerShape(26.dp),
+                cornerRadius = 26.dp,
+                onClick = withHaptic(onClick),
+            )
             .padding(start = 14.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -326,10 +321,13 @@ private fun WorkDirDialog(
         .take(40)
         .trim('-', ' ', '.')
 
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.sessionWorkDir, style = MaterialTheme.typography.titleSmall) },
-        text = {
+        maxContentHeight = 300,
+        title = s.sessionWorkDir,
+        // 内容自带 verticalScroll，这里不能再套一层
+        scrollable = false,
+        content = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -412,11 +410,9 @@ private fun WorkDirDialog(
                 )
             }
         },
-        confirmButton = {
-            TextButton(onClick = { onPicked(selected) }) { Text(s.save) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
+        buttons = {
+            GlassDialogButton(s.cancel, onClick = onDismiss)
+            GlassDialogButton(s.save, primary = true) { onPicked(selected) }
         },
     )
 }
@@ -426,16 +422,13 @@ private fun DirRow(text: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest
-                }
+            .glassSurface(
+                shape = RoundedCornerShape(10.dp),
+                cornerRadius = 10.dp,
+                tint = if (selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                onClick = withHaptic(onClick),
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

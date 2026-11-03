@@ -1,5 +1,7 @@
 package com.dshwatch.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.dshwatch.domain.model.TokenUsage
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalDeviceProfile
+import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
@@ -60,6 +63,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
 
 // ---------------------------------------------------------------------------
 // 页面骨架
@@ -217,8 +222,10 @@ fun SettingCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .glassSurface(
+                shape = RoundedCornerShape(WatchDimens.cardRadius),
+                cornerRadius = WatchDimens.cardRadius,
+            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         content = content,
     )
@@ -240,9 +247,11 @@ fun SettingPill(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
+            .glassSurface(
+                shape = RoundedCornerShape(24.dp),
+                cornerRadius = 24.dp,
+                onClick = onClick?.let { withHaptic(it) },
+            )
             .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -361,8 +370,21 @@ fun SwitchRow(
     }
 }
 
+/**
+ * 开关。
+ *
+ * 玻璃主题下用自己画的 [GlassSwitch] —— M3 的 Switch 是两段纯色：
+ * 轨道 primary、滑块白圆，放进玻璃卡片里就是两块塑料贴片，
+ * 用户截图里的「开关没做成玻璃」指的就是这个。
+ *
+ * 非玻璃主题仍然走 M3，一行都不多 —— M3E 的开关本来就该长成 M3 的样子。
+ */
 @Composable
 fun M3Switch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    if (LocalGlass.current) {
+        GlassSwitch(checked = checked, onCheckedChange = onCheckedChange)
+        return
+    }
     // 直接用 MD3 Switch，但缩小到手表尺寸
     androidx.compose.material3.Switch(
         checked = checked,
@@ -387,34 +409,65 @@ fun SegmentedRow(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    val glass = LocalGlass.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            // 玻璃主题下用很淡的白：分段条本身是「凹槽」，不能和里面的选中块一样亮，
+            // 否则选中态分不出来
+            .background(
+                if (glass) Color.White.copy(alpha = 0.07f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh
+            )
             .padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         options.forEachIndexed { index, label ->
             val selected = index == selectedIndex
+            // 选中块是玻璃，反馈（形变 + 光）由它自己画；
+            // 未选中的块没有玻璃，反馈交给 tap()。
+            // 共享同一个 interaction，两边的按压状态才不会各走各的
+            val src = remember { MutableInteractionSource() }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                    .then(
+                        if (glass) {
+                            // 选中块才是真正的玻璃；未选中的块什么都不画，透出凹槽
+                            if (selected) {
+                                Modifier.glassSurface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    cornerRadius = 12.dp,
+                                    interaction = src,
+                                )
+                            } else {
+                                Modifier.clip(RoundedCornerShape(12.dp))
+                            }
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                        },
                     )
-                    .tap(onClick = withHaptic { onSelect(index) }),
+                    .tap(
+                        // 选中块已有玻璃反馈，别再叠一层
+                        quiet = glass && selected,
+                        onClick = withHaptic { onSelect(index) },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    color = when {
+                        selected && glass -> MaterialTheme.colorScheme.onSurface
+                        selected -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     // 只有两三个短选项时才用分段条；超过 4 项或文字长，调用方应改用 ChoiceRow。
                     // 这里给两行兜底，避免中文被硬截成省略号。
@@ -476,12 +529,26 @@ private fun StepButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val glass = LocalGlass.current
+    val src = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .size(26.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .tap(enabled = enabled, onClick = withHaptic(onClick)),
+            .then(
+                if (glass) {
+                    Modifier.glassSurface(
+                        shape = RoundedCornerShape(11.dp),
+                        cornerRadius = 11.dp,
+                        enabled = enabled,
+                        interaction = src,
+                    )
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                },
+            )
+            .tap(enabled = enabled, quiet = glass, onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -506,12 +573,11 @@ fun Chip(
     Box(
         modifier = Modifier
             .height(WatchDimens.chipHeight)
-            .clip(CircleShape)
-            .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceContainerHigh
+            .glassSurface(
+                shape = CircleShape,
+                tint = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Unspecified,
+                onClick = onClick?.let { withHaptic(it) },
             )
-            .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
             .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -540,12 +606,17 @@ fun PrimaryButton(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight + 6.dp)
-            .clip(CircleShape)
-            .background(
-                if (enabled) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceContainerHighest
-            )
-            .tap(enabled = enabled, onClick = withHaptic(onClick)),
+            .glassSurface(
+                shape = CircleShape,
+                tint = if (enabled) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHighest
+                },
+                enabled = enabled,
+                onClick = withHaptic(onClick),
+                solid = true,
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -582,13 +653,24 @@ fun GhostButton(
     onClick: () -> Unit,
 ) {
     val tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val glass = LocalGlass.current
+    val src = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(WatchDimens.buttonHeight + 6.dp)
-            .clip(CircleShape)
-            .border(1.dp, tint.copy(alpha = 0.5f), CircleShape)
-            .tap(onClick = withHaptic(onClick)),
+            .then(
+                if (glass) {
+                    Modifier
+                        .glassSurface(shape = CircleShape, interaction = src)
+                        .tap(quiet = true, interaction = src, onClick = withHaptic(onClick))
+                } else {
+                    Modifier
+                        .clip(CircleShape)
+                        .border(1.dp, tint.copy(alpha = 0.5f), CircleShape)
+                        .tap(onClick = withHaptic(onClick))
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = text, style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp), color = tint)
@@ -635,20 +717,22 @@ fun ConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     val s = LocalStrings.current
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = title, style = MaterialTheme.typography.titleSmall) },
-        text = { Text(text = text, style = MaterialTheme.typography.bodySmall) },
-        confirmButton = {
+        title = title,
+        content = { Text(text = text, style = MaterialTheme.typography.bodySmall) },
+        buttons = {
+            TextButton(onClick = onDismiss) { Text(s.cancel) }
             TextButton(onClick = onConfirm) {
                 Text(
                     text = confirmText ?: if (destructive) s.delete else s.ok,
-                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    color = if (destructive) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
                 )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
         },
     )
 }
@@ -742,7 +826,12 @@ fun ContextBar(used: Int, total: Int, modifier: Modifier = Modifier) {
             } else {
                 MaterialTheme.colorScheme.primary
             },
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            trackColor = if (LocalGlass.current) {
+                // 玻璃主题下轨道是「背景上的一道刻痕」，用淡白，不用不透明容器色
+                Color.White.copy(alpha = 0.12f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            },
         )
     }
 }
@@ -854,12 +943,81 @@ fun WatchSlider(
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                inactiveTrackColor = if (LocalGlass.current) {
+                    Color.White.copy(alpha = 0.14f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
             ),
             // 圆屏两侧被切掉，轨道左右留出来才不会把滑块端点藏进黑边
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = WatchDimens.touchMin),
+        )
+    }
+}
+
+/**
+ * 玻璃开关。
+ *
+ * ## 和 M3 开关的三处区别
+ *
+ * | | M3 Switch | GlassSwitch |
+ * |---|---|---|
+ * | 轨道 | 纯色（primary / surfaceVariant） | 玻璃：底透 + 渐变 + 描边 |
+ * | 滑块 | 白圆，无描边 | 玻璃小球：中心微亮、下沿一道暗 |
+ * | 状态切换 | 位置突变 + 轨道换色 | 位置走弹簧，轨道亮度跟着推子走 |
+ *
+ * 轨道用 `glassSurface(tint = primary)` 会调成「染色玻璃」——
+ * 那是把白色**替换**成主色再乘 0.42，所以打开时是带蓝的玻璃而不是一块蓝塑料。
+ *
+ * 滑块单独画：一个圆形的 `glassSurface`，用 `padding` 定位而不是 `offset`，
+ * 这样轨道变宽变窄时它自动跟着走，不需要手动算 dp。
+ */
+@Composable
+fun GlassSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val trackWidth = 42.dp
+    val trackHeight = 26.dp
+    val thumb = 20.dp
+    val pad = 3.dp
+
+    val travel = trackWidth - thumb - pad * 2
+    val progress = animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 700f),
+        label = "switchTravel",
+    )
+
+    val src = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .size(width = trackWidth, height = trackHeight)
+            .glassSurface(
+                shape = CircleShape,
+                tint = MaterialTheme.colorScheme.primary,
+                interaction = src,
+                // 轨道本身不响应点击 → 下面用 tap(quiet) 挂事件。
+                // 但**必须显式打开跟手**：按默认值（trackPointer = onClick != null）
+                // 这里是 null，玻璃就不会装 pointerInput，
+                // 光斑永远钉在静态位置 —— 用户报的「开关的光晕不跟手」就是这条
+                onClick = null,
+                trackPointer = true,
+            )
+            .tap(quiet = true, interaction = src, onClick = withHaptic { onCheckedChange(!checked) })
+            // 关着的时候轨道要更淡：染色玻璃的 alpha 跟随状态，
+            // 否则「关」和「开」只差滑块位置，一眼看不出状态
+            .then(
+                if (checked) Modifier
+                else Modifier.background(Color.Black.copy(alpha = 0.18f), CircleShape)
+            ),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = pad + travel * progress.value)
+                .size(thumb)
+                .glassSurface(shape = CircleShape, cornerRadius = thumb / 2)
+                .background(Color.White.copy(alpha = 0.16f), CircleShape),
         )
     }
 }

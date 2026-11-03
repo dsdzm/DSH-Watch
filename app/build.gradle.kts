@@ -40,8 +40,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 21
-        versionName = "1.13"
+        versionCode = 23
+        versionName = "1.15"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -60,11 +60,17 @@ android {
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
-                // 三种签名方案全开：
-                //  - v1(JAR) 兼容部分国产手表自带的安装器（只认老式 JAR 签名）；
-                //  - v2 是 Android 7+ 的通用方案；
-                //  - v3 是 Android 9+ 的方案，支持密钥轮换。
-                // 代价只有几百 KB，换来"装不上"这类问题彻底消失。
+                // 三种签名方案都声明开启，但**实际产物只带 v3**（用 apksigner verify 实测）。
+                //
+                // 原因：AGP 8.x 会按 minSdk 优化签名方案 —— 本工程 minSdk 28，
+                // 而 v3 正是 API 28 引入的，所有能装上这个 App 的设备都支持 v3，
+                // 于是 v1/v2 被省略。这不是配置没生效，是构建链的合理裁剪。
+                //
+                // 之所以留着这三个 true：万一以后 minSdk 下探到 28 以下，
+                // 或者要出给第三方安装器的包，开关已经在那儿了，不用回头改。
+                //
+                // 实测过的兼容性：v1.13、v1.13-fix、v1.14 三版都是 v3-only，
+                // 证书指纹一致（70437a7f…bf31f94），覆盖安装正常。
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true

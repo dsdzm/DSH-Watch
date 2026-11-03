@@ -2,6 +2,7 @@ package com.dshwatch
 
 import android.app.Application
 import com.dshwatch.core.AppContainer
+import com.dshwatch.core.CrashLog
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.bili.BiliSchedule
 import com.dshwatch.service.StreamingService
@@ -17,6 +18,8 @@ class DshWatchApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Logx.enabled = BuildConfig.DEBUG
+        // 崩溃兜底要尽量早装：越早，能抓到的启动期问题越多
+        CrashLog.install(this)
         container = AppContainer(this)
 
         // 生成开始 / 结束时同步前台服务，保证手表锁屏后不被冻结

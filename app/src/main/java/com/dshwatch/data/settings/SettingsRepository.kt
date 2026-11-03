@@ -70,7 +70,29 @@ class SettingsRepository(
      * 迁移是幂等的，每次读设置跑一遍也不会出问题。
      */
     private fun migrate(s: AppSettings): AppSettings {
-        if (!s.biliImageTouched && s.biliImage == "none") return s.copy(biliImage = "pack")
-        return s
+        var out = s
+        // 1.11 的配图默认值修正
+        if (!out.biliImageTouched && out.biliImage == "none") {
+            out = out.copy(biliImage = "pack")
+        }
+        // v1.15：玻璃从「主题预设」里拆成独立的「外观风格」。
+        //
+        // 注意这里**不再改写 themePreset**。玻璃预设本身仍然存在、仍然可选，
+        // 它只是不再等于「材质」。之前的版本把它强行改成 "oled"，
+        // 结果用户辛辛苦苦选的玻璃底色被换成纯黑 —— 玻璃要的就是能透出底色，
+        // 底换成黑，玻璃就只剩一块灰板。
+        //
+        // 唯一要补的是：老数据里 themePreset = "glass" 意味着当时用的就是玻璃材质，
+        // 所以 appearance 要一并置成玻璃，否则升级后会变成「玻璃预设 + 不透明卡片」，
+        // 那套底色配实心卡片是最难看的一种组合。
+        if (out.themePreset == com.dshwatch.ui.theme.ThemePresets.GLASS_ID &&
+            out.appearance != com.dshwatch.domain.model.Appearances.GLASS
+        ) {
+            out = out.copy(appearance = com.dshwatch.domain.model.Appearances.GLASS)
+        }
+        // 归一化 appearance：未知取值（含老存档的空串）一律落回 M3E
+        val appearance = com.dshwatch.domain.model.Appearances.of(out.appearance)
+        if (appearance != out.appearance) out = out.copy(appearance = appearance)
+        return out
     }
 }

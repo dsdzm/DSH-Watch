@@ -101,7 +101,11 @@ import com.dshwatch.ui.components.shareFile
 import com.dshwatch.ui.components.TokenBadge
 import com.dshwatch.ui.components.ToolApprovalDialog
 import com.dshwatch.ui.components.ToolCallCard
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
+import com.dshwatch.ui.components.GlassDialogRow
 import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.components.glassSurface
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.i18n.LocalStrings
@@ -118,6 +122,8 @@ import com.dshwatch.util.Fmt
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.sqrt
+import com.dshwatch.ui.theme.LocalGlass
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 @Composable
 fun ChatScreen(
@@ -572,8 +578,7 @@ fun ChatScreen(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 2.dp, bottom = 2.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        .glassSurface(shape = CircleShape),
                 ) {
                     IconTap(
                         icon = Icons.Filled.KeyboardArrowDown,
@@ -736,9 +741,13 @@ private fun BubbleScaffold(
      * 也自动适配动态取色出来的任意色调。
      */
     val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val glass = LocalGlass.current
     val bubbleColor = when {
         isUser && light -> MaterialTheme.colorScheme.secondaryContainer
         isUser -> Color(0xFF4A5670)
+        // 玻璃主题下 AI 气泡不填色：交给 glassSurface 的半透明白，
+        // 填 surfaceContainerHigh 会把底下的色晕整块盖掉，气泡就成了深灰砖
+        glass -> Color.Transparent
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val textColor = when {
@@ -783,8 +792,13 @@ private fun BubbleScaffold(
             Row(
                 modifier = Modifier
                     .fillMaxWidth(if (isUser) (if (isRound) 0.92f else 0.94f) else 1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(bubbleColor)
+                    .then(
+                        if (glass && bubbleColor == Color.Transparent) {
+                            Modifier.glassSurface(shape = RoundedCornerShape(16.dp), cornerRadius = 16.dp)
+                        } else {
+                            Modifier.clip(RoundedCornerShape(16.dp)).background(bubbleColor)
+                        },
+                    )
                     .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.Top,
             ) {
@@ -820,9 +834,13 @@ private fun BubbleScaffold(
             Column(
                 modifier = Modifier
                     .fillMaxWidth(0.88f)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(
-                        if (isUser) bubbleColor else bubbleColor.copy(alpha = 0.82f),
+                    .then(
+                        if (glass && bubbleColor == Color.Transparent) {
+                            Modifier.glassSurface(shape = RoundedCornerShape(26.dp), cornerRadius = 26.dp)
+                        } else {
+                            Modifier.clip(RoundedCornerShape(26.dp))
+                                .background(if (isUser) bubbleColor else bubbleColor.copy(alpha = 0.82f))
+                        },
                     )
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
@@ -843,8 +861,18 @@ private fun BubbleScaffold(
                             1f
                         }
                     )
-                    .clip(RoundedCornerShape(if (isRound) 22.dp else 26.dp))
-                    .background(bubbleColor)
+                    .then(
+                        if (glass && bubbleColor == Color.Transparent) {
+                            Modifier.glassSurface(
+                                shape = RoundedCornerShape(if (isRound) 22.dp else 26.dp),
+                                cornerRadius = if (isRound) 22.dp else 26.dp,
+                            )
+                        } else {
+                            Modifier
+                                .clip(RoundedCornerShape(if (isRound) 22.dp else 26.dp))
+                                .background(bubbleColor)
+                        },
+                    )
                     .padding(horizontal = 14.dp, vertical = 12.dp),
             ) {
                 CompositionLocalProvider(LocalContentColor provides textColor) {
@@ -1302,13 +1330,14 @@ private fun AgentWorkBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f))
+            .glassSurface(shape = RoundedCornerShape(10.dp), cornerRadius = 10.dp)
             .padding(horizontal = 7.dp, vertical = 5.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                // 卡片本身不可点，行可点 —— 所以 feedback 只能来自 tap()，
+                // 这里不能 quiet
                 .tap(onClick = withHaptic { expanded = !expanded }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1465,9 +1494,11 @@ private fun MsgAction(text: String, onClick: () -> Unit) {
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .tap(onClick = withHaptic(onClick))
+            .glassSurface(
+                shape = RoundedCornerShape(9.dp),
+                cornerRadius = 9.dp,
+                onClick = withHaptic(onClick),
+            )
             .padding(horizontal = 9.dp, vertical = 4.dp),
     )
 }
@@ -1487,6 +1518,7 @@ private fun ChatBottomBar(
     onModelClick: () -> Unit,
 ) {
     val s = LocalStrings.current
+    val sendSrc = remember { MutableInteractionSource() }
     // 圆屏底部两侧是空的：左右再收 10dp，避免两个下角被圆切掉
     Row(
         modifier = Modifier
@@ -1494,8 +1526,11 @@ private fun ChatBottomBar(
             .fillMaxWidth()
             .height(52.dp)
             .cornerSafe()
-            .clip(RoundedCornerShape(WatchDimens.cardRadius))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .glassSurface(
+                shape = RoundedCornerShape(WatchDimens.cardRadius),
+                cornerRadius = WatchDimens.cardRadius,
+                tint = MaterialTheme.colorScheme.surfaceContainerLow,
+            )
             .padding(horizontal = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -1504,9 +1539,12 @@ private fun ChatBottomBar(
             modifier = Modifier
                 .weight(1f)
                 .height(38.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .tap(onClick = withHaptic(onOpenInput)),
+                .glassSurface(
+                    shape = RoundedCornerShape(12.dp),
+                    cornerRadius = 12.dp,
+                    tint = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = withHaptic(onOpenInput),
+                ),
             contentAlignment = Alignment.CenterStart,
         ) {
             Text(
@@ -1523,9 +1561,16 @@ private fun ChatBottomBar(
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .tap(onClick = withHaptic(onSend)),
+                    // 发送键：玻璃负责画与形变，事件交给 tap(quiet)。
+                    // 主按钮用 solid —— 反馈光强度自动减半（见 drawGlassPanel）
+                    .glassSurface(
+                        shape = RoundedCornerShape(12.dp),
+                        cornerRadius = 12.dp,
+                        tint = MaterialTheme.colorScheme.primary,
+                        interaction = sendSrc,
+                        solid = true,
+                    )
+                    .tap(quiet = true, interaction = sendSrc, onClick = withHaptic(onSend)),
                 contentAlignment = Alignment.Center,
             ) {
                 androidx.compose.material3.Icon(
@@ -1566,35 +1611,24 @@ private fun ModelPickerDialog(
     onDismiss: () -> Unit,
 ) {
     val s = LocalStrings.current
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(s.switchModel, style = MaterialTheme.typography.titleSmall) },
-        text = {
+        title = s.switchModel,
+        maxContentHeight = 260,
+        content = {
             if (models.isEmpty()) {
                 Text(s.none, style = MaterialTheme.typography.bodySmall)
             } else {
-                LazyColumn(modifier = Modifier.height(180.dp)) {
-                    items(models, key = { it }) { model ->
-                        Text(
-                            text = model,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (model == current) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .tap(onClick = withHaptic { onPick(model) })
-                                .padding(vertical = 7.dp),
-                        )
-                    }
+                models.forEach { model ->
+                    GlassDialogRow(
+                        title = model,
+                        selected = model == current,
+                        onClick = { onPick(model) },
+                    )
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
-        },
+        buttons = { GlassDialogButton(s.cancel, onClick = onDismiss) },
     )
 }
 

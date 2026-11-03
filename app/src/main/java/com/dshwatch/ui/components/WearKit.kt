@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.theme.WatchDimens
 
 /**
@@ -50,15 +51,20 @@ fun PillItem(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val glass = LocalGlass.current
     Row(
         modifier = modifier
             .wrapContentWidth(Alignment.Start)
             .widthIn(min = 140.dp)
             .heightIn(min = WatchDimens.touchMin)
-            .alpha(if (enabled) 1f else 0.42f)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .tap(enabled = enabled, onClick = withHaptic(onClick))
+            // 玻璃模式下把整体的 alpha 让给 glassSurface：这里再套一层会多一个
+            // 离屏合成层（alpha 不是 1 就会强制 layer），在表上不值
+            .alpha(if (enabled || glass) 1f else 0.42f)
+            .glassSurface(
+                shape = CircleShape,
+                enabled = enabled,
+                onClick = withHaptic(onClick),
+            )
             .padding(start = 20.dp, end = if (trailing != null) 16.dp else 20.dp, top = 13.dp, bottom = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -138,9 +144,11 @@ fun WearCardRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
+            .glassSurface(
+                shape = RoundedCornerShape(24.dp),
+                cornerRadius = 24.dp,
+                onClick = onClick?.let { withHaptic(it) },
+            )
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
