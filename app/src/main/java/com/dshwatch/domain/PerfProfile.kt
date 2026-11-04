@@ -132,6 +132,17 @@ object PerfDetector {
     ): DeviceTier {
         if (isLowRamDevice || totalMemMb <= 512) return DeviceTier.LOW
 
+        // 低于 1GB 一律 LOW，不再往下算分。
+        //
+        // 原来的写法是「512MB 以下才强制 LOW，其余靠 mem+cores 打分」，
+        // 于是 768MB / 4 核 会得 0+1=1 分落到 LOW —— 碰巧是对的。
+        // 但这条规则没有下限保护，谁哪天把打分权重调一下就会翻车。
+        //
+        // 直接写死下限：800MB 以下的机器上，光是 4 张内置角色卡 + 一份设置
+        // 就可能把 Java 堆顶到上限（实测有一台定制设备 maxMemory() 只有 192MB），
+        // 在那上面谈「渲染多少条消息」已经没有意义，先保命。
+        if (totalMemMb < 800) return DeviceTier.LOW
+
         var score = 0
         score += when {
             totalMemMb >= 3072 -> 3

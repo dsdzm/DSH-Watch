@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -33,17 +34,45 @@ class SettingsRepository(
 
     val flow: Flow<AppSettings> = context.settingsDataStore.data
         .map { decode(it[prefsKey]) }
+        /*
+         * **必须兜住 DataStore 自己的异常。**
+         *
+         * DataStore 的 `data` 流不是"读成功了才发"，它会在读盘失败时
+         * **把异常直接 emit 进流里**（典型：文件损坏 / 权限异常 /
+         * 某些兼容层的文件系统语义不完整）。上游 `stateIn(..., Eagerly)`
+         * 所在的就是 AppContainer 的 appScope —— 异常一路传上去会把
+         * 整个 scope 干掉，之后所有后台任务一起停摆，界面上表现为
+         * 「启动一下就没了」。
+         *
+         * 这里退回默认设置：用户会看到初始设置，但 App 至少进得去。
+         * 设置本来就是可以重设的东西，比打不开强。
+         */
+        .catch { e ->
+            Logx.e("Settings", "读取设置失败，回退默认值", e)
+            emit(AppSettings())
+        }
         .distinctUntilChanged()
         .conflate()
 
-    override suspend fun current(): AppSettings = decode(context.settingsDataStore.data.first()[prefsKey])
+    override suspend fun current(): AppSettings = runCatching {
+        decode(context.settingsDataStore.data.first()[prefsKey])
+    }.getOrElse {
+        Logx.e("Settings", "读取设置失败（current），回退默认值", it)
+        AppSettings()
+    }
 
     override suspend fun update(transform: (AppSettings) -> AppSettings): AppSettings {
         var updated = AppSettings()
-        context.settingsDataStore.edit { prefs ->
-            val current = decode(prefs[prefsKey])
-            updated = transform(current)
-            prefs[prefsKey] = json.encodeToString(AppSettings.serializer(), updated)
+        runCatching {
+            context.settingsDataStore.edit { prefs ->
+                val current = decode(prefs[prefsKey])
+                updated = transform(current)
+                prefs[prefsKey] = json.encodeToString(AppSettings.serializer(), updated)
+            }
+        }.onFailure {
+            // 写不进去（磁盘满 / 兼容层文件系统异常）不该让调用方的协程崩掉。
+            // 界面上的改动能生效到下次重启前，总比点一下就闪退好。
+            Logx.e("Settings", "写入设置失败", it)
         }
         return updated
     }

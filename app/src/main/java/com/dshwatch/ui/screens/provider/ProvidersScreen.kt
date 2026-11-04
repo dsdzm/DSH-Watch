@@ -64,6 +64,7 @@ fun ProvidersScreen(
             return@WatchScaffold
         }
         WearList(
+            state = com.dshwatch.ui.wear.rememberKeptScalingListState("providers"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

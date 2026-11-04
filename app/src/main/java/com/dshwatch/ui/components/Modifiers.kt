@@ -107,7 +107,19 @@ fun Modifier.tap(
 
         val perf = LocalPerf.current
         val animated = perf.enableAnimations
-        val rich = animated && perf.tier != DeviceTier.LOW
+        /*
+         * 跟手光晕开不开。
+         *
+         * 原来写的是 `animated && perf.tier != DeviceTier.LOW`。
+         * 问题是 tier 是**设备算出来的、用户改不了**：一台被系统标成
+         * 低内存的设备（比如 maxMemory 只有 192MB），哪怕用户在设置里
+         * 明确选了「性能优先」，光晕也永远不跟手 —— 用户没法自己救回来。
+         *
+         * enableAnimations 已经承载了「特效开不开」这个决定（它由 tier 和
+         * PerfMode 共同算出），这里再叠一层 tier 判断是重复的，
+         * 而且还把这个开关锁死了。只留 enableAnimations。
+         */
+        val rich = animated
         // 光强：0 = 松手，1 = 按住最深
         val glow = remember { Animatable(0f) }
         // 触点。用普通 state 存，只在 draw 阶段读，不触发重组

@@ -222,6 +222,7 @@ fun WorkspaceScreen(
         }
 
         WearList(
+            state = com.dshwatch.ui.wear.rememberKeptScalingListState("workspace"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),

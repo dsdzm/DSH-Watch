@@ -41,9 +41,25 @@ class AppContainer(private val app: Context) {
 
     val json = Jsonx.lenient
 
+    /*
+     * 下面每个字段都在构造时打一个点（CrashLog.mark）。
+     *
+     * 理由很直接：属性是按声明顺序初始化的，哪个字段一崩，后面全都不会执行。
+     * 用户报「装上就闪退、打不开、拿不到日志」时，我们唯一的线索就是
+     * 「最后一步走到哪」—— 而这里恰好把启动拆成了能被跳着读的台阶。
+     *
+     * 其中最容易在国产 ROM 上碎的是 keyStore（Keystore 在部分设备上
+     * 首次访问会抛 KeyStoreException）和 settingsRepo（DataStore 首次建库）。
+     */
+
     val settingsRepo = SettingsRepository(app, json)
+        .also { CrashLog.mark("设置仓库已构造") }
+
     val keyStore = SecureKeyStore(app)
+        .also { CrashLog.mark("密钥库已构造") }
+
     val conversationStore = ConversationStore(File(app.filesDir, "conversations"), json)
+        .also { CrashLog.mark("会话库已构造") }
 
     /**
      * 角色卡库（酒馆与写作共用一套结构，按 `kind` 分）。
@@ -81,7 +97,23 @@ class AppContainer(private val app: Context) {
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
     val backends = BackendRegistry(json)
 
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * 应用级后台作用域。
+     *
+     * `SupervisorJob` 只能保证「一个子任务失败不连坐兄弟」，**不能**兜住
+     * 那些在 launch 里没被 try 住的异常 —— 它们会走到默认处理器，
+     * 直接把整个进程带走。而这里跑的多半是后台的活儿（播报、同步、
+     * 预取），失败了大可以说一声就完了，没理由让用户看到闪退。
+     *
+     * 所以再挂一个 [CoroutineExceptionHandler] 兜底：记一笔、继续活着。
+     * 这也是「华为手表 4 打开就闪退」这类反馈里最该先堵的一个口子 ——
+     * 只要有一个后台任务炸了，App 从外面看就是"打不开"。
+     */
+    private val scopeErrors = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        Logx.e("AppScope", "后台任务异常（已兜住，不影响前台）", e)
+    }
+
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + scopeErrors)
 
     /** 设备画像：性能档 + 屏幕尺寸 + 圆角安全边距 */
     private val _profile = MutableStateFlow(DeviceProfiler.detect(app, -1))
@@ -174,7 +206,7 @@ class AppContainer(private val app: Context) {
         roleCard = { id -> roleCardStore.load(id) },
         memoryReader = { id -> memoryStore.read(id) },
         json = json,
-    )
+    ).also { CrashLog.mark("对话引擎已构造") }
 
     /**
      * 长期记忆压缩器。
@@ -194,7 +226,13 @@ class AppContainer(private val app: Context) {
             settings.collect { s ->
                 _settingsReady.value = true
                 // 屏幕形状可能是用户在引导页里手选的（ROM 的 isScreenRound 不一定可信）
-                val prof = DeviceProfiler.detect(app, s.cornerInsetDp, s.screenShape)
+                // 设备探测要读 Resources / WindowManager，个别 ROM 上屏幕形状会抛，
+                // 而它失败不该让整个界面出不来 —— 兜一个默认档继续跑。
+                val prof = runCatching { DeviceProfiler.detect(app, s.cornerInsetDp, s.screenShape) }
+                    .onFailure { Logx.w("Profile", "设备探测失败，回退默认档", it) }
+                    .getOrElse {
+                        DeviceProfiler.detect(app, -1, com.dshwatch.domain.model.ScreenShapes.AUTO)
+                    }
                 _profile.value = prof
 
                 var p = PerfProfiles.of(s.perfMode, prof.tier)

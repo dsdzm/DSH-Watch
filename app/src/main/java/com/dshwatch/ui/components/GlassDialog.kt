@@ -142,48 +142,49 @@ fun GlassDialog(
         // 整屏的基调从一开始就被钉在一个很低的亮度上。这就是用户那句
         // 「透明透过去也是黑的」的真正意思。
         //
-        // ## 正解：遮罩不是黑的，是毛玻璃
+        // ## 正解：模糊在**宿主页面**那一层，不在这个 Dialog 里
         //
-        // 正确的做法（也是各家真玻璃 UI 的做法）是：弹窗后面的整屏做**模糊**，
-        // 但不是**变暗**。模糊保留背景的亮度和色相，只把细节糊掉 ——
-        // 于是玻璃卡片透过去的是「糊掉但还亮着的背景」，而不是「一片黑」。
+        // `Dialog` 画在另一个 Window：它背后那页 Activity 根本不在这个节点的
+        // 绘制子树里，所以在这里挂 `blur` 从来就糊不到背景。
+        // 真正在糊背景的是 `GlassBackdropHost`（Backdrop.kt）—— 它包着页面，
+        // 弹窗通过 `LocalBackdropDepth` 通知它把计数加一。
         //
-        // 本项目 minSdk 28，`Modifier.blur` / RenderEffect 要 API 31，
-        // 所以这里有两条路，按系统版本分：
+        // ## 1.15.7：这一层自己挂模糊，把弹窗内容也糊没了
         //
-        //   · API 31+：`Modifier.blur` 真模糊，最接近原生体验
-        //   · API 28~30：`frostedBackground()` 的三层静态近似
-        //     （降饱和 + 摊开亮部 + **极轻**的压对比），只糊不暗
+        // 之前这里有一句 `.then(if (glass) Modifier.dialogBackdrop() else Modifier)`，
+        // 玻璃主题 + API 31+ 时它等于 `blur(26.dp)`。而 `Modifier.blur` 作用于
+        // **整个节点子树** —— 卡片 [Column] 是这个 Box 的 content，于是标题、
+        // 正文、按钮连同木板一起被糊。用户看到的就是「只显示一片模糊的背景，
+        // 没有内容」；圆屏只有 200dp 宽，26dp 相当于 13%，文字直接糊没。
         //
-        // 两者都**不再叠黑**。玻璃主题下这层的 `background()` 现在只在
-        // 非玻璃主题时保留 0.45 的实心压暗（那里没有磨砂，必须压）。
-        //
-        // 上一版磨砂里还留着 0.16 的压对比、本体又压到 0.34，
-        // 两个「暗」叠在一起 —— 这次一起撤掉。
+        // 结论：Dialog 这一层只负责两件事 —— 接住「点空白关闭」，以及
+        // 非玻璃主题时压一层黑。玻璃主题保持全透明，让宿主层的模糊透过来。
         // 通知宿主：把背景糊掉。这是「模糊」真正发生的地方 —— 见 Backdrop.kt。
-        // 弹窗消失时必须归零，否则页面回来还是糊的。
-        val veil = LocalBackdropVeil.current
+        //
+        // 这里是**计数**不是开关：两个弹窗叠在一起时（审批框 + 询问框），
+        // 先关的那个不能把闸拉回 0 —— 那样另一个还开着，背景却突然清楚了。
+        // 用计数就自然是「最后一个关掉才算关」。
+        val depth = LocalBackdropDepth.current
         DisposableEffect(Unit) {
-            veil.value = 1f
-            onDispose { veil.value = 0f }
+            depth.value += 1
+            onDispose { depth.value = (depth.value - 1).coerceAtLeast(0) }
         }
 
         val dismissInteraction = remember { MutableInteractionSource() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (glass) Modifier.dialogBackdrop() else Modifier)
                 .background(
                     when {
                         // 玻璃主题：底下已经是磨砂了，再压黑就又回到「透明透过去也是黑的」
                         glass -> Color.Transparent
                         // M3E 主题（OLED 黑 / 樱花 / 深海 …）**永远**自己压一层。
                         //
-                        // 这里是我上一版真正的漏洞：当时以为「背景已经被 dialogBackdrop 糊掉了，
-                        // 不需要再压」。但 dialogBackdrop 只在玻璃材质下生效，
-                        // 而 `Modifier.blur` 在 API 31 以下会被**静默忽略** ——
-                        // 于是这类设备上 M3E 的弹窗后面既没糊、也没压，
-                        // 用户看到的是一页清清楚楚的文字顶在弹窗后面。
+                        // 这里是我上一版真正的漏洞：当时以为「背景已经被弹窗层的
+                        // dialogBackdrop 糊掉了，不需要再压」。但那东西只在玻璃
+                        // 材质下生效，而 `Modifier.blur` 在 API 31 以下会被
+                        // **静默忽略** —— 于是这类设备上 M3E 的弹窗后面既没糊、
+                        // 也没压，用户看到的是一页清清楚楚的文字顶在弹窗后面。
                         // 0.45 是 M3 的标准 scrim 值。
                         //
                         // 系统支持背景模糊时（setBackgroundBlurRadius），压得更轻一点：

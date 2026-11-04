@@ -76,6 +76,7 @@ fun SettingsScreen(
     ) {
         WatchTopBar(title = s.navSettings, onBack = { nav.pop() })
         WearList(
+            state = com.dshwatch.ui.wear.rememberKeptScalingListState("settings"),
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {

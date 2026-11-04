@@ -150,7 +150,10 @@ fun Modifier.glassSurface(
 
     val perf = LocalPerf.current
     val animated = perf.enableAnimations
-    val rich = animated && perf.tier == DeviceTier.HIGH
+    // 这里原来写着 `animated && perf.tier == DeviceTier.HIGH`，但 rich 这个参数
+    // 在 drawGlassPanel 里从来没被读过 —— 是个死参数，写什么都一样。
+    // 更糟的是它跟 Modifiers.kt 的判据（`tier != LOW`）不一致，
+    // 将来谁想用它，两条规则会打架。直接删掉。
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.35f
     // 浅色底上「压暗」用的颜色：正文色。在 Composable 作用域里取好再传进 DrawScope
     val onSurface = MaterialTheme.colorScheme.onSurface
@@ -333,7 +336,6 @@ fun Modifier.glassSurface(
                     onClick == null && !trackPointer -> 0.45f
                     else -> 0f
                 } * (if (solid) 0.5f else 1f),
-                rich = rich,
                 solid = solid,
                 elevated = elevated,
                 alpha = if (enabled) 1f else 0.45f,
@@ -368,7 +370,6 @@ private fun DrawScope.drawGlassPanel(
     press: Float,
     sheen: Offset,
     sheenAlpha: Float,
-    rich: Boolean,
     solid: Boolean,
     elevated: Boolean,
     alpha: Float,
@@ -413,7 +414,7 @@ private fun DrawScope.drawGlassPanel(
             // 于是把本体压到 0.16、从背景透上来找色相。其实卡片灰是因为
             // **它背后那层被遮罩压黑了**，玻璃透过去的只有 55 的亮度。
             //
-            // 现在遮罩改成「只糊不暗」（见 Frosted.dialogBackdrop），
+            // 现在遮罩改成「只糊不暗」（模糊由页面层的 GlassBackdropHost 负责），
             // 背后回到 76~80，本体就该回到 0.34 —— 这时候透上来的是
             // 还亮着的背景，卡片才是「玻璃」而不是「灰板」。
             //

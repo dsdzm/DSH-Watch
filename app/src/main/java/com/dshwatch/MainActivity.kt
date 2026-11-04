@@ -7,13 +7,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.core.CrashLog
 import com.dshwatch.ui.AppRoot
 import com.dshwatch.ui.nav.rememberWatchNavigator
 import com.dshwatch.ui.theme.DshWatchTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -44,6 +48,35 @@ class MainActivity : ComponentActivity() {
                 // 设置没读出来之前什么都不画：否则 onboardingDone 的默认 false
                 // 会让老用户每次启动都闪一帧引导页。
                 if (settingsReady) {
+                    /*
+                     * 启动完成的判定点就放在这里，**不再放 AppRoot 里**。
+                     *
+                     * 原先写在 AppRoot 的第一帧，但 AppRoot 开头有一段
+                     * `if (!onboardingDone) { 引导页; return }` —— 新用户装完
+                     * 先看到的是 4 步引导，压根走不到那行 `endLaunch`。
+                     * 于是他中途退出（很常见），标记留着，下次启动就报
+                     * 「上次没能启动完成」。
+                     *
+                     * 这个假阳性最坏的地方在于：用户报的是「装上就闪退」，
+                     * 而我们看到的也是「上次没走完」—— 两条错的信息撞在一起，
+                     * 会直接把排查带偏。所以判定点必须前移到「只要能画出内容」。
+                     *
+                     * 写文件是同步 IO，挪到 IO 线程：手表上主线程一卡就是
+                     * 掉帧，没必要为了写几 KB 的文本赌这一下。
+                     */
+                    LaunchedEffect(Unit) {
+                        // 用 markFirstFrame 而不是 mark：这个 LaunchedEffect 会在
+                        // Activity 被系统回收重建后再跑一次，mark 会把第二次也写成
+                        // 「首帧组合完成」，报告里就出现两条一样的时间，看起来像启动花了
+                        // 两次那么久。markFirstFrame 只在第一次定格启动耗时，
+                        // 之后写「界面重建」。
+                        CrashLog.markFirstFrame()
+                        withContext(Dispatchers.IO) {
+                            // 顺序：先写体检（它要读"上次是否崩过"），再抹标记
+                            CrashLog.writeStartupSnapshot(this@MainActivity, perf.tier.name)
+                            CrashLog.endLaunch(this@MainActivity)
+                        }
+                    }
                     AppRoot(
                         container = container,
                         settings = settings,

@@ -63,7 +63,6 @@ import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -121,7 +120,6 @@ import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlin.math.sqrt
 import com.dshwatch.ui.theme.LocalGlass
 import androidx.compose.foundation.interaction.MutableInteractionSource
 
@@ -212,29 +210,20 @@ fun ChatScreen(
     val turns = remember(visible) { groupMessages(visible) }
 
     /*
-     * 圆屏的「弦长内收」。
+     * 圆屏「鱼眼」已整套移除（1.15.7）。
      *
-     * 圆屏上离屏幕中心越远，可用的横向宽度越窄：高度 y 处的半弦长是 sqrt(R²-y²)。
-     * 列表本身不知道每一项最终画在哪里，所以这里把 layoutInfo 里每一项的中心偏移
-     * 归一化成 t ∈ [-1,1]（0 = 正中，±1 = 顶/底），交给每一项按 1-sqrt(1-t²) 的比例
-     * 再收一次边、缩一点、淡一点 —— 这就是圆屏专属的呼吸感。
-     * 方屏恒为空表，不产生任何额外测量。
+     * 原先这里用 `derivedStateOf` 读 `layoutInfo.visibleItemsInfo`，把每一项离
+     * 屏幕中心的偏移归一化成 t，再交给 `roundRow` 改 padding / scale / alpha。
+     * 问题出在两个地方，合起来就是用户说的「对话框显示异常、文字抽搐」：
+     *
+     *   · `padding(horizontal = extra)` 每帧随滚动变化 → 每一项被反复重新测量，
+     *     文本可用宽度不停变，换行位置逐帧跳；
+     *   · `graphicsLayer { scaleX/scaleY }` 把已经栅格化的文字再缩放，
+     *     滚动时字号看起来在抖，环形布局那种窄气泡尤其明显。
+     *
+     * 圆屏的安全区由 `WatchScaffold.cornerSafe()` 和气泡自身的 `isRound` 宽度
+     * 负责，不需要再对每一项做动态几何变换。
      */
-    val roundShift by remember(round) {
-        derivedStateOf {
-            if (!round) {
-                emptyMap<Int, Float>()
-            } else {
-                val info = listState.layoutInfo
-                val half = ((info.viewportEndOffset - info.viewportStartOffset) / 2f)
-                    .coerceAtLeast(1f)
-                val cy = (info.viewportStartOffset + info.viewportEndOffset) / 2f
-                info.visibleItemsInfo.associate { item ->
-                    item.index to ((item.offset + item.size / 2f - cy) / half)
-                }
-            }
-        }
-    }
 
     // 首次进入：自动打开最近一个会话
     LaunchedEffect(Unit) {
@@ -281,7 +270,12 @@ fun ChatScreen(
             // 顶栏只剩最常用的四颗（编程场景）：历史 / 新建 / 切换模式 / 设置。
             // 设置从「右滑第二页」改成显式入口：横滑在圆屏上会和系统返回手势打架。
             // 酒馆与写作场景下 actions 里不会有「新建」（那是编程专属），只剩三颗。
-            IconTap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
+            IconTap(
+                icon = Icons.Outlined.History,
+                contentDescription = s.navSessions,
+            ) {
+                nav.push(Screen.Sessions)
+            }
             if (codingScene) {
                 IconTap(Icons.Outlined.Add, s.newChat) {
                     // 显式写死 scene：默认值 "" 在引擎里等同 coding，
@@ -297,7 +291,12 @@ fun ChatScreen(
                 // 而不是把当前会话改造成另一种东西（会话的场景在创建时就定死了）。
                 IconTap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
             }
-            IconTap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
+            IconTap(
+                icon = Icons.Outlined.Settings,
+                contentDescription = s.navSettings,
+            ) {
+                nav.push(Screen.Settings)
+            }
         },
         bottom = {
             ChatBottomBar(
@@ -485,7 +484,7 @@ fun ChatScreen(
                     items = turns,
                     key = { _, turn -> turn.key },
                     contentType = { _, turn -> turn.messages.first().role },
-                ) { index, turn ->
+                ) { _, turn ->
                     val msgs = turn.messages
                     val sizeOf: (String) -> Long = { path -> artifactSizeOf(container, path) }
                     val openArtifact: (String) -> Unit = { path -> nav.push(Screen.WorkspacePreview(path)) }
@@ -502,15 +501,7 @@ fun ChatScreen(
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
                     }
 
-                    // 圆屏：按这一条离屏幕中心的距离再收边 / 缩一点 / 淡一点
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .roundRow(
-                                shift = roundShift[index] ?: 0f,
-                                enabled = round && perf.enableAnimations,
-                            ),
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         if (msgs.size == 1) {
                             val message = msgs.first()
                             val isLive = live.messageId == message.id
@@ -916,28 +907,6 @@ private fun BubbleHeader(
         )
         trailing()
     }
-}
-
-/**
- * 圆屏的逐项「弦长内收」。
- *
- * [shift] 是这一项中心相对屏幕中心的归一化偏移（-1 顶边 / 0 正中 / 1 底边）。
- * 越靠边，额外内收越多、缩放越小、透明度越低 —— 这正是圆形屏幕该有的
- * 「贴边的东西自然退后」的观感，也顺带保证了贴边内容不会被圆切掉。
- * 只在圆屏 + 动画档启用；方屏和省电档直接返回原 Modifier。
- */
-private fun Modifier.roundRow(shift: Float, enabled: Boolean): Modifier {
-    if (!enabled) return this
-    val t = shift.coerceIn(-1f, 1f)
-    val extra = 20.dp * (1f - sqrt(1f - t * t))
-    val scale = 1f - 0.10f * t * t
-    return this
-        .padding(horizontal = extra)
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-            alpha = 1f - 0.35f * t * t
-        }
 }
 
 /**

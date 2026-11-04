@@ -92,6 +92,13 @@ object WearLayout {
 @Composable
 fun WearList(
     modifier: Modifier = Modifier,
+    /**
+     * 列表状态。
+     *
+     * 想在这个列表「返回后回到原位」时，传一个
+     * `rememberKeptScalingListState("页面名")`（见 ScrollMemory.kt）；
+     * 不传就是每次进页面从顶部开始。
+     */
     state: ScalingLazyListState = rememberScalingLazyListState(),
     contentPadding: PaddingValues? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),

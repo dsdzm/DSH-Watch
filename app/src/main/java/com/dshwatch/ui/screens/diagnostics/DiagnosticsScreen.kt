@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
+import com.dshwatch.core.EnvironmentWarning
 import com.dshwatch.data.settings.SecureKeyStore
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ProviderType
@@ -40,6 +41,7 @@ import com.dshwatch.ui.components.PrimaryButton
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.SettingCard
 import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.components.glassSurface
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
@@ -194,6 +196,40 @@ fun DiagnosticsScreen(
              */
             Spacer(Modifier.height(4.dp))
             com.dshwatch.ui.components.CrashReportCard(title = "上次崩溃的报告")
+
+            /*
+             * 运行环境告警。
+             *
+             * 华为 WATCH 4 这类机器跑的是 HarmonyOS，本身没有 Android 运行时；
+             * 能装 APK 是因为系统里带了一个 Android 兼容层。兼容层对
+             * RenderEffect / Keystore / 精确闹钟这几种东西的支持是残缺的，
+             * 「装上就闪退」几乎都出在这里。
+             *
+             * 与其等用户报上来再猜，不如在这条告警里直接说清楚：
+             * 你现在跑在什么上，哪些功能可能不可靠。
+             */
+            val envMessage = remember { EnvironmentWarning.message }
+            if (envMessage != null) {
+                Spacer(Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .glassSurface(shape = RoundedCornerShape(16.dp), cornerRadius = 16.dp)
+                        .padding(10.dp),
+                ) {
+                    Text(
+                        text = "运行环境",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = envMessage,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
 
             val recent = remember { com.dshwatch.core.Logx.recent() }
             if (recent.isNotEmpty()) {

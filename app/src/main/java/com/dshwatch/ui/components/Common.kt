@@ -159,6 +159,7 @@ fun WatchTopBar(
     }
 }
 
+/** 顶栏 / 工具条上的图标按钮（跟手光晕在 `.tap()` 里，和页面转场无关） */
 @Composable
 fun IconTap(
     icon: androidx.compose.ui.graphics.vector.ImageVector,

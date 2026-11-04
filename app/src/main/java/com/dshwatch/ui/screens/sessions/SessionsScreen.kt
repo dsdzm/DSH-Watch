@@ -98,6 +98,7 @@ fun SessionsScreen(
         // 外层 WatchScaffold 已经给了横向留白，这里只补上下的呼吸空间，
         // 否则会叠成两层内边距，在 205dp 的表盘上白白浪费 20dp 宽度
         WearList(
+            state = com.dshwatch.ui.wear.rememberKeptScalingListState("sessions"),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

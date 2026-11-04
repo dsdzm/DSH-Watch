@@ -6,9 +6,977 @@
 
 ---
 
+## [1.15.7] — 2026-11-03（versionCode 30）
+
+### 两个圆屏专属问题：弹窗没内容、文字抽搐
+
+用户实测：
+
+> 在华为手表等圆形手表上出现的，玻璃主题下弹窗类控件触发后只显示弹窗本身
+> 模糊的背景，没有内容的问题。以及圆形屏幕专属环形布局下，聊天页鱼眼效果
+> 导致对话框显示异常、文字抽搐（建议移除鱼眼特效）
+
+两条都不抛异常，所以只能从结构上找。
+
+#### 一、弹窗为什么「只剩一片模糊」
+
+`GlassDialog` 的遮罩根 Box 上原本挂着：
+
+```kotlin
+.then(if (glass) Modifier.dialogBackdrop() else Modifier)
+```
+
+玻璃主题 + API 31+ 时，`dialogBackdrop()` 等于 `blur(26.dp)`。而卡片 `Column`
+**就是这个 Box 的 content** —— `Modifier.blur` 作用于整棵绘制子树，
+于是标题、正文、按钮连同底板一起被糊掉。圆屏只有约 200dp 宽，
+26dp 相当于 13%，文字直接糊成一片色块，看起来就是「没有内容」。
+
+更根本的是，`Dialog` 画在**另一个 Window**：它背后那页 Activity 根本不在
+这个节点的子树里，在这里挂模糊从来就糊不到背景。真正在糊背景的是
+`GlassBackdropHost`（Backdrop.kt）—— 它包着页面，弹窗通过
+`LocalBackdropDepth` 通知它把计数加一。两层模糊是历史叠加，后者才是正解。
+
+**修法**：Dialog 这一层一点模糊都不挂，只负责接「点空白关闭」和
+非玻璃主题的压黑；玻璃主题保持 `Color.Transparent`，让页面层的模糊透过来。
+`Frosted.kt` 里 `dialogBackdrop()` / `frostedBackground()` / `drawFrost()`
+整套删掉，文件只留 `MIN_SDK_REAL_BLUR` 和给老设备画页面层静态雾的
+`drawFrostVeil()`。
+
+为什么之前没在别的设备上暴露：
+
+| 条件 | 结果 |
+| --- | --- |
+| 非玻璃主题 | `dialogBackdrop()` 第一行就 `return this`，空操作 |
+| API 28~30 | 走 `frostedBackground()`，用 `drawBehind` 只画背景，不碰子树 |
+| 玻璃主题 + API 31+（华为表这类） | 走 `blur(26.dp)`，糊掉整棵子树 ← 出问题的分支 |
+
+#### 二、鱼眼为什么让文字抽搐
+
+聊天页原来对每条消息都套一层 `roundRow`：
+
+```kotlin
+val roundShift by remember(round) {
+    derivedStateOf { /* 每帧读 listState.layoutInfo.visibleItemsInfo */ }
+}
+// ...
+.padding(horizontal = extra)     // extra 随滚动位置变
+.graphicsLayer {
+    scaleX = scale; scaleY = scale
+    alpha = 1f - 0.35f * t * t
+}
+```
+
+`visibleItemsInfo` 是滚动时每帧更新的，于是：
+
+1. `padding` 每帧变 → 每一项被**反复重新测量**，文本可用宽度不停变，
+   换行位置逐帧跳 —— 这就是「抽搐」；
+2. `graphicsLayer` 把已经栅格化的文字再做缩放，字号看着在抖，
+   环形布局那种窄气泡里最明显。
+
+按用户建议，**整套移除**：删掉 `roundShift` 计算、`.roundRow(...)` 调用、
+`roundRow()` 函数以及 `sqrt` / `graphicsLayer` 两个 import。
+消息项现在就是一个 `Column(Modifier.fillMaxWidth())`。
+
+圆屏适配本身没有丢：`WatchScaffold.cornerSafe()` 的侧边安全区、
+气泡按 `isRound` 收窄（0.86f / 0.92f）、右侧 `RoundScrollArc` 滚动弧线
+都还在 —— 移除的只是「逐项动态几何变换」。
+
+#### 三、静态防线
+
+- `GlassDialogScrimRuleTest` 补一条「弹窗窗口内不许挂任何模糊」：
+  原来那条只查 `Modifier.blur(`，查不到 `dialogBackdrop()` 这种间接调用，
+  正好漏掉了本次根因。新断言同时确认页面层的 `Modifier.blur(MaxBlurRadius`
+  和 `drawFrostVeil` 仍在 —— 别把修法做成「背景也不糊了」。
+- 新建 `ChatRoundRuleTest`：守鱼眼别再长回来（`roundRow` / `roundShift` /
+  `scaleX = scale` / 弦长公式 / 动态 padding 一律不许出现），
+  同时确认圆屏的其它适配还在。
+- 顺手把一条断言改成用**剥注释后**的源码扫描：注释里在讲「以前怎么实现」，
+  不剥就会被当成真实调用，假阳性。
+
+#### 产物
+
+- `DSH-Watch-v1.15.7-release.apk`（versionCode 30）
+- `sha256: 899523cb66d936ede5a8571e61c49dd12de3adfd5d64f40bd6b20c40c6344f8d`
+- 签名指纹不变（`70437a7f…bf31f94`），可覆盖安装
+- 单测 706 条，705 通过 / 1 跳过；release 构建 `BUILD SUCCESSFUL in 3m50s`
+
+---
+
+## [1.15.6] — 2026-11-03（versionCode 29）
+
+### 自定义缩放动画下线，改用安卓自带的页面切换
+
+用户原话：
+
+> 算了，删掉缩放动画和之前做的动画，用安卓自带的动画
+
+同意，而且早该这么做了。1.15 → 1.15.5 连着五版都在做「从按钮长成整屏」，
+每版都在真机上冒出新的**静默**故障：空白背景、先整页出现再播、负圆角闪退、
+黑色遮罩闪一下、动画卡一顿、退场没动画。共同点是这套效果全靠我们自己维护
+时序和几何 —— 抓快照、等绘制、算圆角、查矩形、管两个 slot、调曲线，
+任何一环在 192MB 的手表上错位一次，就是不报错、不打日志的「没动画」或「只有背景」。
+
+现在交给平台：
+
+```kotlin
+AnimatedContent(
+    targetState = nav.current,
+    transitionSpec = { fadeIn() togetherWith fadeOut() },
+) { screen -> content(screen) }
+```
+
+`AnimatedContent` 和 `fadeIn()` / `fadeOut()` 都是 `androidx.compose.animation`
+**官方自带**的标准转场，没有自定义几何、没有状态机、没有回调握手。
+系统「开发者选项 → 过渡动画缩放」也能正常影响它。
+两页都满屏，自带的 `SizeTransform` 实际不会改变尺寸，也就不再额外干预。
+
+#### 删掉了什么
+
+| 文件 / 代码 | 原本的职责 |
+| --- | --- |
+| `Motion.kt` | 一次性转场事务 |
+| `ExpansionTransition.kt` | 过冲曲线、坐标换算、负圆角兜底 |
+| `BackNav.kt` | 返回按钮矩形、`LocalNavigator` / `LocalBackButtonBounds` |
+| `NavigationOrigin.kt`（1.15.5 已删） | `Screen -> Rect` 查表 |
+| `ExpansionHost.kt` | `graphicsLayer` 整屏缩放、`TransformOrigin`、`Animatable`、两页 slot 手搓时序 |
+| `WatchNavigator` 里的 `pushFrom` / `popFrom` / `leavingScreen` / `leaveTarget` / `lastBackBounds` | 导航器参与的转场状态 |
+| `IconTap(onBounds)` / `boundsInRoot()` | 为转场上报按钮位置 |
+| `AppRoot` 的 `CompositionLocalProvider(LocalNavigator ...)` | 把导航器塞给顶栏记位置 |
+
+导航器现在只做一件事：改栈。`push()` / `pop()` 都是同步的，
+系统返回键和侧滑返回直接 `nav.pop()`，动画由宿主监听 `current` 变化自己播。
+
+入口也改回普通 `push`：
+
+```kotlin
+// 之前
+nav.pushFrom(Screen.Sessions, historyBounds)
+// 现在
+nav.push(Screen.Sessions)
+```
+
+#### 保留的两条历史教训
+
+和动画方案无关，换掉动画也不能一起弄丢：
+
+1. **`content` 必须用 lambda 给的 `screen` 渲染**。转场期间新旧两页同时在组合里，
+   读外层 `nav.current` 会让两页画成同一份 —— 1.15.3 的「新页先出现一下」就是这么来的。
+   官方 `AnimatedContent` 一样有这个坑。
+2. **底下垫一层 `colorScheme.background`**。两页交叉时 alpha 都不满 1，
+   露出来的必须是纸，不是 Activity 窗口底色（OLED 主题下就是纯黑）。
+
+另外这些独立功能原样保留：返回列表的位置记忆（`rememberKeptScalingListState`）、
+质感玻璃背景与弹窗模糊、按钮跟手光晕、LOW 性能档绕过动画的省电保护、
+崩溃报告 / 版本提示浮层挂在转场之外。
+
+#### 测试
+
+`ExpansionTransitionRuleTest` 整个重写。职责从「守住动画的每个细节」变成
+「**守住自定义动画不要再回来**」：断言宿主里只剩官方 `fadeIn`/`fadeOut`、
+不许出现 `graphicsLayer` / `TransformOrigin` / `Animatable` / `CubicBezierEasing` /
+抓快照 / `delay` 等任何手写时序；四个只服务于转场的文件必须已删除；
+导航器不许再出现 `pushFrom` / `Motion` / `Rect`；按钮不许再上报矩形。
+同时保留返回同步出栈、列表位置记忆、浮层位置、跟手光晕这些仍然成立的断言。
+
+#### 产物
+
+- `DSH-Watch-v1.15.6-release.apk`（versionCode 29）
+- `sha256: 7cfb1db654e8fa1324b58921def2037b20ff46c8104bc7c0363a2ae2c97aec4d`
+- 签名指纹不变（`70437a7f…bf31f94`），可覆盖安装
+- 单测 703 条，702 通过 / 1 跳过
+
+#### 手感变化
+
+点历史 / 设置不再从按钮放大，返回也不再缩回按钮 —— 就是系统标准的淡入淡出。
+这是有意的取舍：少一点花活，换一个不会再安静坏掉的应用。
+
+---
+
+## [1.15.5] — 2026-11-03（versionCode 28）
+
+### 第十七次重发：把状态机整个删掉
+
+用户实测：
+
+> 这一版很明显的感觉就是动画不跟手卡一顿的，退出的时候没有动画，直接回到上一页面。
+
+两条症状，同一个根因：转场靠**好几个互相咬合的状态**共同决定「现在该播什么」。
+任何一处错位，行为就静默降级成硬切 —— 不抛异常、不打日志，只是"没动画"。
+
+#### 一、为什么退场时有时无
+
+上一版有一条 `Screen -> Rect` 的表，退场时拿当前页去查「当初从哪儿进来的」：
+
+```kotlin
+val origin = originOf(current)   // 查不到 → null
+```
+
+查不到就只淡出，用户看到的就是「直接回到上一页面」。而查不到的情况比想象中多：
+只有聊天页顶栏的历史 / 设置两个入口走 `pushFrom`，其余页面全是普通 `push`，
+根本没往表里写过东西。于是**同一台机器上，退场动画时有时无**。
+
+另外还有两条独立通路，都通向同一个结果：
+
+| 通路 | 后果 |
+| --- | --- |
+| 退场终点和入场共用 `motion` | 入场播完 `clearMotion()` 把它清成 `null`，而那一刻恰好是退场刚开始 → 终点读成空 → 几何变换整段跳过 |
+| `BackHandler` 里 `if (b.width > 0f) popFrom(b) else pop()` | `lastBackBounds` 还没刷新时是 `Rect.Zero` → 直接硬切，连淡出都没有 |
+
+现在三处一起改：
+
+- 删掉 `NavigationOrigin.kt`，改成**一次性事务** `Motion(from, to, isPop)`，用完即清。没有表，就没有「查不到」这个分支。
+- `leavingScreen` / `leaveTarget` 独立字段，在 `popFrom` **出栈那一刻**同步写好，不依赖任何回调回来补。
+- 系统返回 / 侧滑返回统一 `nav.popFrom(b)`，取不到矩形也由 `popFrom` 内部退化（仍然同步出栈）。
+
+#### 二、为什么起手会「卡一下」
+
+`Animatable(0f)` + `LaunchedEffect { animateTo(1f) }` 看着没问题，但 `LaunchedEffect`
+要等这一帧组合并绘制完才执行。于是第一帧画的是**满屏**，第二帧才缩回按钮重新长 ——
+用户感知就是"顿一下才动"。这跟 `onGloballyPositioned` 首帧为 0 是两码事，
+上一版只修了后者。
+
+这次连 `AnimatedContent` / `EnterExitState` 一起删掉，宿主自己决定渲染哪两页，
+`Animatable` 的**初值直接就是起点**：
+
+```kotlin
+val progress = remember(screen, leaving) {
+    Animatable(if (anchor == null || leaving) 1f else 0f)
+}
+```
+
+入场初值 `0` → 第一帧就是按钮那么大；退场初值 `1` → 第一帧就是满屏。
+`LaunchedEffect` 只负责从那里继续播，不再负责「把页面从满屏拉回起点」。
+
+#### 三、两页同时在场，各自的活
+
+| 动作 | 上层 | 下层 |
+| --- | --- | --- |
+| 进入 | 新页：按钮 → 全屏（不透明） | 上一页满屏不动，被逐渐盖住 |
+| 退出 | 旧页：全屏 → 按钮（`zIndex = 1f`，末段轻微淡出） | 回到那一页，满屏不动 |
+
+退场前 `delay(24ms)` 让出一帧：出栈发生在点击回调里，不让的话第一帧就是缩小中的
+中间态，看着像"跳了一下"。`onDone` 用 `rememberUpdatedState` 取最新引用，
+避免每次重组都把动画从头播一遍。
+
+曲线保持非线性：入场 `cubic-bezier(0.16, 1, 0.3, 1)` / 300ms，
+退场 `cubic-bezier(0.7, 0, 0.84, 0)` / 220ms（离开时用户已经决定了，略快）。
+
+#### 四、顺手修了两条「测试自己骗自己」
+
+这条值得单列，因为它已经坑过好几轮：静态扫描测试里，断言写得不严比没有断言更糟。
+
+1. `clearMotion` 那条用**注释**当分隔符：`nav.substringAfter("fun clearMotion()")
+   .substringBefore("/**\n     * 退场。")`。可源码先被 `stripComments()` 剥过，
+   分隔串根本不存在 → 一路取到文件末尾 → 把 `clearLeaving` 里的
+   `leaveTarget = null` 算到 `clearMotion` 头上，断言失败。改成按花括号配平取函数体，
+   并额外断言「函数体非空」（空串会让 `!contains(...)` 假通过）。
+2. 「浮层不能挂在页面子树里」用 `overlay > expansion.indexOf("        }\n\n        /*")`。
+   同样剥过注释，`indexOf` 返回 `-1`，于是 `overlay > -1` **恒真** —— 这条断言从来没生效过。
+   改成括号配平求 `ExpansionHost` 内容 lambda 的真正结尾再比位置。
+
+配套加了 `stripStrings()`（Kotlin 的 `"${foo}"` 里的花括号会干扰配平）和
+`matchBracket()`。写注释时顺手敲了个 `/**`，Kotlin 块注释是**可嵌套**的，
+外层注释被重新开了一层导致编译失败 —— 也一并改掉了。
+
+#### 产物
+
+- `DSH-Watch-v1.15.5-release.apk`（versionCode 28）
+- `sha256: 163ae0e1173ac583789b0ee84a5b10815f00b1be715b847fae476310b1f8caf1`
+- 签名指纹不变，可覆盖安装
+- 单测 708 条，707 通过 / 1 跳过
+
+#### 还是只有两个入口
+
+`pushFrom` 仍只在聊天页顶栏的历史 / 设置两处调用，其余页面走普通 `push`。
+现在退场不再依赖「当初有没有登记过起点」，只依赖返回那一刻能否拿到矩形；
+拿不到仍然会退化成直接切页（有尺寸才有几何可播）。入场动画要铺开，
+等这两处手感确认了再说。
+
+---
+
+## [1.15.4] — 2026-11-03（versionCode 27）
+
+### 第十六次重发：两个"看起来像时序"的 bug，其实都是结构问题
+
+用户实测：
+
+> 这一版点击设置之后先出现了下一页面，然后再播放的动画，
+> 退出页面的时候会有黑色的遮罩闪一下
+
+两条都发生在上一版的"直接缩放真实页面"方案里。上一版我以为问题只剩手感，
+实际上还有两个**必然出现**的结构缺陷。
+
+#### 一、为什么"先出现下一页，再播动画"
+
+上一版的尺寸是这么拿的：
+
+```kotlin
+var pageBounds by remember { mutableStateOf(Rect.Zero) }
+Box(Modifier.onGloballyPositioned { pageBounds = it.boundsInRoot() })
+```
+
+`onGloballyPositioned` 要等**布局量完**才回调，而 `graphicsLayer` 的 block
+在 **draw 阶段**执行。第一帧：
+
+```
+pageBounds = Rect.Zero  →  判到"宽高太小" → 整段变换跳过
+                        →  页面按 1:1 画了一次完整的
+```
+
+等测量值到位，才开始从按钮缩放。用户看到的就是"新页先整个出现一下，
+然后缩回去重新长"。**这不是时序微调能救的，是取值的源头错了。**
+
+现在整屏尺寸从 `BoxWithConstraints` 的 `constraints` 直接读 —— 组合期就确定，
+第一帧画出来就是按钮那么大。
+
+#### 二、更隐蔽的一个：两个 slot 画的是同一页
+
+`AnimatedContent` 会把 `Screen` 参数交给 content lambda。上一版的签名是
+
+```kotlin
+content: @Composable () -> Unit     // ← 参数被丢掉了
+```
+
+而 AppRoot 里 lambda 读的是外面那个 `val screen = nav.current`。于是转场期间
+**两个 slot 都渲染成新页**，旧页的位置上放的是新页的一份拷贝。
+
+这也解释了为什么"先出现下一页"看起来特别真：那一刻屏幕上确实有两个新页。
+
+现在 `content: @Composable (Screen) -> Unit`，各画各的。
+
+#### 三、"黑色遮罩闪一下"
+
+退场只有 `fadeOut`。旧页整块变透明，而它底下没有别的东西 ——
+上一页此刻也不在组合里，露出来的是 Activity 窗口的底色。
+OLED 主题下那就是纯黑，所以是"黑色遮罩"。
+
+现在两页同时在组合里：
+
+| 动作 | 上层 | 下层 |
+| --- | --- | --- |
+| 进入 | 新页（从按钮长到全屏） | 旧页不动，被逐渐盖住 |
+| 退出 | 当前页（从全屏缩回按钮，同时淡出） | 上一页满屏不动 |
+
+任何一帧都至少有一页是满的，**结构上不可能露底**。另外 `ExpansionHost`
+外面还垫了一层 `colorScheme.background`，双保险。
+
+#### 四、顺手修掉的三处
+
+1. **返回时上一页会重播入场**。它有起点记录，于是"退回去"变成了
+   "上一页也从按钮里长一次"。新增 `NavDirection`：只有 PUSH 才播入场，
+   POP 时露出来的那页直接满屏。
+2. **push 时旧页在底下淡出**。`EnterExitState.PostExit` 对 push 的旧页同样成立，
+   上一版把它也当退场，旧页一边淡一边等新页盖上来 —— 中间就露出底色。
+   现在 `leaving = exiting && !pushing`。
+3. **浮层被画了两份**。崩溃报告、版本提示挂在页面子树里，转场期间两页各画一份，
+   点掉一份另一份还在，表现为"点了知道了没反应"。已提到转场外面，
+   顺带也不再跟着页面缩放。
+
+#### 五、入场不再半透明
+
+上一版从 `alpha = 0.55` 起步，本意是"看见东西在长大"。但两页叠着时，
+半透明的新页会透出下面那一页的字 —— 200dp 的小屏上两套文字重影，
+比"突然出现"难看得多。改成实心缩放：一个小号的完整页从按钮里长出来。
+
+#### 产物
+
+- `DSH-Watch-v1.15.4-release.apk`（versionCode 27）
+- `sha256: e753f955c958be9e717c09b29d7d0a4d0e98d23d6fcd107be5210bb674abff9e`
+- 签名指纹不变，可覆盖安装
+- 单测 709 条，708 通过 / 1 跳过
+
+#### 还是只有两个入口
+
+`pushFrom` 目前只在聊天页顶栏的历史 / 设置两处调用。其余页面走普通 `push`，
+没有起点 → 不播几何动画（直接出现）。等这两处手感确认了再铺开。
+
+---
+
+## [1.15.3] — 2026-11-03（versionCode 26）
+
+### 第十五次重发：转场推倒重来
+
+用户反馈上一版：「现在没有动画，但是页面不再是空白背景了，
+你可以参考一下 GitHub 上的动画实现逻辑」。
+
+#### 三代手搓转场的体检报告
+
+| 版本 | 做法 | 坏在哪 |
+| --- | --- | --- |
+| 1.15 | 快照 + graphicsLayer | 圆角算成负数，draw 阶段抛异常，**闪退** |
+| 1.15.1 | 快照 + `delay(32)` 猜帧 | 猜错 → 空快照 + 真实页被藏 → **空白** |
+| 1.15.2 | 等绘制回调置位 + 坐标换算 | 不坏了，但**不播** —— 时序依然对不上 |
+
+三次都坏在同一个层面：**手写的转场每个环节都能悄悄错，错了还不报错**。
+录制时机、隐藏时机、坐标系、生命周期，四项里任何一项错位，
+表现都是"页面不见了"或"没有动画"，而日志里一片安静。
+
+#### 这一版把能砍的都砍了
+
+| 之前 | 现在 |
+| --- | --- |
+| 抓快照，藏真实内容，播完再露 | **不抓快照**，直接对真实页面 `scale + 平移` |
+| 等"抓到了"再开播（两次握手） | 每页进场直接播，零握手 |
+| 窗口坐标 / 节点坐标 / root 坐标三种混用 | 只用 **root 一套** |
+| 五个布尔标志组成的状态机 | 一个 `Rect` |
+
+直接缩放真实页面的代价：缩到很小时文字会糊。但那是**显示列表变换**，
+不是重新排版；而快照方案要赌录制时机，赌错的后果是整页空白。
+权衡下来，糊一点可以接受，空白不行。
+
+#### 关键点：缩放原点落在按钮中心
+
+`TransformOrigin(0..1, 0..1)` 是相对本节点的**比例**，按钮给的是**像素矩形**：
+
+```kotlin
+val ox = ((a.center.x - pageBounds.left) / pageBounds.width).coerceIn(0f, 1f)
+val oy = ((a.center.y - pageBounds.top) / pageBounds.height).coerceIn(0f, 1f)
+transformOrigin = TransformOrigin(ox, oy)
+```
+
+少这一步，动画就从页面中心往外胀 —— 像"页面原地弹了一下"，
+而不是"从按钮里长出来"。
+
+#### 顺手加了两个诊断点
+
+前三轮排查全靠猜"卡在哪一环"。现在日志里直接有：
+
+```
+I/Perf       档位=LOW 模式=PERFORMANCE 动画=true
+W/Transition 页面=SessionsScreen 起点=120x120@310,90
+```
+
+`sessions` 那条如果写「起点=无（不播动画）」，说明按钮没上报坐标；
+如果写了尺寸却还是不动，说明问题在动画本身。**不用再猜**。
+
+#### 顺带清场
+
+- `popFrom` 不再有"等快照再出栈"：同步 `removeAt`。返回键失效那类 bug
+  从结构上不可能再出现
+- 删掉 `TransitionBridge` / `LocalSharedTransitionScope` 等试验残留
+- 单测按新实现重写：撤掉守"快照时机"的旧断言（守的东西已经不存在了），
+  换成守"原点换算""坐标统一""必须同步出栈"
+
+#### 产物
+
+- `DSH-Watch-v1.15.3-release.apk`（versionCode 26）
+- `sha256: 0d377ce6c574c736144cf3591a44d66258ba1d0174ae65fe59a058388f04c7e0`
+- 签名指纹不变，可覆盖安装
+
+#### 下一步
+
+退场（缩回按钮）这一版还是淡出，没做缩放。先确认入场对了，
+再把同一套原点算法反过来用 —— 现在只差一个"退场时读哪个按钮"的取值。
+
+---
+
+## [1.15.2] — 2026-11-03（versionCode 25）
+
+### 第十四次重发：转场把人弄丢了 —— 闪一下就只剩背景
+
+用户报告：
+
+> 现在点击历史和设置就会闪一下下一页面，然后页面就显示为背景了，全程没有报错
+
+截图是一整屏空背景。**没有崩溃**，所以不是上一版的圆角问题 —— 是转场本身的逻辑错。
+
+#### 三个错叠在一起
+
+**错一：先藏，后抓**
+
+```kotlin
+alpha = if (state.expanding || state.shrinking) 0f else 1f
+```
+
+只要进了动画状态就把真实页面藏起来，**不管快照抓没抓到**。
+抓图靠 `LaunchedEffect` 里 `delay(32)` 猜帧 —— 猜错就是一张空图。
+结果：真实页面被藏了、快照是空的，屏幕上什么都没有 —— 正好是截图那样。
+
+**错二：`delay(32)` 猜帧本来就不该用**
+
+`drawWithContent` 的绘制回调在 draw 阶段跑，`LaunchedEffect` 的协程体
+在 composition 的 apply 之后 resume，两者的相对顺序取决于这一帧的调度。
+32ms 在 60Hz 上勉强够两帧，但这一帧如果刚好赶上主线程忙（进新页要建一堆
+Composable），就完全跟不上。
+
+改成：绘制回调抓完图**置一个标志**，`LaunchedEffect` 用 `withFrameNanos` 轮询
+这个标志，`withTimeoutOrNull(300)` 兜底。
+
+**错三：窗口坐标当节点坐标用**
+
+`boundsInWindow()` 是**窗口**坐标（不含窗口内边距：手表圆角安全区、状态栏），
+而 `graphicsLayer.translationX/Y` 是**本节点**坐标。直接拿窗口坐标去平移，
+快照整体偏左上一个 inset —— 动画结束、真实页面露出来时，内容和手指底下对不上。
+
+新增 `toLocalRect(selfBounds, rect)`，宿主自己也用一个 Box 记录 `selfBounds`。
+
+#### 外加一道保险
+
+`pushFrom` 拿不到按钮矩形时，**不通知宿主**。以前是"通知了但宿主自己判无效"，
+两边判据不一致就会出现"进了动画状态但没起点"的空窗。
+
+#### 无报错的原因
+
+`graphicsLayer` 里的几何计算包了 `runCatching`（上一版加的），
+出错时静默退化成硬切。这次"只剩背景"就是退化的样子 —— 有兜底，但没有内容。
+
+#### 单测
+
+新增 3 条 / 改写 2 条（共 705 条，通过 704、跳过 1）：
+
+| 用例 | 守的是 |
+| --- | --- |
+| `alpha` 判据必须包含"已抓到"标志 | 错一 |
+| 抓图标志必须在绘制回调里置位 + 有超时 | 错二 |
+| 必须过 `toLocalRect`、不许把窗口坐标直接喂给变换 | 错三 |
+| `pushFrom` 的 `onExpansionStart` 必须在尺寸判断之内 | 保险 |
+| 起点 / 终点无效时必须提前 return / finishCollapse | 不留半截状态 |
+
+#### 产物
+
+- `DSH-Watch-v1.15.2-release.apk`（versionCode 25）
+- `sha256: 5d53c75fd69f8d889e4ae8720a811380c175bdc3cfb665ccf6cbd08227722524`
+- 签名指纹不变（`70437a7f…bf31f94`），可覆盖安装
+
+#### 一个没能根除的东西
+
+`ExpansionHost` 里有两处 `runCatching` 兜底，所以**以后再出同类问题，
+依然会是"没有报错"**。下次遇到"动画不对"，先看是不是变回了硬切（没有动画、
+直接换页）—— 那说明兜底又接住了一次。
+
+---
+
+## [1.15.1] — 2026-11-03（versionCode 24）
+
+### 第十三次重发：转场末段圆角算成负数，真机必闪退
+
+真机报告：
+
+```
+启动耗时：15701ms（崩在启动阶段）
+java.lang.IllegalArgumentException: Corner size in Px can't be negative
+(topStart = -0.06832868, topEnd = -0.06832868, ...)
+	at androidx.compose.ui.graphics.BlockGraphicsLayerElement.f
+	...
+	at android.view.Choreographer.doFrame
+```
+
+#### 根因
+
+`ExpansionGrow` 的控制点 y = **1.06**（要让尺寸"末段轻轻回弹收住"）。
+贝塞尔曲线在 t≈0.7 附近会短暂越过终点，输出约 **1.0007**。
+于是：
+
+```kotlin
+RoundedCornerShape((small.height / 2f) * (1f - grow))
+//                             96/2  ×  (1 - 1.0007)   ≈  -0.07px
+```
+
+`RoundedCornerShape` 对负半径**没有兜底**，构造时直接抛 `IllegalArgumentException`。
+
+#### 为什么一崩就整个进程没了
+
+这段代码在 `graphicsLayer { }` 的 block 里，跑在 **draw 阶段**。
+异常依次穿过 `drawLayer` → `Recomposer` → `Choreographer.doFrame` → `Looper`，
+沿途没有任何 Compose 边界（`try/catch`、`ErrorBoundary`）能接住，
+最终由 `RuntimeInit.main` 带走整个进程 —— 所以崩溃报告里的耗时
+（15701ms）对不上启动阶段日志（首帧 1705ms），它其实是"活了 15 秒才死"。
+
+#### 修法
+
+1. **`expansionCornerPx`**：下限夹 0、上限夹半高、NaN 归零。
+   grow 超界是正常现象，不是错误输入，要在计算处自己兜住。
+2. **整个 `graphicsLayer` block 包 `runCatching`**：转场只是装饰，
+   最差的结果是"没有动画、直接切页"，绝不是"应用没了"。
+   出错时把 scale/translation 复位，不留半截缩放。
+3. **删掉同名的旧 `ExpansionTransition` 类**：它和 `ExpansionHost` 里的实现并存，
+   一个用 `shadowElevation` 假扮圆角（根本不生效），一个用 `shape`。
+   两套代码并存迟早会改错文件 —— 这轮已经差点改错。
+
+#### 单测
+
+新增 3 条 / 扩充 1 条（共 702 条，通过 701、跳过 1）：
+
+| 用例 | 守的是 |
+| --- | --- |
+| 过冲值 1.001 / 1.03 / 1.06 / 1.5 / 100 全部 ≥ 0 | 这次崩溃本身 |
+| grow=0 得半高、grow=1 得 0、负方高度与 NaN 不抛 | 正常区间没被改坏 |
+| `RoundedCornerShape` 的参数必须来自 `expansionCornerPx` | 防"纯函数测对了但调用点没用" |
+| `graphicsLayer` 里必须有 `runCatching` 且复位 scale | 防下一次同类崩在 draw 阶段 |
+
+#### 影响面
+
+- 只有在「设置 → 性能 → 性能优先」下才会走这段动画，所以**开了性能优先就 100% 复现**
+- LOW 档设备 `ExpansionHost` 开头就 return，不进这段代码 —— 这也是它没在更早暴露的原因
+- 已复现条件确认：每次播到底都会踩，不是偶发
+
+#### 产物
+
+- `DSH-Watch-v1.15.1-release.apk`（versionCode 24）
+- `sha256: f9d9f9841b6e715418e71e3cb044203736b21e2b9f7a335f3f3862b7a5ecdafc`
+- 签名指纹与 1.15 一致（`70437a7f…bf31f94`），可直接覆盖安装
+
+---
+
 ## [1.15] — 2026-11-03（versionCode 23）
 
-这一版只有一件事：**让崩溃变得可查**，外加把上一轮反馈的四条收干净。
+### 第十二次重发：列表位置记忆 + 页面从按钮长出整屏
+
+用户要求两件事：返回后列表别跳回表头；点按钮后页面从按钮放大铺满全屏，
+退出时缩回按钮，非线性、要生动。
+
+#### 一、列表跳回顶部
+
+根因不是"手感问题"，是**必然**：`AppRoot` 里 `when (screen)` 是"通过即销毁"，
+push 新页后旧页整棵子树移出组合，`rememberScrollState()` 随之销毁，
+pop 回来拿到的是全新的 0。
+
+`rememberSaveable` 救不了这个场景 —— 它只在配置变更/进程重建时恢复，
+页面整个离开组合时那份状态跟树一起没了。
+
+新增 `ScrollMemory`（组合树之外的 Map）+ `rememberKeptScrollState` /
+`rememberKeptScalingListState`。已接：会话列表、设置、服务商、工作台。
+写回用 `DisposableEffect(onDispose)`，且把当前值作为 key ——
+不带 key 的话闭包捕获的是初始值，存回去的永远是 0。
+
+#### 二、从按钮长成整屏（按用户建议用快照）
+
+```
+点按钮 → keepBounds 记下矩形 → pushFrom
+      → 新页按整屏尺寸离屏画一帧 → 抓成 layer
+      → 从按钮矩形长到全屏 → 播完露出真实页面
+```
+
+**为什么不能直接缩放页面**：布局早按整屏算完了，scale 缩到 0.1 倍时
+看到的是"排好版的文字被挤成一撮"；而且 Lazy 列表 measure 看到真实尺寸，
+整屏缩放等于让它反复改变可视范围，低端机直接卡成幻灯片。
+
+**非线性**：位移 `cubic-bezier(0.16,1,0.3,1)`（先快后慢）、
+尺寸 `cubic-bezier(0.34,0.02,0.2,1.06)`（先慢后快带轻微回弹）。
+一条曲线做不出层次：同时快是"唰"一下，同时慢前段又看不出变化。
+圆角同步收敛：长出时是按钮的圆角，铺满时是方角。展开 300ms、收回 240ms。
+
+**退场最难**：pop 之后当前页立刻离开组合，抓不到任何东西。
+解法是 `popFrom` 只挂请求（`pendingPop`），由绘制回调在"页面还在"的那一帧
+抓下快照，抓完才播缩小、播完才真正出栈。
+
+#### 三、一个会让返回键彻底失效的 bug（写的时候抓到的）
+
+```kotlin
+pendingPop = true
+onCollapseStart?.invoke(to)   // 宿主为 null 时什么都不会发生
+```
+
+`finishCollapse` 只由宿主调用。宿主为 null → `pendingPop` 永远为 true →
+栈永远不弹 → **返回键彻底失效**。而"没有宿主"恰恰是最常见的状态：
+LOW 档设备上 `ExpansionHost` 开头就 `if (reducedMotion) { content(); return }`。
+
+也就是说，如果没检查这一处，用户这台机器装上就当场返回不了。
+现在空宿主直接 `pop()`，并有静态测试守着。
+
+#### 四、转场默认不开
+
+抓快照要真实绘制一帧，LOW 档设备上几十毫秒 —— "点了没反应"比"没动画"更难受。
+所以 `reducedMotion` 时整段绕过，不做半吊子降级。用户可在
+设置 → 性能 → 性能优先 手动打开。
+
+已接入的入口：聊天页顶栏「历史 / 设置」、系统返回手势（缩回返回按钮）。
+其余入口（设置项、会话项、酒馆卡片）暂未上报位置，仍是直接切页 ——
+先验证这两个顺不顺手，再铺开。
+
+---
+
+### 第十一次重发：让「上次没走完」变得可解释
+
+第三份报告里两件事：
+
+**真事：「❌ 没走完」是真的。** 标记时间 19:29:43，体检写入 19:29:54，
+晚于安装时间 —— 是这版自己留下的。上一轮修掉覆盖安装误报之后，这条不再是噪音。
+
+**假事：`界面重建第 1 次` 被我自己的排版搞成了"重启"。**
+同一份报告里 `Application.onCreate 开始` 只出现一次、`首帧` 只记了一次，
+但「界面重建」被我塞进了「启动各阶段」列表，时间戳 11181ms 又排在 568ms 后面 ——
+读起来就是启动又走了一遍。实际是 Activity 被系统回收后重建，`Application` 根本没动。
+
+改法不是加措辞，是**换前缀**：启动阶段用 `L/`，运行期事件用 `R/`，
+体检里分成两段输出（「---- 启动各阶段 ----」和「---- 进程运行期事件（不属于启动）----」）。
+措辞会被误读，前缀不会。
+
+#### 心跳：让「没走完」分出性质
+
+原来只写一句「疑似闪退」，等于没说。上个进程活了 3 秒还是 3 小时，
+一个是启动期崩溃、一个是系统回收后台，性质完全相反。
+
+- 新增 `touchAlive()`：`filesDir/alive.at` 存最后一次存活时间
+- `DshWatchApp` 起一个 30 秒循环刷它。用 appScope 死循环而非 AlarmManager：
+  纯诊断用，不值得换醒系统；进程被冻结时循环也会停，那恰好也是我们想知道的事
+- 体检新增一行：`上次进程：上个进程启动于 …，最后一次还活着：…，存活 xx 秒`
+- `endLaunch` 额外记 `launch.ok.at` —— 抹标记之前写，抹完就分不清
+  「正常退出」和「进程被杀」了
+
+#### 一个观察
+
+四轮下来，「闪退」这件事到现在仍然是**一条真凭据都没有**：
+第一、二份是覆盖安装误报，第三份这次的标记晚于安装时间但进程活了多久还不知道。
+新增的心跳就是为了让下一次能直接下结论。
+
+---
+
+### 第十次重发：那条「上次没走完」是我的误报
+
+用户贴回第二份体检，同时说了一句：「我应用是正常启动的，没有闪退」。
+
+而报告里写着 `上次启动：❌ 没走完（疑似闪退）`。**用户是对的，报告是错的。**
+
+#### 根因：覆盖安装必然杀进程
+
+`launch.inprogress` 在 `filesDir` 里，覆盖安装不会清。系统装新版之前先杀旧进程，
+旧进程当然来不及执行 `endLaunch`，标记就留下了。新版一启动读到它 → 判定"上次崩了"。
+
+**这是最常见的安装方式，所以这条误报几乎每次覆盖安装都会出现一次。**
+上一轮我说"4 条失败记录比你正常退出的概率高，它确实摔过" —— 现在看，
+那 4 条很可能全是这个。这是我第二次被自己的取证工具骗（第一次是把体检写成了
+倒序）。
+
+修法：把标记的时间戳和 `PackageManager.lastUpdateTime` 比。
+标记早于安装时间 → 属于上一个安装实例，判 `STALE`，报告里写「➖ 忽略」。
+时间读不出来时（部分 ROM 会抛）**保守判 CRASHED** —— 宁可多报，不能漏真的。
+
+#### 顺带拆掉的两处误导
+
+**`本次启动：10897ms`** 看上去像启动花了 11 秒。真实含义是"进程已经活了 11 秒"。
+拆成两行：
+```
+本次启动：589ms 到第一帧
+本进程已运行：10897ms
+```
+第一行才是启动耗时，而且 `firstFrameAt` 一旦写定就不再变。
+
+**`首帧组合完成` 出现两次**（589ms / 10896ms）。第二条不是重复打点，
+是这个 Activity 被系统回收后重建了（192MB 堆 + 系统标记低内存的机器上极常见）。
+新增 `markFirstFrame()`：第一次定格 `firstFrameAt`，之后写
+`界面重建第 N 次（系统回收了界面后重新创建，不是闪退）`。
+
+#### 顺带修掉的死代码与锁死的开关
+
+- `Glass.kt` 里 `val rich = animated && perf.tier == DeviceTier.HIGH`，而 `rich`
+  这个参数在 `drawGlassPanel` 里**从来没被读过** —— 死参数。更糟的是它和
+  `Modifiers.kt` 的判据（`tier != LOW`）不一致，将来谁用它就会打架。删掉。
+- `Modifiers.kt` 的 `rich = animated && perf.tier != DeviceTier.LOW` 把跟手光晕
+  **锁死在设备档位上**：一台被 ROM 标成低内存的设备，哪怕用户在设置里明确选了
+  「性能优先」，光晕也永远不跟手。`enableAnimations` 已经承载了这个决定
+  （它由 tier 和 PerfMode 共同算出），再叠一层 tier 是重复且有害的。只留 `animated`。
+- 体检新增 `性能档位` 一行。这台设备很典型：物理内存 3906MB、4 核，
+  但 ROM 把 `ro.config.low_ram` 设成 true，堆只有 192MB —— 我们据此判 LOW
+  并关掉动画。用户看到的是"更新后界面变素了"，却不知道可以自己改回来。
+
+#### 实测数据修正一条判断
+
+上一轮我断定「OOM 是头号嫌疑」。这份报告里 `堆使用：已用 4MB / 已分配 5MB / 上限 192MB（2%）`
+—— 启动期完全不吃内存，OOM 嫌疑基本排除。192MB 仍然是唯一的天花板，
+但它是"打开长对话/图片时才可能碰到"，不是"装上就崩"。
+
+---
+
+### 第九次重发：体检报告里我自己写了三处假数据
+
+用户贴回来一份真机体检（`sprd CD_Watch_A` / Android 9 / API 28 / 192MB 堆 /
+412×502 方屏）。那份报告直接推翻了我三个判断。
+
+**假数据 1：`本次启动：53364ms`。**
+`launchMark` 是进程级静态变量，只在 `Application.onCreate` 里赋值。
+进程没死、只重建 Activity 时它还是旧值，于是"本次启动"把上一次的时间也算进去了。
+真实首帧是 `L/711ms`。改用 `processStartAt`（只在进程第一次进来时定格），
+`mark()` 和体检里的"本次启动"都改用它；体检额外写一行绝对时间
+`本次进程启动于：yyyy-MM-dd HH:mm:ss`。
+
+**假数据 2：阶段列表读反。**
+环形缓冲新的在末尾，`recent()` 本身就是「旧 → 新」，这里又套了一次 `asReversed()`，
+于是报告从"首帧完成"读到"onCreate 开始"。启动阶段有先后因果，必须正序。
+
+**假数据 3：`上次启动 ❌` 可能是假的。**
+抹标记当时还在 `AppRoot`，而它前面有引导页的 early return ——
+首次安装的用户在引导页退出一次就会记一条"没走完"。
+
+#### 这台机器的真实画像
+
+- **API 28** → `Modifier.blur` 不存在（要 31），全程走静态雾
+- **192MB 堆上限** → OOM 是头号嫌疑，而 OOM 正是 uncaught handler 抓不到的那类
+- ROM 是 2026-01 的出厂定制固件
+
+所以这版补的是**内存可见性**，不是猜着改 UI：
+
+- 体检新增 `堆使用`（已用/已分配/上限+百分比）和 `内存诊断`（偏紧/一般/充裕）。
+  在 192MB 的机器上，"上限多少"远不如"写这份报告时已经用了多少"有信息量。
+- `PerfProfile.classify` 加下限：`isLowRamDevice` 或总内存 ≤ 512MB 直接 LOW，
+  低于 800MB 一律 LOW。原写法"512 以下才强制 LOW，其余靠打分"没有下限保护，
+  谁调一下权重就会翻车。
+
+#### 第三次被注释骗
+
+新加的 `启动阶段必须按时间正序输出` 断言 `!snapshot.contains("asReversed()")`，
+红在我自己写的说明注释里（那段注释解释了为什么要去掉 `asReversed()`）。
+`PressFeedbackRuleTest`、`GlassDialogScrimRuleTest`、这次，同一个坑第三次。
+现在这条也过了 `stripComments`，并在测试里写死一句：
+**凡「扫源码断言某些字不存在」的测试，一律先剥注释。**
+
+---
+
+### 第八次重发：点开只剩一片模糊 —— 三个错叠在一起
+
+用户原话：「更新后有些 bug 啊，好多地方点开就加载个背景模糊就没了」。
+
+这是**上一版我自己引入的**。第五次重发为了「弹窗背后做模糊」造了
+`GlassBackdropHost`，把整页交给 `Modifier.blur`。三个错叠在一起：
+
+**错 1：半径 26dp。**
+手表现在这个 App 的屏宽约 200dp，26dp 是宽度的 13%。整屏文字直接糊成
+一团色块 —— 用户的第一反应不是「背景虚化了」，是「内容没了」。
+改成 **14dp**（约 7%），糊成纹理但还看得出布局轮廓。
+
+**错 2：用动画值当开关。**
+```kotlin
+if (real && animated > 0.01f) Modifier.blur(...)
+```
+闸归零后 `animateFloatAsState` 还要跑 160ms 才落到 0，这 160ms 里页面仍然糊着。
+而这恰好是用户关掉弹窗、立刻点下一步的时间窗口。
+改成由「计数 > 0」直接决定 —— **闸一归零，Modifier 立刻从链上摘掉**。
+淡出不做渐变是故意的：从「糊」到「清楚」的瞬切，眼睛感觉不到跳
+（模糊没有方向感）；反过来「淡出」那 160ms 是半糊的，像花屏。
+
+**错 3：页面切换不清零（最致命）。**
+上面那 160ms 里如果用户返回上一页，**新页面带着上一页的模糊进来**，
+它自己的内容在那层糊底下 —— 就是用户看到的
+「加载出一片背景模糊，然后就没了」。
+宿主加 `resetKey`（传 `nav.current`），页面一变立刻清零。
+
+#### 顺带修的
+
+- **闸从 0/1 开关改成引用计数**。两个弹窗叠在一起（审批框 + 询问框）时，
+  先关的那个会把背景的模糊一起关掉，另一个还开着却清楚了。计数才是
+  「最后一个关掉才算关」。
+- **老设备的磨砂雾层同样只在 `active` 时画**。以前它跟着 `animated` 走，
+  关掉后残留 160ms，屏幕像蒙了层灰。
+- **清零用 `SideEffect` 而不是 `LaunchedEffect`**。`DisposableEffect`（弹窗把计数 +1）
+  在 apply 时同步执行，而 `LaunchedEffect` 的协程体要等一次 dispatch ——
+  「进入页面时就已经有弹窗」的情况会被这次清零抹掉，弹窗开着但背景不糊。
+  首屏恰好最可能带弹窗。
+
+#### 一个重复踩的坑
+
+`GlassDialogScrimRuleTest` 里断言「不许出现 `LaunchedEffect(resetKey)`」，
+结果红在注释上 —— 我在 Backdrop.kt 的注释里写了「第一版写的是
+`LaunchedEffect(resetKey) { ... }`」。这是**第二次**被同一件事骗
+（第一次是 `PressFeedbackRuleTest` 的三条假阳性）。
+现在这个测试类也带上了 `stripComments`，并把这个教训写进了函数注释。
+
+---
+
+### 第七次重发：华为手表 4 闪退 —— 取证链 + 启动崩溃点
+
+用户原话：「修复华为手表4使用闪退问题」→「没有日志，打开直接闪退」。
+追问里明确选了「**只做取证，先不猜**」。这一轮就按这个做。
+
+**查出来一件比闪退更要紧的事：华为 WATCH 4 跑的是 HarmonyOS 4.3，不是 Android。**
+
+它之所以能装 APK，是因为系统里带了一个 Android 兼容层。我们的代码整个跑在那层里，
+而那一层对 `RenderEffect`、硬件 Keystore、精确闹钟、前台服务的支持都是残缺的。
+**同一个 APK 在 Wear OS 上没问题，在 HarmonyOS 上可能一启动就崩，而且崩在系统侧，
+我们的 `setDefaultUncaughtExceptionHandler` 连回调都收不到** —— 这就是"打不开、
+拿不到日志"的机制性原因。
+
+#### 取证：四条路
+
+原来的死结很直接：报告写在应用私有目录，**App 打不开就永远拿不出来**，
+写再多也没用。现在：
+
+1. **`export()` 抄到 `Android/data/com.dshwatch/files/crash/`** —— 这个目录
+   **不需要任何权限**（targetSdk 34 也一样），插电脑直接能看到。
+   不能用公共 Documents：targetSdk 30+ 写公共目录要走 SAF 或 MediaStore，
+   两者都要用户交互，崩溃回调里做不了。
+2. **启动标记 `launch.inprogress`** —— `Thread.setDefaultUncaughtExceptionHandler`
+   抓不到 native 崩溃、OOM、被系统 kill、主线程 watchdog。这几种情况下
+   `write()` 根本不会执行。有了标记，下次启动只要它还在，就能确定"上次没走到主界面"，
+   即使一个 Java 堆栈都没有。标记同时抄一份到外部目录，防私有目录被清。
+3. **`启动体检.txt`：不管崩不崩都写** —— 兜住"一秒都撑不到、来不及点复制"。
+   只要进程活到主界面，设备/ROM/ABI/内存/启动各阶段耗时全部落盘。
+4. **无堆栈报告 `buildLaunchFailureReport()`** —— 没有堆栈不等于没有信息。
+   "崩在 Application 之前/之后""ABI 是什么"这些已经能砍掉一大半可能。
+
+#### 启动打点
+
+`CrashLog.mark()` 在每个易碎环节各打一点，只进环形缓冲、不进 Logcat
+（release 下 `Log.w` 也是系统调用，启动路径上每步都打会拖慢冷启动）：
+
+`Application.onCreate 开始` → `崩溃兜底已安装` → `设置仓库已构造` →
+`密钥库已构造` → `会话库已构造` → `对话引擎已构造` → `依赖容器构造完成` →
+`引擎回调已挂上` → `首帧组合完成`
+
+属性是按声明顺序初始化的，哪个字段一崩，后面全不执行 —— 所以这些点能被跳着读。
+
+#### 堵掉的启动崩溃点
+
+1. **`appScope` 没有异常兜底（最可能的那条）**
+   `SupervisorJob` 只能保证"一个子任务失败不连坐兄弟"，**兜不住 launch 里
+   没被 try 住的异常**。那种异常走到默认处理器，直接把进程带走。
+   而这个 scope 里跑的全是后台活。现在挂了 `CoroutineExceptionHandler`。
+
+2. **DataStore 读盘失败会打死整个 scope**
+   `dataStore.data` 的语义不是"读成功才发"，**读盘失败时它把异常 emit 进流里**，
+   上游 `stateIn(appScope, Eagerly)` 就挂在这个 scope 上。兼容层文件系统语义不完整，
+   这条尤其容易踩。加 `catch` 退回默认设置 —— 用户看到初始设置，但 App 进得去。
+   `update()` 写入失败同样处理（以前直接抛给调用方）。
+
+3. **`AppContainer` 构造失败 = 必闪退** —— 裸调改 `runCatching`，
+   崩之前先把现场写到外部目录，再抛。
+
+4. **设备探测失败连累设置流** —— `DeviceProfiler.detect()` 原来在
+   `settings.collect{}` 里面，一抛整个设置流就断，界面永远等不到 `settingsReady`。
+
+5. **B站定时同步**：`setExactAndAllowWhileIdle` 在部分 ROM 上会抛，兜住。
+
+#### 判定点前移（这一条差点变成假阳性）
+
+体检和抹标记原先写在 `AppRoot` 的第一帧。但 `AppRoot` 开头就有：
+
+```kotlin
+if (!settings.onboardingDone) { OnboardingScreen(...); return }
+```
+
+新用户装完先看到 4 步引导，**走不到那行 `endLaunch`**。他中途退出（很常见），
+标记留着，下次启动就报「上次没能启动完成」。
+
+这个假阳性最坏的地方在于它刚好污染用户那句「装上就闪退」——
+用户说闪退，我们看到「上次没走完」，两条错信息撞在一起会把排查直接带偏。
+
+现在判定点前移到 `MainActivity` 的 `settingsReady` 之后：**只要能画出内容
+（引导页或主界面）就算启动成功**。同时把写盘挪到 `Dispatchers.IO` ——
+手表上主线程卡一下就掉帧，没必要为几 KB 赌这一下。
+
+静态测试也改了：原来断言「AppRoot 里必须有 endLaunch」，现在反过来断言
+「AppRoot 里**不许**有」，并写清了原因。
+
+#### 环境识别
+
+新增 `EnvironmentWarning`：诊断页直接写明"你跑在 HarmonyOS 兼容层上"，
+崩溃报告加一行 `环境：`，让"崩在兼容层"和"崩在真 Android"能分开统计。
+多个弱信号投票（`MANUFACTURER` / `BRAND` 是华为荣耀 + `DISPLAY` / `RELEASE`
+带 harmony 痕迹），不做强断言 —— 误报代价只是一行说明，漏报代价是又一轮瞎猜。
+
+#### 7 条静态防线（`CrashEvidenceRuleTest`）
+
+守取证链本身。这类错误编译照过、单测照过，**只有真正出事那天才发现"什么都没记下来"**：
+
+- `beginLaunch` 必须在 `onCreate` 最开头
+- 标记必须**先读后写**（顺序反了界面读到"本次"的标记，天天报假崩溃）
+- `endLaunch` 必须在 `LaunchedEffect` 里
+- 体检必须在抹标记**之前**写
+- 崩溃报告必须 `export()` 到外部目录
+- 标记必须比 `AppContainer(` / `install(` 早
+- **体检内容不许含用户数据**（API Key / Cookie / 对话）—— 它会写到外部目录、
+  用户会直接发给开发者，这条是我给自己上的锁
+
+---
 
 ### 上一轮四条反馈的收尾
 

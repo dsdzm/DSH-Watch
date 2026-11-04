@@ -60,6 +60,10 @@ sealed interface Screen {
  * 不用 navigation-compose：手表上屏幕少、参数简单，
  * 引入 NavHost 会多出 300KB 左右的依赖和一层转场动画，反而拖慢低端机。
  * 这里只维护一个 SnapshotStateList，配合 BackHandler 即可。
+ *
+ * 页面切换的动画由 [ExpansionHost] 用官方淡入淡出处理，
+ * **导航器本身不参与动画** —— 不记按钮矩形、不存转场事务、不等回调。
+ * 之前那套 `Motion` / `leavingScreen` / `leaveTarget` / `pushFrom` 已全部删除。
  */
 class WatchNavigator internal constructor(
     private val stack: SnapshotStateList<Screen>,
@@ -68,17 +72,9 @@ class WatchNavigator internal constructor(
 
     val canGoBack: Boolean get() = stack.size > 1
 
-    /**
-     * 栈的只读快照。页面转场要同时渲染「上一页」和「当前页」，
-     * 需要知道 `size - 2` 那一层是谁。
-     *
-     * 返回新建的 List 而不是内部 SnapshotStateList：调用方在动画里持有它时，
-     * 不应该因为后续 push/pop 而被改写（否则转场中途会看到两份当前页）。
-     */
-    fun snapshot(): List<Screen> = stack.toList()
-
     val depth: Int get() = stack.size
 
+    /** 普通跳转：动画由宿主根据 current 的变化自己决定，这里只改栈 */
     fun push(screen: Screen) {
         stack.add(screen)
     }
