@@ -122,6 +122,33 @@ class SettingsRepository(
         // 归一化 appearance：未知取值（含老存档的空串）一律落回 M3E
         val appearance = com.dshwatch.domain.model.Appearances.of(out.appearance)
         if (appearance != out.appearance) out = out.copy(appearance = appearance)
+
+        /*
+         * v1.15.22：字号并入界面大小。
+         *
+         * 旧版有两个滑块 —— 「界面大小」（缩 density）和「字号」（缩 fontScale）。
+         * 两者在文字上**相乘**：1.15 × 1.30 让字号相对卡片放大到 1.5 倍，
+         * 于是字撑出卡片、内容顶到圆周外被切。用户的原话是「先调缩放再调字号
+         * 会出问题，先调字号再调缩放也会出问题」——单独调任一个都正常。
+         *
+         * 合并后只剩 uiScale 一个轴，这里把旧字号值折进去：
+         *  - 原本手动调过界面大小：直接相乘，保留用户当时的观感；
+         *  - 原本跟随本机自动：**不动**。自动值是按屏幕宽度算的安全值，
+         *    再乘 1.3 就必然溢出 —— 这正是要修的病，不能在迁移里重新犯一遍。
+         *
+         * 幂等：fontScale 归 1.0 之后条件不再成立，重复执行不会连乘。
+         */
+        if (out.fontScale != 1f) {
+            val merged = if (out.uiScaleAuto) {
+                out.uiScale
+            } else {
+                (out.uiScale * out.fontScale).coerceIn(
+                    com.dshwatch.domain.UiScale.MIN,
+                    com.dshwatch.domain.UiScale.MAX,
+                )
+            }
+            out = out.copy(uiScale = merged, fontScale = 1f)
+        }
         return out
     }
 }

@@ -106,6 +106,21 @@ interface AppStrings {
     val themeLight: String
     val dynamicColor: String
     val dynamicColorHint: String
+    /**
+     * 界面整体大小。
+     *
+     * **这是唯一的缩放轴。** v1.15.22 起「字号」并入这里：以前两个滑块
+     * 分别缩 density 和 fontScale，文字上却是相乘的，一起调就会把字撑出
+     * 卡片、内容顶到圆周外。文案必须说清「一起缩放」，否则用户会以为
+     * 少了字号就调不了字。
+     */
+    val uiScale: String
+    val uiScaleHint: String
+    val uiScaleAuto: String
+    val uiScaleAutoOn: String
+    val uiScaleReset: String
+    /** 超过本机推荐值时的提醒，`%s` 是推荐值，如 `0.64×` */
+    fun uiScaleOver(recommended: String): String
     val fontSize: String
     val fontSmall: String
     val fontNormal: String
@@ -650,6 +665,13 @@ object Zh : AppStrings {
     override val themeLight = "浅色"
     override val dynamicColor = "动态取色"
     override val dynamicColorHint = "Android 12+ 跟随壁纸取色"
+    override val uiScale = "界面大小"
+    override val uiScaleHint = "文字、卡片与间距一起缩放"
+    override val uiScaleAuto = "跟随本机"
+    override val uiScaleAutoOn = "已按屏幕宽度自动适配"
+    override val uiScaleReset = "恢复自适应"
+    override fun uiScaleOver(recommended: String) =
+        "超过本机推荐 $recommended，边缘可能被切到"
     override val fontSize = "字号"
     override val fontSmall = "小"
     override val fontNormal = "标准"
@@ -1259,6 +1281,13 @@ object En : AppStrings {
     override val themeLight = "Light"
     override val dynamicColor = "Dynamic color"
     override val dynamicColorHint = "Follow wallpaper on Android 12+"
+    override val uiScale = "UI size"
+    override val uiScaleHint = "Scales text, cards and spacing together"
+    override val uiScaleAuto = "Match device"
+    override val uiScaleAutoOn = "Fitted to this screen"
+    override val uiScaleReset = "Use device fit"
+    override fun uiScaleOver(recommended: String) =
+        "Beyond $recommended for this screen — edges may be clipped"
     override val fontSize = "Font size"
     override val fontSmall = "S"
     override val fontNormal = "M"

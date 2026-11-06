@@ -215,16 +215,42 @@ fun CircleScaffold(
     }
 }
 
-/** 顶栏顶端距圆顶的比例。再往上那一行弦宽不足 120dp，放不下标题 */
-private const val BAR_TOP_RATIO = 0.072f
+/**
+ * 顶栏顶端距圆顶的比例。
+ *
+ * ## 这个数不是审美，是几何反推出来的
+ *
+ * 圆顶那一行的弦宽是 0。设圆半径 r、圆心到该行距离 dy，弦宽
+ *      w = 2·√(r² − dy²)
+ * 要让 w 至少达到直径的 0.62（顶栏要放一个标题 + 最多四颗 32dp 图标），
+ * 令 w = 0.62d、r = 0.5d：
+ *      0.31d = √(0.25d² − dy²)  →  dy² = 0.1539d²  →  dy = 0.392d
+ *      y = r − dy = 0.5d − 0.392d = **0.108d**
+ *
+ * ## 之前的 0.072 为什么会让图标点不到
+ *
+ * 0.072d 处弦宽只有 0.52d（420dp 的表盘上约 220dp），而「标题 + 四颗图标」
+ * 需要 128 + 至少 90 = 218dp —— 刚好卡在临界点。标题稍长（会话名超过十来个字）
+ * 就会被挤成省略号，两颗图标则被推到圆周之外：看得见，但按不到。
+ *
+ * 下移 0.036d（420dp 上约 15dp）换来 +40dp 的横向空间。代价是内容区少了
+ * 同样的 15dp，比"按钮点不到"划算得多。
+ */
+private const val BAR_TOP_RATIO = 0.108f
 /** 顶栏高度占直径的比例（33dp） */
 private const val BAR_HEIGHT_RATIO = 0.10f
 /** 内容区底边距圆顶的比例 */
 private const val CONTENT_BOTTOM_RATIO = 0.862f
 /** 独占底栏带占直径的比例（约 51dp） */
 private const val BAND_RATIO = 0.155f
-/** 底栏浮层下沿距圆顶的比例 */
-private const val FAB_BOTTOM_RATIO = 0.972f
+/**
+ * 底栏浮层下沿距圆顶的比例。
+ *
+ * 从 0.972 收到 0.95：0.972 时按钮下沿距圆周只剩 2.8% 直径（420dp 上 12dp），
+ * 在矩形屏上（圆外侧还有大片空白）看着就像"掉到圆外面去了"。
+ * 0.95 处弦宽仍有 0.995d，横向完全够，纵向留出 21dp 的呼吸空间。
+ */
+private const val FAB_BOTTOM_RATIO = 0.95f
 
 @Composable
 private fun CircleTopBar(

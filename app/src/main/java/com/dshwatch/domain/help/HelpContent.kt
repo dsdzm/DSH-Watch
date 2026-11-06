@@ -94,6 +94,34 @@ object HelpContent {
         ),
 
         HelpTopic(
+            id = "size",
+            title = t("界面太大或太小", "UI too big or too small"),
+            summary = t("在「外观」和首次引导里调节", "Adjust in Appearance or the first-run guide"),
+            blocks = listOf(
+                text(
+                    "设置 → 外观 → 界面大小。这个滑块缩放的是整块界面：卡片、间距、图标和字号一起变，不是只改字。",
+                    "Settings → Appearance → UI size. It scales the whole layout — cards, spacing, icons and text together.",
+                ),
+                bullet(
+                    "默认「跟随本机」：按屏幕宽度自动计算。可用宽度不足 320dp 的高 dpi 小屏会自动收小，正常表盘上几乎看不出变化。",
+                    "“Match device” is on by default. Narrow high-dpi panels get scaled down automatically; normal watch faces stay as they were.",
+                ),
+                bullet(
+                    "字号已经并入这一个滑块：拖大时文字、卡片、间距按同一比例走，不会再出现「字撑破卡片」或「内容被圆边切掉」。",
+                    "Font size is merged into this single slider: text, cards and spacing scale by the same ratio, so text can no longer outgrow its card or get clipped by the round edge.",
+                ),
+                bullet(
+                    "手动调到超过本机推荐值（右侧会提示）时，边缘内容可能被切到一部分——想更大就得让出一圈。",
+                    "Pushing past the recommended value for this screen (shown in red) clips the edges a little — bigger always costs a ring of margin.",
+                ),
+                note(
+                    "首次启动的第 4 步也有同一个滑块，拖动立即生效，不必先进设置。",
+                    "Step 4 of the first-run guide has the same slider, applied live.",
+                ),
+            ),
+        ),
+
+        HelpTopic(
             id = "scene",
             title = t("三个场景", "Three scenes"),
             summary = t("编程 / 酒馆 / 写作各是什么", "Coding, tavern and writing"),

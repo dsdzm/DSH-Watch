@@ -49,6 +49,8 @@ import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.components.GhostButton
 import com.dshwatch.ui.components.PageDots
 import com.dshwatch.ui.components.PrimaryButton
+import com.dshwatch.ui.components.SwitchRow
+import com.dshwatch.ui.components.WatchSlider
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.i18n.LocalStrings
@@ -64,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.screens.scene.sceneIcon
 import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.theme.LocalUiScale
 import com.dshwatch.ui.theme.LocalGlass
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.remember
@@ -94,6 +97,8 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
     val update: ((AppSettings) -> AppSettings) -> Unit = { block ->
         scope.launch { container.settingsRepo.update(block) }
     }
+    // 当前生效的缩放（含自动值）。关掉「跟随本机」时要用它作为手动起点
+    val currentScale = LocalUiScale.current
 
     // 返回键：圆屏上它承担「上一步」—— 圆屏底栏只放得下一个按钮，
     // 两个并排会把「下一步」压到 60dp。所以回退动作交给系统返回键，
@@ -218,6 +223,16 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 else -> ThemeStep(
                     settings = settings,
                     dark = dark,
+                    onPickUiScale = { v -> update { it.copy(uiScale = v, uiScaleAuto = false) } },
+                    onToggleUiScaleAuto = { v ->
+                        update {
+                            it.copy(
+                                uiScaleAuto = v,
+                                // 关掉自动时落到当前生效值，避免界面突然跳回 1.0
+                                uiScale = if (v) it.uiScale else currentScale,
+                            )
+                        }
+                    },
                     onPickAppearance = { id ->
                         // 选风格时顺带关掉动态取色：动态取色会整块替换色板，
                         // 玻璃的底色晕就没了依据（见 DshWatchTheme 的说明）
@@ -554,9 +569,37 @@ private fun ThemeStep(
     onPickAppearance: (String) -> Unit,
     onPickPreset: (String) -> Unit,
     onPickAccent: (String) -> Unit,
+    onPickUiScale: (Float) -> Unit,
+    onToggleUiScaleAuto: (Boolean) -> Unit,
 ) {
     val s = LocalStrings.current
     StepHeader(s.onboardingThemeTitle, s.onboardingThemeHint)
+
+    /*
+     * 界面大小放在最前面。
+     *
+     * 高 dpi 小屏上，剩下的主题、预设、强调色是在一个已经溢出的界面上铺开的，
+     * 选项本身就可能被裁掉一半。先让用户把界面收进屏幕，后面才好选。
+     * 拖动即时生效（密度变化会整体重组），所见即所得，不需要「预览」按钮。
+     */
+    val effectiveScale = LocalUiScale.current
+    val scaleText = String.format(java.util.Locale.US, "%.2f×", effectiveScale)
+    WatchSlider(
+        value = (if (settings.uiScaleAuto) effectiveScale else settings.uiScale)
+            .coerceIn(com.dshwatch.domain.UiScale.MIN, com.dshwatch.domain.UiScale.MAX),
+        onChange = onPickUiScale,
+        valueRange = com.dshwatch.domain.UiScale.MIN..com.dshwatch.domain.UiScale.MAX,
+        steps = 10,
+        label = s.uiScale,
+        valueText = if (settings.uiScaleAuto) "自动 $scaleText" else scaleText,
+    )
+    SwitchRow(
+        title = s.uiScaleAuto,
+        subtitle = s.uiScaleHint,
+        checked = settings.uiScaleAuto,
+        onCheckedChange = onToggleUiScaleAuto,
+    )
+    Spacer(Modifier.height(6.dp))
 
     // ---- 第一步：先选材质，再选颜色 ----
     //

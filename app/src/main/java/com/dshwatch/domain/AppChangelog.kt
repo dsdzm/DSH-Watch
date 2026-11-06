@@ -23,6 +23,20 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.15.22",
+            date = "2026-11-06",
+            highlights = listOf(
+                "统一界面缩放：字号并入「界面大小」，文字、卡片与间距始终等比缩放",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.15.21",
+            date = "2026-11-06",
+            highlights = listOf(
+                "外观与首次引导新增「界面大小」调节：卡片、间距与字号一起缩放，高 dpi 小屏可自动适配，不再溢出",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.15.20",
             date = "2026-11-06",
             highlights = listOf(

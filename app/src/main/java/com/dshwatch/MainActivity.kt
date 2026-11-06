@@ -40,13 +40,26 @@ class MainActivity : ComponentActivity() {
             val perf by container.perf.collectAsStateWithLifecycle()
             val profile by container.profile.collectAsStateWithLifecycle()
 
+            /*
+             * 界面缩放要在主题之外算好：主题内部只知道「缩放多少」，
+             * 不知道设备多宽；而按宽度推自动值需要 profile。
+             *
+             * 用 profile.screenWidthDp（系统密度下的 dp 宽）而不是缩放后的值，
+             * 否则自动值会随着自身结果反复变化、来回震荡。
+             */
+            val uiScale = com.dshwatch.domain.UiScale.resolve(
+                value = settings.uiScale,
+                autoEnabled = settings.uiScaleAuto,
+                widthDp = profile.screenWidthDp,
+            )
+
             DshWatchTheme(
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,
                 themePreset = settings.themePreset,
                 accentColor = settings.accentColor,
                 appearance = settings.appearance,
-                fontScale = settings.fontScale,
+                uiScale = uiScale,
                 appLanguage = settings.appLanguage,
                 perf = perf,
                 profile = profile,

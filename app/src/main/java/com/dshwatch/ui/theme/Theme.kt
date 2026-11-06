@@ -60,6 +60,26 @@ val LocalGlass = staticCompositionLocalOf { false }
 val LocalDeviceProfile = staticCompositionLocalOf { DeviceProfileDefaults.fallback }
 
 /**
+ * 当前生效的界面缩放值（1.0 = 标准）。
+ *
+ * 设置页需要显示「自动 · 0.64×」这样的文案，而自动值由根组合算好后
+ * 才能确定；放在这里就不用每个页面各自再算一遍 [com.dshwatch.domain.UiScale.auto]。
+ */
+val LocalUiScale = staticCompositionLocalOf { 1f }
+
+/**
+ * 本机的推荐缩放值（按未缩放的屏幕宽度算出的自动值）。
+ *
+ * 设置页拿它当参照：界面大小超过它之后，内容会开始贴近甚至超出圆周。
+ * 不做成硬上限 —— 宁可裁一点也要把字放大是用户的正当选择，
+ * App 只负责把「推荐值是多少」说清楚。
+ *
+ * 放在这里而不是让页面自己算：页面里能拿到的 `LocalDeviceProfile` 已经是
+ * 缩放后的（宽 322dp 而不是 206dp），拿它反推会算出 1.00 这种错值。
+ */
+val LocalUiScaleRecommended = staticCompositionLocalOf { 1f }
+
+/**
  * 手表的尺寸常量。
  * 目标屏宽按 200dp 设计（1.4~1.8 寸方表常见换算值），
  * 所有点击区域 ≥ 40dp，兼顾手指而不是笔尖。
@@ -123,7 +143,19 @@ fun DshWatchTheme(
      * 那样既选不出「深海 + 玻璃」，也会让「玻璃」看起来像一种配色。
      */
     appearance: String = com.dshwatch.domain.model.Appearances.M3E,
-    fontScale: Float = 1.0f,
+    /**
+     * 界面整体缩放，1.0 = 标准。
+     *
+     * **这是唯一的缩放轴。** v1.15.21 及以前这里还并行一个 `fontScale`：
+     * 缩放改 `Density.density`（dp 与 sp 一起缩），字号改 `Density.fontScale`
+     * （只缩字、不动布局）。两者相乘之后，字号相对卡片的比例变成
+     * `uiScale × fontScale`，字号被撑破、内容顶到圆周外 —— 用户看到的是
+     * 「调完缩放再调字号就坏」。单独调任一个都正常，所以很难复现。
+     *
+     * 现在只留这一条：缩放密度本身，文字、卡片、间距、图标按同一比例走。
+     * 比例恒定 ⇒ 数学上不可能出现「字比卡片大」。
+     */
+    uiScale: Float = 1f,
     appLanguage: String = AppLanguage.SYSTEM,
     perf: PerfProfile = PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID),
     profile: DeviceProfile = DeviceProfileDefaults.fallback,
@@ -173,9 +205,40 @@ fun DshWatchTheme(
     val lightBase = remember(colorScheme) { colorScheme.background.luminance() > 0.35f }
 
     val baseDensity = LocalDensity.current
-    // 只缩放字号，不缩放 dp：dp 保持物理一致，避免按钮忽大忽小
-    val scaledDensity = remember(baseDensity, fontScale) {
-        Density(density = baseDensity.density, fontScale = baseDensity.fontScale * fontScale)
+    /*
+     * 缩放密度本身，而不是只缩放字号。
+     *
+     * 只改 `fontScale` 时，字变小了、卡片和间距却不变 —— 界面看起来
+     * 「字挤在一起、框还是那么大」，在高 dpi 小屏上仍然溢出。
+     * 改 `density` 则让所有 dp 一起缩，布局才真的收得住。
+     */
+    val scaledDensity = remember(baseDensity, uiScale) {
+        /*
+         * 只乘 density，**不要再乘 fontScale**。
+         *
+         * sp 转 px 的公式是 `sp × density × fontScale`：density 一变，字号
+         * 已经跟着等比变了。以前这里又乘了一次用户字号，等于把字号放大
+         * 两遍 —— 1.15 缩放 × 1.30 字号时，字实际是 1.5 倍而卡片只有
+         * 1.15 倍，文字必然溢出容器、顶到圆周外。
+         *
+         * 保留系统 fontScale（`baseDensity.fontScale`），那是无障碍设置，
+         * 属于用户的全局偏好，不该被 App 覆盖掉。
+         */
+        Density(
+            density = baseDensity.density * uiScale,
+            fontScale = baseDensity.fontScale,
+        )
+    }
+
+    // 密度变了，同一 px 宽度对应的 dp 也变了：profile 里的宽度要与新密度一致，
+    // 否则圆屏弦长、列表预加载都会按旧宽度算（详见 UiScale.rescale）
+    val scaledProfile = remember(profile, uiScale) {
+        com.dshwatch.domain.UiScale.rescale(profile, uiScale)
+    }
+
+    // 推荐值要用**缩放前**的宽度算：profile 是 MainActivity 传进来的原始画像
+    val uiScaleRecommended = remember(profile) {
+        com.dshwatch.domain.UiScale.recommended(profile.screenWidthDp)
     }
 
     // 语言要跟着「设置值」和「配置里的 locale」一起变：
@@ -190,7 +253,9 @@ fun DshWatchTheme(
     CompositionLocalProvider(
         LocalDensity provides scaledDensity,
         LocalPerf provides perf,
-        LocalDeviceProfile provides profile,
+        LocalDeviceProfile provides scaledProfile,
+        LocalUiScale provides uiScale,
+        LocalUiScaleRecommended provides uiScaleRecommended,
         LocalStrings provides strings,
         LocalGlass provides glass,
     ) {

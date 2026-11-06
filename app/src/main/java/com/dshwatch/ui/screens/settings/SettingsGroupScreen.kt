@@ -36,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.DeviceProfile
@@ -58,6 +57,7 @@ import com.dshwatch.domain.model.WorkspaceLocation
 import com.dshwatch.ui.components.AgentModeDialog
 import com.dshwatch.ui.components.SegmentedRow
 import com.dshwatch.ui.components.SettingCard
+import com.dshwatch.ui.theme.LocalUiScale
 import com.dshwatch.ui.components.SettingRow
 import com.dshwatch.ui.components.StepperRow
 import com.dshwatch.ui.components.SwitchRow
@@ -417,23 +417,72 @@ private fun AppearanceGroup(
             onCheckedChange = { v -> update { it.copy(dynamicColor = v) } },
         )
         Spacer(Modifier.height(2.dp))
-        // 字号：连续滑块 + 实时预览。
-        // 旧版是三格分段条，且"标准"写进去的是 0.92 —— 用户看到停在标准上、
-        // 字却明显偏小，反馈成"滑块选不到标准大小"。现在 1.00 就是标准，
-        // 拖动时上面那行示例文字会跟着变，所见即所得。
+        /*
+         * 界面大小：**唯一**的缩放轴，缩放的是密度，dp 与 sp 一起变。
+         *
+         * 以前这里还有第二个「字号」滑块（只缩 fontScale、不动 dp），
+         * 两者在文字上相乘，调完这个再调那个就会把字撑出卡片、内容顶到
+         * 圆周外 —— 见文件下方那段说明。现在只剩一条轴，比例恒定。
+         */
+        val effectiveScale = LocalUiScale.current
+        val scaleAuto = settings.uiScaleAuto
+        // 本机推荐值（按未缩放的屏幕宽度算）：超过它会开始有内容贴近圆周
+        val recommended = com.dshwatch.ui.theme.LocalUiScaleRecommended.current
         WatchSlider(
-            value = settings.fontScale,
-            onChange = { v -> update { it.copy(fontScale = v) } },
-            valueRange = 0.85f..1.30f,
-            steps = 8,  // 0.05 一档：0.85, 0.90 ... 1.30
-            label = s.fontSize,
-            sample = s.fontPreview,
-            sampleStyle = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = (15f * settings.fontScale).sp,
-                lineHeight = (21f * settings.fontScale).sp,
-            ),
+            value = (if (scaleAuto) effectiveScale else settings.uiScale)
+                .coerceIn(com.dshwatch.domain.UiScale.MIN, com.dshwatch.domain.UiScale.MAX),
+            onChange = { v -> update { it.copy(uiScale = v, uiScaleAuto = false) } },
+            valueRange = com.dshwatch.domain.UiScale.MIN..com.dshwatch.domain.UiScale.MAX,
+            steps = 10,
+            label = s.uiScale,
+            valueText = if (scaleAuto) {
+                "自动 " + String.format(java.util.Locale.US, "%.2f×", effectiveScale)
+            } else {
+                String.format(java.util.Locale.US, "%.2f×", effectiveScale)
+            },
         )
-        Spacer(Modifier.height(6.dp))
+        if (!scaleAuto && effectiveScale > recommended + 0.02f) {
+            // 只提醒、不拦：宁可裁一点也要把字放大是用户的选择，
+            // 但得让他知道「这不是 App 坏了」，而是已经越过本机能放下的尺寸
+            Text(
+                text = s.uiScaleOver(String.format(java.util.Locale.US, "%.2f×", recommended)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 2.dp, top = 2.dp, end = 2.dp),
+            )
+        }
+        if (!scaleAuto) {
+            // 手动模式下给一条回到自适应的捷径：拖到极端之后很难靠滑块找准推荐值
+            SettingRow(
+                title = s.uiScaleReset,
+                subtitle = s.uiScaleHint,
+                showDivider = false,
+                onClick = {
+                    update { it.copy(uiScaleAuto = true) }
+                },
+            )
+        }
+        SwitchRow(
+            title = s.uiScaleAuto,
+            subtitle = s.uiScaleHint,
+            checked = scaleAuto,
+            onCheckedChange = { v ->
+                // 关掉自动时把当前生效值落到手动值上，滑块才不会跳回 1.0
+                update { it.copy(uiScaleAuto = v, uiScale = if (v) it.uiScale else effectiveScale) }
+            },
+        )
+        Spacer(Modifier.height(2.dp))
+        /*
+         * 这里原来还有一个「字号」滑块，v1.15.22 起删掉了。
+         *
+         * 原因是它和上面这个「界面大小」在文字上**相乘**：界面大小缩 density
+         * （dp 与 sp 同比），字号只缩 fontScale（不动 dp）。两者一起调时，
+         * 字号相对卡片的比例被放大成 `uiScale × fontScale`，字撑出卡片、
+         * 内容顶到圆周外被切 —— 用户只能描述成「两个一起调就出问题」。
+         *
+         * 删掉之后只剩一条缩放轴，比例恒定，数学上不可能再出现字比卡片大。
+         * 老存档里的 fontScale 由 SettingsRepository.migrate 折进 uiScale。
+         */
         // 语言单独给一个显式开关：跟随系统在部分手表上会判成英文，
         // 用户至少要有一条「我自己选」的路，而不是只能忍着。
         Text(
