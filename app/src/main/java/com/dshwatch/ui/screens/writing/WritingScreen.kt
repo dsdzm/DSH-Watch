@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.GlassCircleButton
 import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
@@ -94,6 +96,34 @@ fun WritingScreen(
         loaded = true
     }
 
+    /*
+     * 「继续写」接着这个设定上一次的稿子；「新开」才是从零开始。
+     *
+     * 与酒馆页同一套逻辑：写作是长期的，一篇文要写很多天，
+     * 每次点「继续写」都开一张新纸，等于逼用户自己去历史里捞。
+     */
+    val startOrResume: (RoleCard, Boolean) -> Unit = { card, forceNew ->
+        scope.launch {
+            container.settingsRepo.update { it.copy(lastWritingCardId = card.id) }
+            val latest = if (forceNew) {
+                null
+            } else {
+                container.conversationStore.latestFor(Scenes.WRITING, card.id)
+            }
+            if (latest != null) {
+                container.engine.open(latest.id)
+            } else {
+                container.engine.startNew(
+                    settings = settings.copy(agentMode = com.dshwatch.domain.model.AgentMode.OFF),
+                    scene = Scenes.WRITING,
+                    roleCardId = card.id,
+                    title = card.displayName,
+                )
+            }
+            nav.push(Screen.RoleplayChat)
+        }
+    }
+
     WatchScaffold(
         title = "写作",
         actions = {
@@ -117,18 +147,9 @@ fun WritingScreen(
             cards.forEach { card ->
                 WritingCardRow(
                     card = card,
-                    onContinue = {
-                        scope.launch {
-                            container.settingsRepo.update { it.copy(lastWritingCardId = card.id) }
-                            container.engine.startNew(
-                                settings = settings.copy(agentMode = com.dshwatch.domain.model.AgentMode.OFF),
-                                scene = Scenes.WRITING,
-                                roleCardId = card.id,
-                                title = card.displayName,
-                            )
-                            nav.push(Screen.RoleplayChat)
-                        }
-                    },
+                    onContinue = { startOrResume(card, false) },
+                    onNew = { startOrResume(card, true) },
+                    onHistory = { nav.push(Screen.SceneSessions(Scenes.WRITING, card.id)) },
                     onEdit = { nav.push(Screen.CardEdit(Scenes.WRITING, card.id)) },
                     onImport = { importTarget = card },
                 )
@@ -186,6 +207,8 @@ fun WritingScreen(
 private fun WritingCardRow(
     card: RoleCard,
     onContinue: () -> Unit,
+    onNew: () -> Unit,
+    onHistory: () -> Unit,
     onEdit: () -> Unit,
     onImport: () -> Unit,
 ) {
@@ -236,7 +259,27 @@ private fun WritingCardRow(
             )
         }
         Spacer(Modifier.height(10.dp))
-        WatchButton(text = "继续写", icon = Icons.Filled.ArrowForward, onClick = onContinue)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WatchButton(
+                text = "继续写",
+                icon = Icons.Filled.ArrowForward,
+                modifier = Modifier.weight(1f),
+                onClick = onContinue,
+            )
+            GlassCircleButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "新开一份",
+                onClick = onNew,
+            )
+            GlassCircleButton(
+                icon = Icons.Outlined.History,
+                contentDescription = "历史记录",
+                onClick = onHistory,
+            )
+        }
         Spacer(Modifier.height(6.dp))
         WatchGhostButton(text = "导入世界书 / 插件", onClick = onImport)
     }

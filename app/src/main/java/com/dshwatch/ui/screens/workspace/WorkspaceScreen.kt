@@ -222,9 +222,8 @@ fun WorkspaceScreen(
         }
 
         WearList(
-            state = com.dshwatch.ui.wear.rememberKeptScalingListState("workspace"),
+            state = com.dshwatch.ui.wear.rememberKeptListState("workspace"),
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             items(visible.size, key = { visible[it].path }) { index ->

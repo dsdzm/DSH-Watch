@@ -95,53 +95,91 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
         scope.launch { container.settingsRepo.update(block) }
     }
 
-    // 返回键视作「就用当前选择」：不把用户困在引导里，也不直接退出 App
+    // 返回键：圆屏上它承担「上一步」—— 圆屏底栏只放得下一个按钮，
+    // 两个并排会把「下一步」压到 60dp。所以回退动作交给系统返回键，
+    // 退到第一步之后再按一次才「就用当前选择」离开引导。
+    // 方屏维持原行为（底栏两个按钮都在，返回键直接完成引导）。
+    val circle = com.dshwatch.ui.wear.LocalCircle.current
     BackHandler {
-        update { it.copy(onboardingDone = true) }
+        if (circle != null && step > 0) {
+            step--
+        } else {
+            update { it.copy(onboardingDone = true) }
+        }
     }
 
     fun goNext() {
         if (step >= 3) {
-            update {
-                it.copy(
-                    onboardingDone = true,
-                    // 环形布局只在圆屏上有意义；从圆屏切到方屏时收回气泡
-                    chatLayout = if (it.chatLayout == ChatLayouts.RING &&
-                        !ScreenShapes.resolve(it.screenShape, detectedRound)
-                    ) ChatLayouts.BUBBLE else it.chatLayout
-                )
-            }
+            update { it.copy(onboardingDone = true) }
             return
         }
         if (step == 0 && settings.screenShape == ScreenShapes.AUTO) {
             // 用户什么都没点就直接下一步：把他看到的这个形状落成显式选择，
-            // 否则进到布局页时「环形」可能因为系统检测值而消失。
+            // 否则进到布局页时，可用布局列表可能因为系统检测值而变。
             update { it.copy(screenShape = if (detectedRound) ScreenShapes.ROUND else ScreenShapes.SQUARE) }
         }
         step++
     }
 
+    /*
+     * 圆屏的三段边距，各按自己那一行的弦长算。
+     *
+     * 基准是**圆的直径**，不是屏幕高：这台机器 412×502（329.6×401.6dp），
+     * 圆只占中间 329.6dp，上下各有 36dp 黑边。拿屏幕高算，整页会整体下沉、
+     * 底部按钮掉到圆周外面 —— 看着在，按下去没反应。
+     *
+     * 三段分开之后：指示行 / 内容 / 按钮各按自己那一行的弦宽收，
+     * 全部落在圆内。
+     */
+    val d = circle?.diameter?.value ?: 0f
+    val topY = circle?.top?.value ?: 0f
+    val barY = topY + d * 0.08f
+    val barInset = circle?.let { (it.insetAt(barY) + 2f).dp } ?: 0.dp
+    val bodyInset = circle?.let { (it.insetAt(topY + d * 0.72f) + 2f).dp }
+        ?: if (round) 20.dp else 10.dp
+    val footInset = circle?.let { (it.insetAt(topY + d * 0.80f) + 2f).dp }
+        ?: if (round) 20.dp else 10.dp
+    // 圆底到屏幕底那段不能用：那里弦宽趋近 0，按钮放上去就是个装饰品
+    val bottomPad = circle?.let { it.height - it.top - it.diameter * 0.80f }
+        ?: 8.dp
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = if (round) 20.dp else 10.dp),
+            .padding(bottom = if (circle != null) bottomPad else 0.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = s.onboardingTitle,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "${step + 1} / 4",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-        )
+        /*
+         * 圆屏不画主标题。
+         *
+         * 那一行贴着圆顶，弦宽只有直径的零头 —— 任何一句「欢迎」都会被切成两半。
+         * 文本留白在这里不是风格问题，是几何问题。
+         * 步骤指示（"2 / 4" + 圆点）足够让用户知道进度。
+         */
+        Spacer(Modifier.height(if (circle != null) barY.dp else 6.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (circle != null) barInset else 0.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (circle == null) {
+                Text(
+                    text = s.onboardingTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "${step + 1} / 4",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         PageDots(
             count = 4,
@@ -154,6 +192,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .padding(horizontal = bodyInset)
                 .wearVerticalScroll(rememberScrollState()),
         ) {
             when (step) {
@@ -200,11 +239,15 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
             Spacer(Modifier.height(8.dp))
         }
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = if (circle != null) footInset else 0.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (step > 0) {
+            // 圆屏底栏只有约 120dp 可用：两个按钮各 57dp，"上一步"挤成一条缝。
+            // 所以圆屏只留一个主按钮，回退交给系统返回键（见上面的 BackHandler）。
+            if (step > 0 && circle == null) {
                 GhostButton(
                     text = s.onboardingBack,
                     modifier = Modifier.weight(1f),
@@ -213,7 +256,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
             }
             PrimaryButton(
                 text = if (step >= 3) s.onboardingStart else s.onboardingNext,
-                modifier = Modifier.weight(if (step > 0) 1.4f else 1f),
+                modifier = Modifier.weight(if (step > 0 && circle == null) 1.4f else 1f),
                 onClick = ::goNext,
             )
         }
@@ -478,7 +521,6 @@ private fun LayoutStep(
 @Composable
 private fun LayoutThumb(layout: String, tint: Color) {
     Canvas(modifier = Modifier.size(36.dp)) {
-        val stroke = Stroke(width = 1.5f)
         when (layout) {
             ChatLayouts.BUBBLE -> {
                 drawRoundRect(tint.copy(alpha = 0.75f), Offset(0f, size.height * 0.12f), Size(size.width * 0.58f, size.height * 0.3f), CornerRadius(8f))
@@ -498,17 +540,6 @@ private fun LayoutThumb(layout: String, tint: Color) {
                         Offset(size.width * 0.2f, size.height * y),
                         Size(size.width * (if (i == 2) 0.45f else 0.72f), size.height * 0.09f),
                         CornerRadius(3f),
-                    )
-                }
-            }
-            else -> {
-                drawCircle(tint.copy(alpha = 0.7f), size.minDimension / 2f, style = stroke)
-                listOf(0.36f to 0.5f, 0.52f to 0.6f, 0.68f to 0.4f).forEach { (y, w) ->
-                    drawRoundRect(
-                        tint.copy(alpha = 0.55f),
-                        Offset(size.width * (0.5f - w / 2f), size.height * y),
-                        Size(size.width * w, size.height * 0.08f),
-                        CornerRadius(4f),
                     )
                 }
             }

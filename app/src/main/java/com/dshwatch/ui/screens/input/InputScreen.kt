@@ -57,6 +57,8 @@ fun InputScreen(
 ) {
     val s = LocalStrings.current
     var text by remember { mutableStateOf(initial) }
+    // 上一次发送因为「正在生成」被挡下来：留在本页，并给出原因
+    var busy by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val settings by container.settings.collectAsStateWithLifecycle()
     val conversation by container.engine.conversation.collectAsStateWithLifecycle()
@@ -71,11 +73,27 @@ fun InputScreen(
         runCatching { focusRequester.requestFocus() }
     }
 
+    /*
+     * 发送后**只退一层**，回到把这一页推进来的那一页。
+     *
+     * 这里原来是 `nav.toChat()`（= popToRoot）。编程场景下输入页就压在根屏上，
+     * 退到根和退一层是同一个结果，所以一直没人发现；但写作 / 酒馆的层级是
+     * 列表 → 对话 → 输入，退到根会直接跳过对话页落在**列表页**上：
+     * 用户刚说完一句话就被弹出对话，看不到自己发的内容，也看不到回复。
+     * 更糟的是他再点「继续写」时，`engine.open()` 会把还在跑的生成取消掉 ——
+     * 于是消息留在本地、回复永远不来。
+     *
+     * 另外这里要按 send 的返回值决定退不退：上一轮还在生成时消息根本没入队，
+     * 关闭输入页等于把用户刚打的字吃掉。
+     */
     fun submit() {
         val value = text.trim()
         if (value.isEmpty()) return
-        container.engine.send(value)
-        nav.toChat()
+        if (container.engine.send(value)) {
+            nav.pop()
+        } else {
+            busy = true
+        }
     }
 
     WatchScaffold(
@@ -103,6 +121,14 @@ fun InputScreen(
             DeepSeekPriceBar()
             Spacer(Modifier.height(5.dp))
         }
+        if (busy) {
+            Text(
+                text = "上一轮还在生成，等它写完再发（内容已保留）",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(5.dp))
+        }
 
         // 输入框本身做成玻璃卡片：OutlinedTextField 的描边框在玻璃主题下
         // 是一条突兀的主色细线（圆屏上尤其明显），所以这里去掉描边，
@@ -110,7 +136,10 @@ fun InputScreen(
         val glass = LocalGlass.current
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = {
+                text = it
+                if (busy) busy = false
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

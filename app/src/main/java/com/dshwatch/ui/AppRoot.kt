@@ -165,11 +165,25 @@ fun AppRoot(
                         else -> ChatScreen(container = container, settings = settings, nav = nav)
                     }
                     Screen.Sessions -> SessionsScreen(container = container, nav = nav)
+                    is Screen.HtmlView -> com.dshwatch.ui.screens.html.HtmlScreen(
+                        nav = nav,
+                        html = page.html,
+                    )
+                    is Screen.SceneSessions -> SessionsScreen(
+                        container = container,
+                        nav = nav,
+                        filterScene = page.scene,
+                        filterCardId = page.cardId,
+                    )
                     Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)
                     Screen.Providers -> ProvidersScreen(container = container, settings = settings, nav = nav)
                     Screen.Usage -> UsageScreen(container = container, nav = nav)
                     Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)
                     Screen.About -> AboutScreen(container = container, nav = nav)
+                    Screen.Update -> com.dshwatch.ui.screens.update.UpdateScreen(
+                        container = container,
+                        nav = nav,
+                    )
                     Screen.GroupChat -> GroupChatScreen(nav = nav)
                     Screen.Donate -> DonateScreen(nav = nav)
                     Screen.Thanks -> ThanksScreen(nav = nav)

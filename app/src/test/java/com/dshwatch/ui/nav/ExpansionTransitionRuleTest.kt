@@ -257,8 +257,8 @@ class ExpansionTransitionRuleTest {
         ).forEach { (path, key) ->
             val s = stripComments(read(path))
             assertTrue(
-                "$path 必须用 rememberKeptScalingListState(\"$key\")，否则返回后跳回顶部",
-                s.contains("rememberKeptScalingListState(\"$key\")"),
+                "$path 必须用 rememberKeptListState(\"$key\")，否则返回后跳回顶部",
+                s.contains("rememberKeptListState(\"$key\")"),
             )
         }
     }

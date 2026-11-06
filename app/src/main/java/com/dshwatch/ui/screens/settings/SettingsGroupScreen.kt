@@ -178,7 +178,7 @@ fun SettingsGroupScreen(
                 SettingsGroups.PLUGINS -> PluginsGroup(settings, update, s)
                 SettingsGroups.MCP -> McpGroup(settings, update, container, s)
                 SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
-                else -> ConnectionGroup(settings, nav, s)
+                else -> ConnectionGroup(settings, update, nav, s)
             }
         }
     }
@@ -487,17 +487,8 @@ private fun AppearanceGroup(
                     2 -> ScreenShapes.SQUARE
                     else -> ScreenShapes.AUTO
                 }
-                val nextRound = ScreenShapes.resolve(next, detectedRound)
                 update { st ->
-                    st.copy(
-                        screenShape = next,
-                        // 环形布局只属于圆屏：切到方屏时自动退回气泡
-                        chatLayout = if (!nextRound && st.chatLayout == ChatLayouts.RING) {
-                            ChatLayouts.BUBBLE
-                        } else {
-                            st.chatLayout
-                        },
-                    )
+                    st.copy(screenShape = next)
                 }
             },
         )
@@ -1005,8 +996,18 @@ private fun PluginsGroup(settings: AppSettings, update: Update, s: AppStrings) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun ConnectionGroup(settings: AppSettings, nav: WatchNavigator, s: AppStrings) {
+private fun ConnectionGroup(
+    settings: AppSettings,
+    update: Update,
+    nav: WatchNavigator,
+    s: AppStrings,
+) {
     SettingCard {
+        SwitchRow(
+            title = s.autoCheckUpdate,
+            checked = settings.autoCheckUpdate,
+            onCheckedChange = { v -> update { it.copy(autoCheckUpdate = v) } },
+        )
         SettingRow(
             title = s.pairTitle,
             subtitle = s.entryPairDesc,

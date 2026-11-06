@@ -38,7 +38,7 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.domain.plugin.PluginRegistry
-import com.dshwatch.ui.components.WatchTopBar
+import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.WearCardRow
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
@@ -67,18 +67,17 @@ fun SettingsScreen(
 ) {
     val s = LocalStrings.current
 
-    // 设置现在是对话页的二级页（不再靠右滑进入），所以顶部要有返回。
-    // 之前作为「第二页」时不需要返回键，因为横滑本身就回去了。
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        WatchTopBar(title = s.navSettings, onBack = { nav.pop() })
+    /*
+     * 走统一骨架，不要自己拼 `WatchTopBar + WearList`。
+     *
+     * 之前的写法绕开了圆屏分支：设置页因此在圆屏上拿到的是一个**矩形**，
+     * 顶部 56dp 的标题栏、列表里 16dp 的左右 padding 全是方屏的数值 ——
+     * 用户看到的就是「设置列表没有适配」：卡片顶到圆周外、上下两端被切掉。
+     */
+    WatchScaffold(title = s.navSettings, onBack = { nav.pop() }) {
         WearList(
-            state = com.dshwatch.ui.wear.rememberKeptScalingListState("settings"),
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            state = com.dshwatch.ui.wear.rememberKeptListState("settings"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(SettingsGroups.all.size) { index ->
                 val id = SettingsGroups.all[index]

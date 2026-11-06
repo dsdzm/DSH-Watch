@@ -32,11 +32,13 @@ class ChatLayoutsTest {
     }
 
     @Test
-    fun `ring layout is round only`() {
+    fun `ring layout is gone, both shapes get the same three`() {
+        // 环形布局已删除：圆屏 / 方屏都用气泡、卡片、极简三套。
         assertThat(ChatLayouts.available(isRound = true))
-            .containsExactly(ChatLayouts.BUBBLE, ChatLayouts.CARD, ChatLayouts.MINIMAL, ChatLayouts.RING)
-        assertThat(ChatLayouts.available(isRound = false)).doesNotContain(ChatLayouts.RING)
+            .containsExactly(ChatLayouts.BUBBLE, ChatLayouts.CARD, ChatLayouts.MINIMAL)
         assertThat(ChatLayouts.available(isRound = false)).hasSize(3)
+        // 老设置里存过 "ring" 的要落回气泡，不能变成不存在的布局
+        assertThat(ChatLayouts.of("ring")).isEqualTo(ChatLayouts.BUBBLE)
     }
 
     @Test

@@ -105,16 +105,18 @@ object ChatLayouts {
     const val CARD = "card"
     const val MINIMAL = "minimal"
 
-    /** 环形布局：只给圆屏 —— 方屏上它和一个窄居中的极简布局没有区别 */
-    const val RING = "ring"
-
-    val all = listOf(BUBBLE, CARD, MINIMAL, RING)
+    val all = listOf(BUBBLE, CARD, MINIMAL)
 
     fun of(id: String): String = id.takeIf { it in all } ?: BUBBLE
 
-    /** 当前设备可选的布局：方屏不提供环形 */
-    fun available(isRound: Boolean): List<String> =
-        if (isRound) all else all.filter { it != RING }
+    /**
+     * 当前设备可选的布局。
+     *
+     * 参数留着是为了调用点不用改：环形布局已经删掉，方屏圆屏都是这三套。
+     * 老用户设置里存过 "ring" 的，[of] 会把它落回气泡。
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun available(isRound: Boolean): List<String> = all
 }
 
 @Serializable
@@ -184,6 +186,15 @@ data class AppSettings(
     val haptics: Boolean = true,
     /** 流式生成时挂前台服务，锁屏不中断 */
     val foregroundService: Boolean = true,
+    /**
+     * 启动后自动检查更新（一天最多一次）。
+     *
+     * 关掉之后只能从「关于 → 检查更新」手动查。默认开：手表上没人会主动去点
+     * 那个入口，而版本落后带来的问题（尤其是崩溃修复）恰恰需要它主动被发现。
+     */
+    val autoCheckUpdate: Boolean = true,
+    /** 上次自动检查的时间戳（毫秒），0 表示从没查过。只用来做 24h 节流 */
+    val lastUpdateCheckAt: Long = 0,
     val autoScroll: Boolean = true,
     val showReasoning: Boolean = true,
     val showTokenBadge: Boolean = true,

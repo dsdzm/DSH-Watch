@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -43,6 +44,7 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
+import com.dshwatch.ui.components.GlassCircleButton
 import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.components.SectionHeader
@@ -84,6 +86,37 @@ fun TavernScreen(
         loaded = true
     }
 
+    /*
+     * 「开始对话」现在会先找这张卡上一次聊过的会话。
+     *
+     * 以前这里无条件 startNew —— 用户昨天聊了三小时的角色，今天点「开始对话」
+     * 得到一张空白页，之前的内容得自己去历史列表里翻，而且列表里还混着
+     * 所有别的会话。现在：有记录就接着上次，没有才新建。
+     * 「新开」那颗按钮走 forceNew = true，保留"从零开始"的入口。
+     */
+    val startOrResume: (RoleCard, Boolean) -> Unit = { card, forceNew ->
+        scope.launch {
+            // 记住上次用过的卡：下次进来直接续上，省一次选择
+            container.settingsRepo.update { it.copy(lastTavernCardId = card.id) }
+            val latest = if (forceNew) {
+                null
+            } else {
+                container.conversationStore.latestFor(Scenes.TAVERN, card.id)
+            }
+            if (latest != null) {
+                container.engine.open(latest.id)
+            } else {
+                container.engine.startNew(
+                    settings = settings.copy(agentMode = com.dshwatch.domain.model.AgentMode.OFF),
+                    scene = Scenes.TAVERN,
+                    roleCardId = card.id,
+                    title = card.displayName,
+                )
+            }
+            nav.push(Screen.RoleplayChat)
+        }
+    }
+
     WatchScaffold(
         title = "酒馆",
         actions = {
@@ -112,19 +145,9 @@ fun TavernScreen(
             cards.forEach { card ->
                 TavernCardRow(
                     card = card,
-                    onStart = {
-                        scope.launch {
-                            // 记住上次用过的卡：下次进来直接续上，省一次选择
-                            container.settingsRepo.update { it.copy(lastTavernCardId = card.id) }
-                            container.engine.startNew(
-                                settings = settings.copy(agentMode = com.dshwatch.domain.model.AgentMode.OFF),
-                                scene = Scenes.TAVERN,
-                                roleCardId = card.id,
-                                title = card.displayName,
-                            )
-                            nav.push(Screen.RoleplayChat)
-                        }
-                    },
+                    onStart = { startOrResume(card, false) },
+                    onNew = { startOrResume(card, true) },
+                    onHistory = { nav.push(Screen.SceneSessions(Scenes.TAVERN, card.id)) },
                     onEdit = { nav.push(Screen.CardEdit(Scenes.TAVERN, card.id)) },
                 )
             }
@@ -161,6 +184,8 @@ fun TavernScreen(
 private fun TavernCardRow(
     card: RoleCard,
     onStart: () -> Unit,
+    onNew: () -> Unit,
+    onHistory: () -> Unit,
     onEdit: () -> Unit,
 ) {
     Column(
@@ -215,12 +240,27 @@ private fun TavernCardRow(
             )
         }
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             WatchButton(
                 text = "开始对话",
                 icon = Icons.Filled.ArrowForward,
                 modifier = Modifier.weight(1f),
                 onClick = onStart,
+            )
+            // 主按钮旁边这两颗 40dp 的圆：新开一个对话 / 看这个角色的历史。
+            // 之前只有一个「开始对话」，想看之前聊过的内容得去全局会话列表里翻。
+            GlassCircleButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "新开一个对话",
+                onClick = onNew,
+            )
+            GlassCircleButton(
+                icon = Icons.Outlined.History,
+                contentDescription = "历史记录",
+                onClick = onHistory,
             )
         }
     }

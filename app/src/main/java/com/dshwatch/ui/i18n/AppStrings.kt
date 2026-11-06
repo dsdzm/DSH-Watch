@@ -384,6 +384,27 @@ interface AppStrings {
     val deviceInfo: String
     val sourceHint: String
 
+    // 更新
+    val updateCheck: String
+    val autoCheckUpdate: String
+    val updateTitle: String
+    val updateNewVersion: String
+    val updateChecking: String
+    val updateUpToDate: String
+    val updateCurrent: String
+    val updateLatest: String
+    val updateDownloadInstall: String
+    val updateDownloading: String
+    val updateInstall: String
+    val updateReady: String
+    val updateRetry: String
+    val updateNeedPermission: String
+    val updateGrant: String
+    val updateNoSettings: String
+    val updateCopied: String
+    val updateInstallFailed: String
+    val updateNotes: String
+
     // 诊断
     val navDiagnostics: String
     val diagTitle: String
@@ -512,11 +533,9 @@ interface AppStrings {
     val layoutBubble: String
     val layoutCard: String
     val layoutMinimal: String
-    val layoutRing: String
     val layoutBubbleHint: String
     val layoutCardHint: String
     val layoutMinimalHint: String
-    val layoutRingHint: String
     val screenShape: String
     val chatLayout: String
     val themePreset: String
@@ -892,6 +911,26 @@ object Zh : AppStrings {
     override val deviceInfo = "设备信息"
     override val sourceHint = "本项目基于开源社区的 DeepSeek Harness 客户端思路重写，与 DeepSeek 官方无关。"
 
+    override val updateCheck = "检查更新"
+    override val autoCheckUpdate = "自动检查更新"
+    override val updateTitle = "检查更新"
+    override val updateNewVersion = "有新版本"
+    override val updateChecking = "正在检查…"
+    override val updateUpToDate = "已经是最新版本"
+    override val updateCurrent = "当前版本"
+    override val updateLatest = "最新版本"
+    override val updateDownloadInstall = "下载并安装"
+    override val updateDownloading = "正在下载…"
+    override val updateInstall = "安装"
+    override val updateReady = "已下载，可以安装"
+    override val updateRetry = "重试"
+    override val updateNeedPermission = "需要先允许「安装未知应用」"
+    override val updateGrant = "去授权"
+    override val updateNoSettings = "这台设备没有这个设置页。用数据线执行一次下面的命令即可："
+    override val updateCopied = "已复制"
+    override val updateInstallFailed = "无法调起系统安装器"
+    override val updateNotes = "更新内容"
+
     override val navDiagnostics = "诊断"
     override val diagTitle = "连接诊断"
     override val diagRun = "开始诊断"
@@ -1048,11 +1087,9 @@ object Zh : AppStrings {
     override val layoutBubble = "气泡"
     override val layoutCard = "卡片"
     override val layoutMinimal = "极简"
-    override val layoutRing = "环形"
     override val layoutBubbleHint = "左右气泡，对话感最强"
     override val layoutCardHint = "每条一张卡片，信息分层清楚"
     override val layoutMinimalHint = "去掉底色，小屏也能多读两行"
-    override val layoutRingHint = "沿表盘收窄的居中版式，圆屏专属"
     override val screenShape = "屏幕形状"
     override val chatLayout = "对话布局"
     override val themePreset = "主题预设"
@@ -1070,14 +1107,12 @@ object Zh : AppStrings {
     override fun chatLayoutLabel(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
         com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCard
         com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimal
-        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRing
         else -> layoutBubble
     }
 
     override fun chatLayoutHint(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
         com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCardHint
         com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimalHint
-        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRingHint
         else -> layoutBubbleHint
     }
 
@@ -1482,6 +1517,26 @@ object En : AppStrings {
     override val deviceInfo = "Device"
     override val sourceHint = "Rewritten from community DSH client ideas. Not affiliated with DeepSeek."
 
+    override val updateCheck = "Check for updates"
+    override val autoCheckUpdate = "Auto-check for updates"
+    override val updateTitle = "Update"
+    override val updateNewVersion = "New version"
+    override val updateChecking = "Checking…"
+    override val updateUpToDate = "You are up to date"
+    override val updateCurrent = "Current"
+    override val updateLatest = "Latest"
+    override val updateDownloadInstall = "Download and install"
+    override val updateDownloading = "Downloading…"
+    override val updateInstall = "Install"
+    override val updateReady = "Downloaded, ready to install"
+    override val updateRetry = "Retry"
+    override val updateNeedPermission = "Allow installing unknown apps first"
+    override val updateGrant = "Allow"
+    override val updateNoSettings = "This device has no such settings page. Run this once over USB:"
+    override val updateCopied = "Copied"
+    override val updateInstallFailed = "Could not open the system installer"
+    override val updateNotes = "What's new"
+
     override val navDiagnostics = "Diagnostics"
     override val diagTitle = "Connection diagnostics"
     override val diagRun = "Run diagnostics"
@@ -1639,11 +1694,9 @@ object En : AppStrings {
     override val layoutBubble = "Bubble"
     override val layoutCard = "Card"
     override val layoutMinimal = "Minimal"
-    override val layoutRing = "Ring"
     override val layoutBubbleHint = "Left/right bubbles, the most conversational"
     override val layoutCardHint = "One card per turn, clear hierarchy"
     override val layoutMinimalHint = "No fills, more lines on a tiny screen"
-    override val layoutRingHint = "Centered and narrowed around the dial, round-only"
     override val screenShape = "Screen shape"
     override val chatLayout = "Chat layout"
     override val themePreset = "Theme preset"
@@ -1661,14 +1714,12 @@ object En : AppStrings {
     override fun chatLayoutLabel(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
         com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCard
         com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimal
-        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRing
         else -> layoutBubble
     }
 
     override fun chatLayoutHint(id: String) = when (com.dshwatch.domain.model.ChatLayouts.of(id)) {
         com.dshwatch.domain.model.ChatLayouts.CARD -> layoutCardHint
         com.dshwatch.domain.model.ChatLayouts.MINIMAL -> layoutMinimalHint
-        com.dshwatch.domain.model.ChatLayouts.RING -> layoutRingHint
         else -> layoutBubbleHint
     }
 

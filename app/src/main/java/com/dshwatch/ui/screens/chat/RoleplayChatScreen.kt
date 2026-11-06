@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -107,11 +108,43 @@ fun RoleplayChatScreen(
         memoryText = if (cardId.isBlank()) "" else container.memoryStore.read(cardId)
     }
 
-    // 流式期间只滚到底部，不做任何重排 —— 手表 CPU 弱，重排一次就掉帧
-    LaunchedEffect(messages.size, live.text.length, streaming) {
-        if (messages.isNotEmpty()) {
-            runCatching { listState.scrollToItem(messages.lastIndex) }
+    /*
+     * 自动跟随到最后一条。
+     *
+     * 这里原来写的是 `scrollToItem(messages.lastIndex)` —— 把**最后一条消息的顶部**
+     * 对齐到视口顶部。一条几百字的长回复，每来几个字就重新对齐一次，
+     * 用户看到的永远是这段话的开头，新生成的字一直在屏幕下方看不见，
+     * 观感就是「一生成就滚回页首」。
+     *
+     * 正确目标是列表末尾的 tail 项（index = messages.size）：它贴在最后，
+     * 对齐它就等于滚到最底。再加一道 atBottom 守卫 —— 用户往上翻历史时
+     * 不要把他拽回来。
+     */
+    val atBottom by remember {
+        androidx.compose.runtime.derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            info.totalItemsCount == 0 || last >= info.totalItemsCount - 2
         }
+    }
+    /*
+     * 进页面先落到底，之后再按 atBottom 跟随。
+     *
+     * 从输入页退回来时这一页是**新组合**的：列表状态重建、滚动位置归零，
+     * 而 atBottom 此刻通常已经是 false（列表停在最上面），跟随逻辑不会触发 ——
+     * 用户发完一句话，看到的却是这篇稿子的第一段。
+     * 所以第一次拿到消息时无条件滚到尾，把「跟随」留给后续的增量。
+     */
+    var landedAtTail by remember { mutableStateOf(false) }
+    LaunchedEffect(messages.size, live.text.length, streaming) {
+        if (messages.isEmpty()) return@LaunchedEffect
+        if (!landedAtTail) {
+            runCatching { listState.scrollToItem(messages.size) }
+            landedAtTail = true
+            return@LaunchedEffect
+        }
+        if (!atBottom) return@LaunchedEffect
+        runCatching { listState.scrollToItem(messages.size) }
     }
 
     /*
@@ -260,12 +293,18 @@ fun RoleplayChatScreen(
             contentPadding = PaddingValues(vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(messages, key = { it.id }) { m ->
+            itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->
                 RoleplayMessage(
                     message = m,
                     liveText = if (live.messageId == m.id) live.text else null,
                     isWriting = isWriting,
                     speakerName = card?.displayName.orEmpty(),
+                    onOpenHtml = { html -> nav.push(Screen.HtmlView(html)) },
+                    onScrollBy = { d -> listState.dispatchRawDelta(d) },
+                    canPick = index == messages.lastIndex && !streaming,
+                    onChoose = { c ->
+                        if (c.custom) nav.push(Screen.Input()) else engine.send(c.raw)
+                    },
                 )
             }
             item(key = "__tail__") { Spacer(Modifier.height(8.dp)) }
@@ -285,10 +324,38 @@ private fun RoleplayMessage(
     liveText: String?,
     isWriting: Boolean,
     speakerName: String,
+    onOpenHtml: (String) -> Unit,
+    onScrollBy: (Float) -> Unit,
+    canPick: Boolean,
+    onChoose: (com.dshwatch.domain.Choices.Choice) -> Unit,
 ) {
     val isUser = message.role == Role.USER
     val text = liveText ?: message.content
     if (text.isBlank() && message.status != MessageStatus.STREAMING) return
+
+    /*
+     * 自定义界面：消息里带一份完整 HTML 文档时，正文之外多一张活的界面。
+     *
+     * 放在气泡**外面**、宽度撑满 —— 它不是"角色说的话"，是一块面板。
+     * 塞进气泡会跟着气泡收窄，作者排好的表格和标签全被挤烂。
+     */
+    val html = remember(text, message.status) {
+        if (message.status == MessageStatus.STREAMING) null
+        else com.dshwatch.ui.html.HtmlBlocks.find(text)
+    }
+    val rawPlain = if (html != null) com.dshwatch.ui.html.HtmlBlocks.strip(text, html) else text
+    // ```panel 围栏 → 原生面板；流式期间半截围栏没闭合，不必解析
+    val panelRes = remember(rawPlain, message.status) {
+        if (message.status == MessageStatus.STREAMING) {
+            com.dshwatch.domain.Panels.Result(rawPlain, emptyList())
+        } else {
+            com.dshwatch.domain.Panels.extract(rawPlain)
+        }
+    }
+    val afterPanel = if (panelRes.panels.isNotEmpty()) panelRes.body else rawPlain
+    // 尾部 A/B/C 拆出来做按钮，正文只留前面
+    val parsed = remember(afterPanel) { com.dshwatch.domain.Choices.parse(afterPanel) }
+    val plain = if (parsed.hasChoices) parsed.body else afterPanel
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -301,6 +368,18 @@ private fun RoleplayMessage(
             },
             modifier = Modifier.padding(start = 4.dp, bottom = 3.dp),
         )
+        if (html != null) {
+            // 直接渲染成界面，不是入口卡片：角色面板、状态条这类东西
+            // 就是要在对话里一眼看到、随手点，多一跳全屏就失去了意义
+            com.dshwatch.ui.html.InlineHtml(
+                html = html.html,
+                maxHeight = 260.dp,
+                onOpenFull = onOpenHtml,
+                onDrag = onScrollBy,
+            )
+            if (plain.isNotBlank()) Spacer(Modifier.height(6.dp))
+        }
+        if (plain.isNotBlank() || message.status == MessageStatus.STREAMING) {
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
@@ -336,10 +415,27 @@ private fun RoleplayMessage(
                 } else {
                     // 角色扮演里通常没有 Markdown，但写作场景会有分段与强调，
                     // 所以仍走同一个解析器；字号由 LocalTextSize 决定。
-                    MarkdownText(text = text)
+                    MarkdownText(text = plain)
                 }
             }
         }
+        }
+        if (panelRes.panels.isNotEmpty()) {
+            panelRes.panels.forEach { p ->
+                Spacer(Modifier.height(7.dp))
+                com.dshwatch.ui.components.PanelCard(panel = p)
+            }
+        }
+
+        if (!isUser && parsed.hasChoices && message.status != MessageStatus.STREAMING) {
+            Spacer(Modifier.height(7.dp))
+            com.dshwatch.ui.components.ChoiceButtons(
+                choices = parsed.choices,
+                enabled = canPick,
+                onPick = onChoose,
+            )
+        }
+
         if (message.status == MessageStatus.ERROR) {
             Text(
                 text = message.error.ifBlank { "出错了" },

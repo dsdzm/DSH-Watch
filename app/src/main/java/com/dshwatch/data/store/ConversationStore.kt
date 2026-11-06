@@ -62,6 +62,46 @@ class ConversationStore(
     }
 
     /**
+     * 某个角色卡（或写作设定）下最近一次真正聊过的会话。
+     *
+     * 「开始对话 / 继续写」现在走这里：有就直接续上，没有才新建。
+     *
+     * 之前这两个按钮每次都 `startNew` —— 用户聊了三天的角色，第二天点「开始对话」
+     * 得到的是一个空会话，之前的内容只能自己去历史列表里翻。
+     * 卡 id 为空（编程场景）时返回 null，行为不变。
+     */
+    suspend fun latestFor(scene: String, roleCardId: String): Conversation? = withContext(io) {
+        if (roleCardId.isBlank()) return@withContext null
+        mutex.withLock {
+            readIndexLocked()
+                .asSequence()
+                .filter {
+                    it.messageCount > 0 &&
+                        it.scene == com.dshwatch.domain.roleplay.Scenes.of(scene) &&
+                        it.roleCardId == roleCardId
+                }
+                .maxByOrNull { it.updatedAt }
+        }
+    }
+
+    /** 某个角色卡下的全部会话，按更新时间倒序（历史记录页用） */
+    suspend fun listFor(scene: String, roleCardId: String): List<Conversation> = withContext(io) {
+        mutex.withLock {
+            readIndexLocked()
+                .filter {
+                    it.messageCount > 0 &&
+                        it.scene == com.dshwatch.domain.roleplay.Scenes.of(scene) &&
+                        (roleCardId.isBlank() || it.roleCardId == roleCardId)
+                }
+                .sortedWith(
+                    compareByDescending<Conversation> { it.pinned }
+                        .thenByDescending { it.updatedAt },
+                )
+        }
+    }
+
+
+    /**
      * 物理清掉没有任何消息的空会话（连同它的 json 文件）。
      * 在 App 启动时调用一次，把升级前堆积的空会话清干净。
      *

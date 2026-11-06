@@ -121,4 +121,28 @@ class RolePromptTest {
         assertThat(lore.length).isAtMost(TavernPrompt.LORE_CHAR_BUDGET + 64)
         assertThat(lore).doesNotContain("这条挤不进来")
     }
+
+    @Test
+    fun `writing prompt carries the already written opening`() {
+        /*
+         * 「开头」以前只显示在开场提示卡上，从来没进过模型上下文：
+         * 首次续写的引导语说"以上是我已经写好的开头"，对模型来说"以上"是空的。
+         * 这里守住它必须出现在写作提示里，并且不能被挤到超预算。
+         */
+        val card = sampleCard().copy(
+            kind = Scenes.WRITING,
+            greeting = "雨下到第九天，涵洞的水位已经漫过了标尺的第三格。",
+        )
+        val p = TavernPrompt.buildWriting(card, opening = card.greeting)
+        assertThat(p).contains("已经写好的开头")
+        assertThat(p).contains("涵洞的水位")
+
+        // 超长开头只留末尾：续写看的是断点前发生了什么
+        val long = "旧".repeat(5_000) + "断点在这里"
+        val cut = TavernPrompt.buildWriting(card, opening = long)
+        assertThat(cut).contains("断点在这里")
+        assertThat(cut).doesNotContain("旧".repeat(TavernPrompt.OPENING_CHAR_BUDGET))
+        // 不传 opening 时不该凭空多出一段
+        assertThat(TavernPrompt.buildWriting(card)).doesNotContain("已经写好的开头")
+    }
 }

@@ -12,11 +12,13 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.dshwatch.MainActivity
 import com.dshwatch.R
 import com.dshwatch.core.AppContainer
+import com.dshwatch.core.Logx
 
 /**
  * 流式生成期间的前台服务。
@@ -58,25 +60,59 @@ class StreamingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        /*
+         * 第一件事就是进前台，而且**对所有 action 都进**。
+         *
+         * 系统只认一件事：只要服务是被 startForegroundService() 拉起来的，
+         * 就必须在 5 秒内调用 startForeground()，否则进程被直接干掉 ——
+         * 抛的是 RemoteServiceException，堆栈停在 ActivityThread$H，
+         * 从日志完全看不出是「谁启动的、为什么慢」，只留下一行
+         * `Context.startForegroundService() did not then call Service.startForeground()`。
+         *
+         * 之前只有 ACTION_START 会进前台，ACTION_UPDATE 走的是同一条拉起通道
+         * 却从不调用它 —— 那是一条必然崩溃的路径，只是平时 instance 还在、
+         * 根本走不到 startForegroundService 那一行，所以一直没暴露。
+         */
+        val lag = SystemClock.elapsedRealtime() - requestedAt
+        if (lag > 1500L) {
+            // 5 秒是死线。记录延迟，下次再崩就能直接看出是「主线程被谁堵住了」
+            Logx.w(TAG, "onStartCommand 延迟 ${lag}ms 才执行（主线程繁忙）")
+        }
+
+        if (!goForeground()) {
+            // 进不了前台就别赖着：再等几秒系统一样会崩掉整个进程，
+            // 不如自己收干净，生成还能在 Application 作用域里继续跑
+            Logx.w(TAG, "进入前台失败，主动停止服务")
+            stopSelfSafely()
+            return START_NOT_STICKY
+        }
+
         when (intent?.action) {
             ACTION_START -> {
-                ensureChannel()
-                runCatching { startForeground(NOTIFICATION_ID, buildNotification()) }
-                    .onFailure { com.dshwatch.core.Logx.w(TAG, "前台服务启动失败：${it.message}") }
                 acquireWakeLock()
                 scheduleRenew()
             }
 
-            /**
-             * 只更新通知文案。
+            /*
+             * 只更新文案。刷 B站 那种任务要跑好几分钟、几十次工具调用，
+             * 用户早就把界面划走了，通知上一直写「正在生成」等于什么都没说。
              *
-             * 刷 B站 那种任务要跑好几分钟、几十次工具调用，用户早就把界面划走了。
-             * 通知上一直写「正在生成」等于什么都没说 —— 至少让他看见「在读字幕」。
+             * 走到这里说明服务确实在：update() 已经不会再用 startForegroundService
+             * 去拉起一个不存在的服务，前台状态在上面也一并就位了。
              */
             ACTION_UPDATE -> refreshNotification()
 
+            /*
+             * 通知栏上的「停止」。
+             *
+             * 这一步可能是进程被杀之后、由通知按钮重新拉起来的第一次执行，
+             * 此时 [AppContainer] 还没构造过 —— 它的构造要读 keystore、开 DataStore，
+             * 在主线程做足够触发 ANR。所以扔到后台线程，服务这边立刻收工。
+             */
             ACTION_STOP_GENERATION -> {
-                AppContainer.of(this).engine.stop()
+                val app = applicationContext
+                runCatching { Thread { AppContainer.of(app).engine.stop() }.start() }
+                    .onFailure { Logx.w(TAG, "停止生成失败：${it.message}") }
                 stopSelfSafely()
             }
 
@@ -101,6 +137,48 @@ class StreamingService : Service() {
         }
         super.onDestroy()
     }
+
+    /**
+     * 进入前台。成功返回 true。
+     *
+     * 分三步且每步都兜住异常：建渠道 → 构通知 → startForeground。
+     * 任何一步失败都只返回 false，由调用方停服务 —— 绝不能让「调用过
+     * startForegroundService 但我们这边悄悄失败了」这种状态存在，
+     * 那等于埋一颗 5 秒后引爆的雷。
+     */
+    private fun goForeground(): Boolean {
+        runCatching { ensureChannel() }
+            .onFailure { Logx.w(TAG, "通知渠道创建失败：${it.message}") }
+
+        val notification = runCatching { buildNotification() }
+            .getOrElse {
+                Logx.w(TAG, "通知构建失败：${it.message}")
+                buildFallbackNotification()
+            }
+        return runCatching {
+            startForeground(NOTIFICATION_ID, notification)
+            true
+        }.getOrElse {
+            Logx.w(TAG, "startForeground 失败：${it.message}")
+            false
+        }
+    }
+
+    /**
+     * 最简通知。
+     *
+     * 正常那条带 PendingIntent 和 action，任一环节出问题（比如包名被改、
+     * 图标资源被裁）都会让 buildNotification 抛异常。而这时候系统仍然要求
+     * 我们进前台 —— 一条只有标题的通知远好过一个必崩的进程。
+     */
+    private fun buildFallbackNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(getString(R.string.notification_title))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
 
     /** 直接刷通知（不走 startService，后台调用不会被系统拦） */
     private fun refreshNotification() {
@@ -145,11 +223,13 @@ class StreamingService : Service() {
 
     private fun stopSelfSafely() {
         releaseWakeLock()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
         }
         stopSelf()
     }
@@ -232,9 +312,20 @@ class StreamingService : Service() {
         @Volatile
         private var instance: StreamingService? = null
 
+        /**
+         * 最近一次 start() 的时刻。
+         *
+         * 只用于诊断：onStartCommand 的主线程排队时间一旦接近系统的 5 秒红线，
+         * 崩起来是"进程直接没了"、没有任何现场。先把它记进日志，
+         * 下次再出问题就能一眼看出是不是主线程被堵住。
+         */
+        @Volatile
+        private var requestedAt: Long = 0L
+
         fun start(context: Context) {
             if (running) return
             running = true
+            requestedAt = SystemClock.elapsedRealtime()
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -243,34 +334,47 @@ class StreamingService : Service() {
             }.onFailure {
                 // 启动失败要回滚，否则 running 卡在 true，之后每次 start() 都变成空操作
                 running = false
-                com.dshwatch.core.Logx.w(TAG, "启动失败：${it.message}")
+                Logx.w(TAG, "启动失败：${it.message}")
             }
         }
 
         fun stop(context: Context) {
             running = false
             progressText = ""
-            // 后台不能 startService（会抛 IllegalStateException 被吞掉，唤醒锁要拖到
-            // 15 分钟超时才释放）。stopService 没有这个限制，onDestroy 里会收尾。
+            /*
+             * 服务还在就在本进程里直接收：`stopSelf()` 走的路径和 onDestroy
+             * 是同一套，通知、唤醒锁都能立刻清干净。
+             * 绕一层 stopService 反而有竞态 —— 服务刚被 startForegroundService
+             * 拉起但 onStartCommand 还没跑时，stopService 会把它取消掉，
+             * 系统那边仍记着「启动过但没进前台」，于是照样在 5 秒后崩。
+             */
+            instance?.let { svc ->
+                runCatching { svc.stopSelfSafely() }
+                    .onFailure { Logx.w(TAG, "停止服务失败：${it.message}") }
+                return
+            }
             runCatching { context.stopService(Intent(context, StreamingService::class.java)) }
-                .onFailure { com.dshwatch.core.Logx.w(TAG, "停止服务失败：${it.message}") }
+                .onFailure { Logx.w(TAG, "停止服务失败：${it.message}") }
         }
 
-        /** 更新通知第二行（当前在做什么）。服务没在跑时静默忽略 */
+        /**
+         * 更新通知第二行（当前在做什么）。
+         *
+         * 服务不在就**什么都不做**。这里以前会 startForegroundService() 去
+         * 「顺手把服务拉起来」，但发的是 ACTION_UPDATE，服务端不会进前台 ——
+         * 每一次更新都等于一次 5 秒后的 RemoteServiceException。
+         * 通知少刷一次无所谓，进程崩了生成才真的断了。
+         */
         fun update(context: Context, text: String) {
             if (!running) return
             progressText = text.take(60)
             // 服务就在本进程里跑着，直接刷比绕一圈 Intent 可靠得多
-            instance?.let { svc ->
-                svc.refreshNotification()
+            val svc = instance
+            if (svc == null) {
+                Logx.w(TAG, "服务不在，跳过通知更新")
                 return
             }
-            runCatching {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, StreamingService::class.java).setAction(ACTION_UPDATE),
-                )
-            }.onFailure { com.dshwatch.core.Logx.w(TAG, "更新通知失败：${it.message}") }
+            svc.refreshNotification()
         }
 
         /**

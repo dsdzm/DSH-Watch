@@ -18,4 +18,6 @@
     <files-path name="workspace" path="workspace/" />
     <external-files-path name="workspace_ext" path="workspace/" />
     <cache-path name="share_cache" path="share/" />
+    <!-- 应用内更新下载的 APK：装完就删，放缓存而不是 files，别长期占用用户数据区 -->
+    <cache-path name="apk" path="apk/" />
 </paths>

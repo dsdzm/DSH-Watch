@@ -269,6 +269,16 @@ class ChatEngine(
     // ---------------- 会话 ----------------
 
     suspend fun open(conversationId: String) {
+        /*
+         * 正在这个会话里生成时被再次「打开」，不能把生成掐掉。
+         *
+         * 真实场景：用户发完话退回列表，过一会儿又想接着看，点了「继续写」。
+         * 旧实现在这里无条件 cancelRunning —— 请求被取消，那段回复永远写不出来，
+         * 磁盘上只剩用户自己那条消息，看起来就像「消息只发到了本地」。
+         * 引擎里的会话本来就是它，直接返回即可（界面会订阅到正在流式的内容）。
+         */
+        if (_conversation.value?.id == conversationId && job?.isActive == true) return
+
         cancelRunning(silent = true)
         val sc = store.load(conversationId) ?: run {
             Logx.w(TAG, "会话不存在：$conversationId")
@@ -386,14 +396,23 @@ class ChatEngine(
 
     // ---------------- 发送 ----------------
 
-    fun send(text: String) {
+    /**
+     * 发一条消息。
+     *
+     * @return 是否真的进入了发送队列。false 只有两种情况：内容为空、或上一轮
+     *   还在生成。**调用方要据此决定「要不要关掉输入页」** —— 以前它返回 Unit，
+     *   输入页无论如何都会关掉，于是用户在生成期间打的字被静默吞掉：
+     *   界面看起来像发出去了，会话里却没有这条消息。
+     */
+    fun send(text: String): Boolean {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty()) return false
         if (job?.isActive == true) {
             _banner.value = Banner("正在生成中，先停止或等待完成")
-            return
+            return false
         }
         job = appScope.launch { guardedRun { runSend(trimmed, regenerateOf = "") } }
+        return true
     }
 
     /** 重新生成某条助手消息（丢弃它及其之后的消息，用它的父消息再跑一遍） */
@@ -621,7 +640,9 @@ class ChatEngine(
             }.orEmpty()
             val recent = workingList.takeLast(6).joinToString("\n") { it.content }
             if (scene == com.dshwatch.domain.roleplay.Scenes.WRITING) {
-                com.dshwatch.domain.roleplay.TavernPrompt.buildWriting(card, memory, recent)
+                com.dshwatch.domain.roleplay.TavernPrompt.buildWriting(
+                    card, memory, recent, opening = card.greeting,
+                )
             } else {
                 com.dshwatch.domain.roleplay.TavernPrompt.build(card, memory, recent)
             }

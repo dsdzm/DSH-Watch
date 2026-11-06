@@ -16,6 +16,9 @@ sealed interface Screen {
     data object Usage : Screen
     data object Pair : Screen
     data object About : Screen
+
+    /** 检查更新：版本对比、更新说明、下载与安装 */
+    data object Update : Screen
     data object Diagnostics : Screen
     data object Workspace : Screen
     data class WorkspacePreview(val path: String) : Screen
@@ -47,11 +50,27 @@ sealed interface Screen {
     /** 角色扮演 / 写作的对话页（场景由 Conversation.scene 决定） */
     data object RoleplayChat : Screen
 
+    /**
+     * 某个角色卡 / 写作设定下的历史会话。
+     *
+     * 与全局会话列表分开，是因为在「酒馆」里点「历史」时，
+     * 用户想看的是这个角色的记录，不是所有会话混在一起。
+     */
+    data class SceneSessions(val scene: String, val cardId: String) : Screen
+
     /** 卡编辑：kind = tavern / writing，cardId 为空表示新建 */
     data class CardEdit(val kind: String, val cardId: String) : Screen
 
     /** 长期记忆文档的只读预览 */
     data class MemoryDoc(val cardId: String) : Screen
+
+    /**
+     * 自定义界面（HTML + CSS）的全屏预览。
+     *
+     * 内容可能几十 KB，所以**不进导航存档**（见 encode 里的 UNRESTORABLE）：
+     * 被系统回收后恢复成根屏，比往 Bundle 里塞一大段 HTML 安全。
+     */
+    data class HtmlView(val html: String) : Screen
 }
 
 /**
@@ -123,6 +142,7 @@ class WatchNavigator internal constructor(
         private const val WRITING = "writing"
         private const val ROLEPLAY = "roleplay"
         private const val CARD_EDIT = "cardedit"
+        private const val SCENE_SESSIONS = "scenesess"
 
         private fun encode(screen: Screen): String = when (screen) {
             Screen.Chat -> "chat"
@@ -132,6 +152,7 @@ class WatchNavigator internal constructor(
             Screen.Usage -> "usage"
             Screen.Pair -> "pair"
             Screen.About -> "about"
+            Screen.Update -> "update"
             Screen.Diagnostics -> "diag"
             Screen.Workspace -> "ws"
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
@@ -146,11 +167,13 @@ class WatchNavigator internal constructor(
             Screen.TavernHome -> TAVERN
             Screen.WritingHome -> WRITING
             Screen.RoleplayChat -> ROLEPLAY
+            is Screen.SceneSessions -> "$SCENE_SESSIONS$SEP${screen.scene}$SEP${screen.cardId}"
             // 卡编辑页要带 kind 与 cardId：新建卡（cardId 为空）恢复后就是空表单，
             // 不丢用户已经输入的内容 —— 因为内容此刻还在内存里，没被系统回收。
             is Screen.CardEdit -> "$CARD_EDIT$SEP${screen.kind}$SEP${screen.cardId}"
             // 记忆文档是只读预览，恢复到根屏没有损失，也不必重建上下文
             is Screen.MemoryDoc -> UNRESTORABLE
+            is Screen.HtmlView -> UNRESTORABLE
         }
 
         private fun decode(raw: String): Screen {
@@ -163,6 +186,7 @@ class WatchNavigator internal constructor(
                 "usage" -> Screen.Usage
                 "pair" -> Screen.Pair
                 "about" -> Screen.About
+                "update" -> Screen.Update
                 "diag" -> Screen.Diagnostics
                 "ws" -> Screen.Workspace
                 "exec" -> Screen.ExecSettings
@@ -177,6 +201,10 @@ class WatchNavigator internal constructor(
                 TAVERN -> Screen.TavernHome
                 WRITING -> Screen.WritingHome
                 ROLEPLAY -> Screen.RoleplayChat
+                SCENE_SESSIONS -> Screen.SceneSessions(
+                    scene = com.dshwatch.domain.roleplay.Scenes.of(parts.getOrNull(1)),
+                    cardId = parts.getOrNull(2).orEmpty(),
+                )
                 CARD_EDIT -> Screen.CardEdit(
                     kind = com.dshwatch.domain.roleplay.Scenes.of(parts.getOrNull(1)),
                     cardId = parts.getOrNull(2).orEmpty(),

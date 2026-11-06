@@ -94,11 +94,31 @@ fun WatchScaffold(
     subtitle: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
     bottom: (@Composable () -> Unit)? = null,
+    bottomOverlay: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    /*
+     * 圆屏走另一套骨架。
+     *
+     * 不是「同一套换个 padding」—— 圆屏的顶栏必须整体下压（最顶一行的可用宽度是 0），
+     * 横向边距必须由弦长算出（写死 16dp 会把 174dp 的可用宽压到 142dp），
+     * 图标必须收到 40dp（48dp 放不下两个）。三条都是硬约束，见 CircleScaffold 的注释。
+     */
+    if (com.dshwatch.ui.wear.LocalCircle.current != null) {
+        CircleScaffold(
+            title = title,
+            onBack = onBack,
+            subtitle = subtitle,
+            actions = actions,
+            bottom = bottom,
+            bottomOverlay = bottomOverlay,
+            content = content,
+        )
+        return
+    }
     // 圆屏的可用宽度比同尺寸方屏小得多：屏幕是个内切圆，滚动到上下两端时
     // 左右各要收回近 1/4 的宽度。8dp 在方屏上刚好，在圆屏上会切字。
-    val side = if (LocalDeviceProfile.current.isRound) 16.dp else WatchDimens.screenPadding
+    val side = WatchDimens.screenPadding
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -194,6 +214,42 @@ fun withHaptic(onClick: () -> Unit): () -> Unit {
             runCatching { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
         }
         onClick()
+    }
+}
+
+/**
+ * 圆形玻璃图标按钮。
+ *
+ * 用在卡片上做「次要但常用」的动作 —— 例如酒馆卡上的「新开一个对话」「历史记录」。
+ * 40dp 是这颗按钮的甜点尺寸：比 48dp 省 8dp 宽，又远大于裸图标的 24dp 触控区。
+ */
+@Composable
+fun GlassCircleButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    size: Dp = 40.dp,
+    enabled: Boolean = true,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .glassSurface(
+                shape = CircleShape,
+                cornerRadius = size / 2,
+                enabled = enabled,
+                onClick = if (enabled) withHaptic(onClick) else null,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else tint.copy(alpha = 0.35f),
+            modifier = Modifier.size(size * 0.48f),
+        )
     }
 }
 

@@ -3,8 +3,8 @@ package com.dshwatch.ui.wear
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.wear.compose.foundation.lazy.ScalingLazyListState
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnState
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 
 /**
  * 跨页面保留的滚动位置。
@@ -114,9 +114,9 @@ private fun KeepScrollOnLeave(key: String, value: Int) {
 
 
 /**
- * `ScalingLazyColumn` 版本的滚动记忆。
+ * `TransformingLazyColumn` 版本的滚动记忆。
  *
- * Wear Compose 的 `rememberScalingLazyListState` 没有暴露 `initialIndex` 参数，
+ * `rememberTransformingLazyColumnState` 没有暴露 `initialIndex` 参数，
  * 所以这里先建一个默认状态，再用 `LaunchedEffect` 把它滚回记忆位置。
  *
  * 代价是**会看到一帧顶部画面**。为了把它压到看不见，回滚放在
@@ -125,8 +125,8 @@ private fun KeepScrollOnLeave(key: String, value: Int) {
  * 用户感知到的是"页面直接出现在原位"。
  */
 @Composable
-fun rememberKeptScalingListState(key: String, keep: Boolean = true): ScalingLazyListState {
-    val state = rememberScalingLazyListState()
+fun rememberKeptListState(key: String, keep: Boolean = true): TransformingLazyColumnState {
+    val state = rememberTransformingLazyColumnState()
     if (!keep) return state
     val (index, offset) = ScrollMemory.itemOf(key)
 
@@ -138,10 +138,10 @@ fun rememberKeptScalingListState(key: String, keep: Boolean = true): ScalingLazy
         }
     }
 
-    // 离开时记住位置。读 centerItem* 而不是 requestScrollToItem 的目标值：
+    // 离开时记住位置。读 anchorItem* 而不是滚动目标值：
     // 后者反映的是"正在滚向哪里"，用户松手后可能还会惯性滑动一段。
-    val idx = state.centerItemIndex
-    val off = state.centerItemScrollOffset
+    val idx = state.anchorItemIndex
+    val off = state.anchorItemScrollOffset
     androidx.compose.runtime.DisposableEffect(key, idx, off) {
         onDispose { ScrollMemory.putItem(key, idx, off) }
     }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import com.dshwatch.ui.wear.wearVerticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -35,9 +36,13 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -72,7 +77,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.R
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.Choices
 import com.dshwatch.domain.LiveDelta
+import com.dshwatch.domain.Panels
 import com.dshwatch.domain.TokenEstimator
 import com.dshwatch.domain.ApprovalDecision
 import com.dshwatch.domain.model.AgentMode
@@ -90,10 +97,13 @@ import com.dshwatch.ui.components.AgentModeDialog
 import com.dshwatch.ui.components.ArtifactCard
 import com.dshwatch.ui.components.AskUserDialog
 import com.dshwatch.ui.components.Chip
+import com.dshwatch.ui.components.ChoiceButtons
 import com.dshwatch.ui.components.ConfirmDialog
 import com.dshwatch.ui.components.ContextBar
 import com.dshwatch.ui.components.EmptyState
+import com.dshwatch.ui.components.PanelCard
 import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.components.CircleIconTap
 import com.dshwatch.ui.components.PrimaryButton
 import com.dshwatch.ui.components.ShareResult
 import com.dshwatch.ui.components.shareFile
@@ -133,12 +143,19 @@ fun ChatScreen(
     val perf = LocalPerf.current
     val profile = LocalDeviceProfile.current
     val round = profile.isRound
-    // 环形布局只在圆屏上有意义：方屏上它会退化成「窄一点的气泡」，没有辨识度
-    val chatLayout = if (!round && settings.chatLayout == ChatLayouts.RING) {
-        ChatLayouts.BUBBLE
-    } else {
-        ChatLayouts.of(settings.chatLayout)
-    }
+    /*
+     * 圆屏的内边距由骨架统一给。
+     *
+     * 上一版这里自己算 `safePad = 0.30d`（99dp）去躲开上下两条弧形 dock，
+     * 结果对话被挤成中间一条 200dp 的窄带，上下各留一大片空白 ——
+     * 用户的原话是「对话框上下内容消失」。
+     *
+     * 现在骨架回到内接矩形：内容区 221×227dp 整个落在圆内，
+     * 纵向居中、四角不越界，列表既不会被圆周切掉，也不需要任何躲闪的内边距。
+     */
+    val sidePad = 0.dp
+    val safePad = 0.dp
+    val chatLayout = ChatLayouts.of(settings.chatLayout)
     val engine = container.engine
     val scope = rememberCoroutineScope()
 
@@ -219,7 +236,7 @@ fun ChatScreen(
      *   · `padding(horizontal = extra)` 每帧随滚动变化 → 每一项被反复重新测量，
      *     文本可用宽度不停变，换行位置逐帧跳；
      *   · `graphicsLayer { scaleX/scaleY }` 把已经栅格化的文字再缩放，
-     *     滚动时字号看起来在抖，环形布局那种窄气泡尤其明显。
+     *     滚动时字号看起来在抖，窄气泡尤其明显。
      *
      * 圆屏的安全区由 `WatchScaffold.cornerSafe()` 和气泡自身的 `isRound` 宽度
      * 负责，不需要再对每一项做动态几何变换。
@@ -245,7 +262,8 @@ fun ChatScreen(
         if (!settings.autoScroll) return@LaunchedEffect
         if (!atBottom) return@LaunchedEffect
         if (turns.isNotEmpty()) {
-            runCatching { listState.scrollToItem(turns.lastIndex) }
+            // +1 是那个 __info__ 头项：列表里第 0 项已经不是第一条消息了
+            runCatching { listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1) }
         }
     }
     // 生成期间保持亮屏（可选）。手表抬手看进度时不用反复抬腕。
@@ -267,37 +285,36 @@ fun ChatScreen(
         // 对话页是根：没有返回，靠右滑去设置
         onBack = null,
         actions = {
-            // 顶栏只剩最常用的四颗（编程场景）：历史 / 新建 / 切换模式 / 设置。
-            // 设置从「右滑第二页」改成显式入口：横滑在圆屏上会和系统返回手势打架。
-            // 酒馆与写作场景下 actions 里不会有「新建」（那是编程专属），只剩三颗。
-            IconTap(
-                icon = Icons.Outlined.History,
-                contentDescription = s.navSessions,
-            ) {
-                nav.push(Screen.Sessions)
-            }
+            /*
+             * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
+             *
+             * 圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap —— 圆屏顶栏那一行
+             * 的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
+             *
+             * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
+             * 只有图标和标题，不和内容争地盘。
+             */
+            val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
+                { icon, desc, onClick ->
+                    if (round) {
+                        CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                    } else {
+                        IconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                    }
+                }
+            tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
             if (codingScene) {
-                IconTap(Icons.Outlined.Add, s.newChat) {
+                tap(Icons.Outlined.Add, s.newChat) {
                     // 显式写死 scene：默认值 "" 在引擎里等同 coding，
                     // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
                     scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
                 }
-                // 场景切换。酒馆/写作两页顶栏都有这颗胶囊，编程页最初漏了 ——
-                // 结果进了编程模式就只能靠"重新运行引导"或去设置里改 useScene 才能出来。
-                //
-                // 这里用图标而不是文字胶囊：编程页顶栏已经有 历史 / 新建 / 设置 三颗，
-                // 再塞一个带文字的胶囊会把标题挤到放不下（圆屏尤其明显）。
-                // 切换语义与另外两页一致：改的是"模式"，跳到那个模式的根界面，
-                // 而不是把当前会话改造成另一种东西（会话的场景在创建时就定死了）。
-                IconTap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
+                tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
             }
-            IconTap(
-                icon = Icons.Outlined.Settings,
-                contentDescription = s.navSettings,
-            ) {
-                nav.push(Screen.Settings)
-            }
+            tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
+        // 圆屏的底栏是 46dp 圆 FAB，浮在内容上，不占竖向空间
+        bottomOverlay = round,
         bottom = {
             ChatBottomBar(
                 settings = settings,
@@ -310,87 +327,11 @@ fun ChatScreen(
             )
         },
     ) {
-        // 顶部信息条：模型 + 上下文占用
-        // 非编程场景只留一行"生成中"提示，模型名/Agent 档/上下文条全部收掉 ——
-        // 圆屏顶栏本来就只有三行位置，塞满就别指望用户读到正文。
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (!codingScene) {
-                    Text(
-                        text = conversation?.displayTitle ?: s.appName,
-                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (streaming) {
-                        Text(
-                            text = s.generating,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary,
-                        )
-                    }
-                }
-                if (codingScene) {
-                Chip(
-                    text = provider?.let { p ->
-                        val model = conversation?.model?.ifBlank { p.defaultModel }.orEmpty()
-                        if (model.isBlank()) p.name else model
-                    } ?: "未配置",
-                    selected = true,
-                    onClick = { showModelPicker = true },
-                )
-                Spacer(Modifier.width(4.dp))
-                Chip(
-                    text = "Agent · ${settings.agentMode.label}",
-                    selected = settings.agentMode != AgentMode.OFF,
-                    onClick = { showAgentDialog = true },
-                )
-                // 只要这次会话里成功构建过产物，就常驻一个入口，省得用户去找
-                if (hasArtifact) {
-                    Spacer(Modifier.width(3.dp))
-                    Chip(
-                        text = s.navWorkspace,
-                        selected = true,
-                        onClick = { nav.push(Screen.Workspace) },
-                    )
-                }
-                Spacer(Modifier.width(3.dp))
-                if (streaming) {
-                    Text(
-                        text = s.generating,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary,
-                    )
-                }
-                }
-            }
-            if (perf.enableAnimations && codingScene) {
-                // 上下文条只在动画档显示，省电档下省略这块重绘
-                ContextBar(
-                    used = contextTokens,
-                    total = provider?.contextWindow ?: 0,
-                )
-                Spacer(Modifier.height(2.dp))
-            }
-        }
-
-        banner?.let { b ->
-            BannerCard(text = b.text, onDismiss = { engine.dismissBanner() })
-            Spacer(Modifier.height(4.dp))
-        }
-
         if (provider == null) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(8.dp),
+                    .padding(horizontal = sidePad, vertical = safePad),
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
@@ -398,13 +339,22 @@ fun ChatScreen(
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "直连自己的 API Key，或连接电脑上的 DSH 服务器。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(10.dp))
+                /*
+                 * 圆屏不显示这句引导。
+                 *
+                 * 内容区在圆屏上只剩 83dp 高（顶栏 70、FAB 48），
+                 * 标题 + 两行说明 + 按钮要 100dp —— 按钮会被挤到底部边缘外面，
+                 * 用户看着按钮在那里，按下去没反应。宁可少一句解释。
+                 */
+                if (!round) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "直连自己的 API Key，或连接电脑上的 DSH 服务器。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(if (round) 8.dp else 10.dp))
                 PrimaryButton(
                     text = s.addProvider,
                     icon = Icons.Filled.Add,
@@ -415,8 +365,18 @@ fun ChatScreen(
         }
 
         if (messages.isEmpty()) {
+            /*
+             * 圆屏空状态就是原来这一套（吉祥物 + 一句提示 + B站入口），
+             * 但内容区只有 221×227dp：吉祥物 112 + 两行说明 + 两颗胶囊会超。
+             * 给圆屏加一层纵向滚动兜底 —— 不改变外观，只在装不下时能翻。
+             */
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = sidePad, vertical = safePad)
+                    .then(
+                        if (round) Modifier.wearVerticalScroll(rememberScrollState()) else Modifier
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 if (settings.showMascot) {
@@ -477,15 +437,114 @@ fun ChatScreen(
                     .rotaryScrollable(rotaryBehavior, rotaryFocus)
                     .focusRequester(rotaryFocus)
                     .focusable(),
-                contentPadding = PaddingValues(vertical = 2.dp),
+                /*
+                 * 底部留 44dp：圆屏的输入按钮是**浮层**，压在内容区最后 19dp 上。
+                 * 不留这段 padding，最新一条消息的「复制 / 重新生成」那排按钮
+                 * 正好被 46dp 的圆按钮压住 —— 看得见，点不到。
+                 */
+                contentPadding = PaddingValues(
+                    top = 2.dp,
+                    bottom = if (round) 40.dp else 2.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+            /*
+             * 模型胶囊 / 上下文条 / 提示条都作为**列表第一项**。
+             *
+             * 它们原来钉在消息区上方，占掉 40dp 的固定高度 —— 圆屏上这 40dp
+             * 是从正文里硬挖的。改成列表项之后，用户往下翻消息时它会自己滚走，
+             * 想改模型再翻回顶部即可。
+             */
+            item(key = "__info__") {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                // 顶部信息条：模型 + 上下文占用
+                // 非编程场景只留一行"生成中"提示，模型名/Agent 档/上下文条全部收掉 ——
+                // 圆屏顶栏本来就只有三行位置，塞满就别指望用户读到正文。
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!codingScene) {
+                            Text(
+                                text = conversation?.displayTitle ?: s.appName,
+                                style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (streaming) {
+                                Text(
+                                    text = s.generating,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                            }
+                        }
+                        if (codingScene) {
+                        Chip(
+                            text = provider?.let { p ->
+                                val model = conversation?.model?.ifBlank { p.defaultModel }.orEmpty()
+                                if (model.isBlank()) p.name else model
+                            } ?: "未配置",
+                            selected = true,
+                            onClick = { showModelPicker = true },
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Chip(
+                            text = "Agent · ${settings.agentMode.label}",
+                            selected = settings.agentMode != AgentMode.OFF,
+                            onClick = { showAgentDialog = true },
+                        )
+                        // 只要这次会话里成功构建过产物，就常驻一个入口，省得用户去找
+                        if (hasArtifact) {
+                            Spacer(Modifier.width(3.dp))
+                            Chip(
+                                text = s.navWorkspace,
+                                selected = true,
+                                onClick = { nav.push(Screen.Workspace) },
+                            )
+                        }
+                        Spacer(Modifier.width(3.dp))
+                        if (streaming) {
+                            Text(
+                                text = s.generating,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                            )
+                        }
+                        }
+                    }
+                    if (perf.enableAnimations && codingScene) {
+                        // 上下文条只在动画档显示，省电档下省略这块重绘
+                        ContextBar(
+                            used = contextTokens,
+                            total = provider?.contextWindow ?: 0,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                }
+
+                banner?.let { b ->
+                    BannerCard(text = b.text, onDismiss = { engine.dismissBanner() })
+                    Spacer(Modifier.height(4.dp))
+                }
+                }
+            }
                 itemsIndexed(
                     items = turns,
                     key = { _, turn -> turn.key },
                     contentType = { _, turn -> turn.messages.first().role },
-                ) { _, turn ->
+                ) { turnIndex, turn ->
                     val msgs = turn.messages
+                    // 只有最后一个回合的选项能点：历史里的 A/B/C 点下去就是一条过期回复
+                    val isLastTurn = turnIndex == turns.lastIndex
+                    val chooseHandler: (Choices.Choice) -> Unit = { c ->
+                        if (c.custom) nav.push(Screen.Input()) else engine.send(c.raw)
+                    }
                     val sizeOf: (String) -> Long = { path -> artifactSizeOf(container, path) }
                     val openArtifact: (String) -> Unit = { path -> nav.push(Screen.WorkspacePreview(path)) }
                     val exportArtifact: (String) -> Unit = { path ->
@@ -517,6 +576,10 @@ fun ChatScreen(
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
                                 onExportArtifact = exportArtifact,
+                                onOpenHtml = { html -> nav.push(Screen.HtmlView(html)) },
+                                onScrollBy = { d -> listState.dispatchRawDelta(d) },
+                                canPick = isLastTurn,
+                                onChoose = chooseHandler,
                                 showWork = codingScene,
                             )
                         } else {
@@ -534,6 +597,10 @@ fun ChatScreen(
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
                                 onExportArtifact = exportArtifact,
+                                onOpenHtml = { html -> nav.push(Screen.HtmlView(html)) },
+                                onScrollBy = { d -> listState.dispatchRawDelta(d) },
+                                canPick = isLastTurn,
+                                onChoose = chooseHandler,
                                 showWork = codingScene,
                             )
                         }
@@ -568,7 +635,8 @@ fun ChatScreen(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 2.dp, bottom = 2.dp)
+                        // 圆屏底部有一个 46dp 的圆 FAB：这个按钮要浮到它上面去
+                        .padding(end = 2.dp, bottom = if (round) 46.dp else 2.dp)
                         .glassSurface(shape = CircleShape),
                 ) {
                     IconTap(
@@ -577,7 +645,9 @@ fun ChatScreen(
                         tint = MaterialTheme.colorScheme.primary,
                     ) {
                         scope.launch {
-                            runCatching { listState.animateScrollToItem(turns.lastIndex) }
+                            runCatching {
+                                listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+                            }
                         }
                     }
                 }
@@ -746,10 +816,7 @@ private fun BubbleScaffold(
         isUser -> Color(0xFFF2F2F2)
         else -> MaterialTheme.colorScheme.onSurface
     }
-    // 方屏上环形布局退化成气泡（设置层已兜底，这里再防一层）
-    val effective = if (!isRound && layout == ChatLayouts.RING) ChatLayouts.BUBBLE else layout
-
-    when (effective) {
+    when (layout) {
         /*
          * 极简：去掉所有底色，只靠一条细分隔线划分回合。
          * 小屏上这是「同样的内容多读两行」的最直接办法。
@@ -809,34 +876,6 @@ private fun BubbleScaffold(
                     CompositionLocalProvider(LocalContentColor provides textColor) {
                         content()
                     }
-                }
-            }
-        }
-
-        /*
-         * 环形（圆屏专属）：整块收窄居中、上下全圆角，像顺着表盘走的一段弧。
-         * 标签也居中 —— 圆屏左右没有「边界」，居中才不显得偏。
-         */
-        ChatLayouts.RING -> Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            BubbleHeader(isUser, label, showMascot, headerTrailing, centered = true)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(0.88f)
-                    .then(
-                        if (glass && bubbleColor == Color.Transparent) {
-                            Modifier.glassSurface(shape = RoundedCornerShape(26.dp), cornerRadius = 26.dp)
-                        } else {
-                            Modifier.clip(RoundedCornerShape(26.dp))
-                                .background(if (isUser) bubbleColor else bubbleColor.copy(alpha = 0.82f))
-                        },
-                    )
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-            ) {
-                CompositionLocalProvider(LocalContentColor provides textColor) {
-                    content()
                 }
             }
         }
@@ -969,6 +1008,12 @@ private fun MessageItem(
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
     onExportArtifact: (String) -> Unit,
+    onOpenHtml: (String) -> Unit,
+    // 内嵌 HTML 界面里的竖向拖动要转给列表，否则手指在界面上划不动
+    onScrollBy: (Float) -> Unit,
+    /** 这条消息是不是最新一条 —— 只有最新的选项可以点 */
+    canPick: Boolean,
+    onChoose: (Choices.Choice) -> Unit,
     // 编程场景才画思维链/工具卡。酒馆/写作场景下这些都是噪音。
     showWork: Boolean = true,
 ) {
@@ -977,6 +1022,27 @@ private fun MessageItem(
     val reasoning = live?.reasoning ?: message.reasoning
     val isUser = message.role == Role.USER
     val isStreaming = live != null
+
+    /*
+     * 自定义界面：整段 HTML 文档不当作正文渲染。
+     *
+     * 手机上可以内联一个 WebView，手表上不行 —— 221dp 宽的页面缩进去没法看，
+     * 而且 WebView 会和列表抢滚动。所以正文里只留一张入口卡片，点开是全屏。
+     */
+    // 流式期间不扫 HTML：每个字都要跑一次正则，手表上这直接就是掉帧。
+    // 生成结束后再判断一次，卡片出现得晚半秒，但滚动是顺的。
+    val htmlDoc = remember(body, isStreaming) {
+        if (isStreaming) null else com.dshwatch.ui.html.HtmlBlocks.find(body)
+    }
+    val rawText = if (htmlDoc != null) com.dshwatch.ui.html.HtmlBlocks.strip(body, htmlDoc) else body
+    // ```panel 围栏抽成原生面板；流式期间半截围栏还没闭合，解析也没有意义
+    val panelRes = remember(rawText, isStreaming) {
+        if (isStreaming) Panels.Result(rawText, emptyList()) else Panels.extract(rawText)
+    }
+    val afterPanel = if (panelRes.panels.isNotEmpty()) panelRes.body else rawText
+    // 尾部若是 A/B/C 选项，拆出来单独渲染成按钮，正文只留前面那段
+    val parsed = remember(afterPanel) { Choices.parse(afterPanel) }
+    val bodyText = if (parsed.hasChoices) parsed.body else afterPanel
 
     BubbleScaffold(
         isUser = isUser,
@@ -1035,7 +1101,16 @@ private fun MessageItem(
             Spacer(Modifier.height(6.dp))
         }
 
-        if (body.isNotBlank()) {
+        if (htmlDoc != null) {
+            com.dshwatch.ui.html.InlineHtml(
+                html = htmlDoc.html,
+                onOpenFull = onOpenHtml,
+                onDrag = onScrollBy,
+            )
+            if (bodyText.isNotBlank()) Spacer(Modifier.height(6.dp))
+        }
+
+        if (bodyText.isNotBlank()) {
             if (isUser) {
                 /*
                  * 节选复制：长按气泡里的文字会弹出系统选择手柄，可以只拖一段复制，
@@ -1048,7 +1123,7 @@ private fun MessageItem(
                  */
                 SelectionContainer {
                     Text(
-                        text = body,
+                        text = bodyText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = LocalContentColor.current,
                     )
@@ -1056,7 +1131,7 @@ private fun MessageItem(
             } else {
                 SelectionContainer {
                     Box(modifier = Modifier.fillMaxWidth()) {
-                        MarkdownText(text = body)
+                        MarkdownText(text = bodyText)
                     }
                 }
             }
@@ -1065,6 +1140,22 @@ private fun MessageItem(
                 text = "…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (panelRes.panels.isNotEmpty()) {
+            panelRes.panels.forEach { p ->
+                Spacer(Modifier.height(7.dp))
+                PanelCard(panel = p)
+            }
+        }
+
+        if (!isUser && parsed.hasChoices && !isStreaming) {
+            Spacer(Modifier.height(8.dp))
+            ChoiceButtons(
+                choices = parsed.choices,
+                enabled = canPick,
+                onPick = onChoose,
             )
         }
 
@@ -1107,6 +1198,10 @@ private fun AgentTurnItem(
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
     onExportArtifact: (String) -> Unit,
+    onOpenHtml: (String) -> Unit,
+    onScrollBy: (Float) -> Unit,
+    canPick: Boolean,
+    onChoose: (Choices.Choice) -> Unit,
     showWork: Boolean = true,
 ) {
     val s = LocalStrings.current
@@ -1177,9 +1272,47 @@ private fun AgentTurnItem(
             if (plain.isNotBlank()) MarkdownText(text = plain)
         }
 
-        if (answer.isNotBlank()) {
+        // 面板与选项都从正文里剥出去，各自由专门控件渲染
+        val answerPanels = remember(answer, isStreaming) {
+            if (isStreaming) Panels.Result(answer, emptyList()) else Panels.extract(answer)
+        }
+        val answerNoPanel = if (answerPanels.panels.isNotEmpty()) answerPanels.body else answer
+        val answerParsed = remember(answerNoPanel) { Choices.parse(answerNoPanel) }
+        val answerBody = if (answerParsed.hasChoices) answerParsed.body else answerNoPanel
+
+        if (answerBody.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
-            MarkdownText(text = answer)
+            val htmlDoc = remember(answerBody) { com.dshwatch.ui.html.HtmlBlocks.find(answerBody) }
+            if (htmlDoc != null) {
+                com.dshwatch.ui.html.InlineHtml(
+                    html = htmlDoc.html,
+                    onOpenFull = onOpenHtml,
+                    onDrag = onScrollBy,
+                )
+                val rest = com.dshwatch.ui.html.HtmlBlocks.strip(answerBody, htmlDoc)
+                if (rest.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    MarkdownText(text = rest)
+                }
+            } else {
+                MarkdownText(text = answerBody)
+            }
+        }
+
+        if (answerPanels.panels.isNotEmpty()) {
+            answerPanels.panels.forEach { p ->
+                Spacer(Modifier.height(7.dp))
+                PanelCard(panel = p)
+            }
+        }
+
+        if (answerParsed.hasChoices && !isStreaming) {
+            Spacer(Modifier.height(8.dp))
+            ChoiceButtons(
+                choices = answerParsed.choices,
+                enabled = canPick,
+                onPick = onChoose,
+            )
         }
 
         if (hasError && last.error.isNotBlank()) {
@@ -1488,10 +1621,58 @@ private fun ChatBottomBar(
 ) {
     val s = LocalStrings.current
     val sendSrc = remember { MutableInteractionSource() }
+
+    /*
+     * 圆屏底栏 = 一个圆 FAB。
+     *
+     * 横贯的底栏在圆屏上根本不成立：底栏下沿那一行的弦宽只有 70~100dp，
+     * 而底栏要做 190dp 宽 —— 两端必然被圆啃掉，看起来就是「输入框被斜着切了」。
+     * 1.15.7 的修补（左右各收 10dp）治不了本，因为问题出在**高度方向**：
+     * 越往下弦宽越小，收左右完全没用。
+     *
+     * 收成一个 46dp 的圆，在任何一行都放得下。代价是少了「一句话预览」，
+     * 但手表上输入框本来就只是「点一下进输入页」的跳板，预览没有价值。
+     */
+    if (round) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 只留 2dp：这一行下面就是圆周了，多留一 dp 都是从内容区偷的高度。
+                // 内容区在圆屏上本来就只剩 83dp（顶栏 74、FAB 区 48），
+                // 之前留 10dp 等于又切掉 8dp —— 一屏刚好少显示半条消息。
+                .padding(bottom = 2.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .glassSurface(
+                        shape = CircleShape,
+                        cornerRadius = 23.dp,
+                        tint = if (streaming) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        solid = true,
+                        onClick = withHaptic { if (streaming) onStop() else onSend() },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
+                    contentDescription = if (streaming) s.stop else s.inputHint,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        return
+    }
+
     // 圆屏底部两侧是空的：左右再收 10dp，避免两个下角被圆切掉
     Row(
         modifier = Modifier
-            .padding(horizontal = if (round) 10.dp else 0.dp)
             .fillMaxWidth()
             .height(52.dp)
             .cornerSafe()

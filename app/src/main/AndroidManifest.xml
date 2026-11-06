@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 定时刷 B站想准点就得要精确闹钟；拿不到会退化成普通闹钟，不会崩 -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- 应用内更新：把下载好的 APK 交给系统安装器。
+         这是普通权限，但还受「安装未知应用」的 appop 门控，见 UpdateInstall -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- 手表特性声明为可选：同一份 APK 既能装在手表，也能装在手机上调试 -->
     <uses-feature
@@ -20,6 +23,17 @@
     <uses-feature
         android:name="android.hardware.touchscreen"
         android:required="false" />
+
+    <!--
+      Android 11+ 的包可见性：不声明这段，resolveActivity() 查安装器会返回 null
+      （不是没有安装器，是查不到），据此做判断会误报「无法安装」。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
 
     <application
         android:name=".DshWatchApp"

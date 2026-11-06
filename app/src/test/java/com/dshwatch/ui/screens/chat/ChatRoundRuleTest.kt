@@ -61,9 +61,10 @@ class ChatRoundRuleTest {
         assertTrue("列表位置仍按圆屏分档", chat.contains("round"))
 
         val common = code("ui/components/Common.kt")
+        // 形状不再由参数传进来，改成读 LocalDeviceProfile —— 断言跟着改成实际实现
         assertTrue(
             "圆屏安全区由 cornerSafe 负责",
-            common.contains("cornerSafe") && common.contains("isRound"),
+            common.contains("fun Modifier.cornerSafe(") && common.contains("LocalDeviceProfile"),
         )
     }
 }

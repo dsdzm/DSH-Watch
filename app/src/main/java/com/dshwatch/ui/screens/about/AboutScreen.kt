@@ -19,6 +19,7 @@ import com.dshwatch.ui.nav.Screen
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,10 +34,12 @@ import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.AppChangelog
 import com.dshwatch.domain.DeviceTier
+import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.KeyValueRow
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.SettingCard
+import com.dshwatch.ui.components.SettingRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
@@ -45,6 +48,9 @@ import com.dshwatch.ui.wear.wearVerticalScroll
 /** 作者信息是专有名词，不参与多语言切换 */
 private const val AUTHOR_NAME = "东山の字幕"
 private const val AUTHOR_EMAIL = "2332184782@qq.com"
+
+/** 更新日志默认展示的版本数，其余折叠 */
+private const val LOG_PREVIEW = 6
 
 /**
  * 关于页。
@@ -65,8 +71,12 @@ fun AboutScreen(
 ) {
     val s = LocalStrings.current
     val context = LocalContext.current
+    // 自动检查可能在任何时候把状态改成 Available，关于页这行要跟着变
+    val updateState by container.updateCenter.state.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
+    // 更新日志默认只展开最近几版：手表上滚二十多张卡片是纯粹的负担
+    var showAllLog by remember { mutableStateOf(false) }
 
     val info = remember {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -172,7 +182,12 @@ fun AboutScreen(
 
             // ---------------- 更新日志 ----------------
             SectionHeader(s.aboutChangelog)
-            AppChangelog.entries.forEach { entry ->
+            val shownLog = if (showAllLog) {
+                AppChangelog.entries
+            } else {
+                AppChangelog.entries.take(LOG_PREVIEW)
+            }
+            shownLog.forEach { entry ->
                 SettingCard {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -200,11 +215,48 @@ fun AboutScreen(
                 }
                 Spacer(Modifier.height(4.dp))
             }
+            if (AppChangelog.entries.size > LOG_PREVIEW) {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Chip(
+                        text = if (showAllLog) {
+                            "收起"
+                        } else {
+                            "查看全部 ${AppChangelog.entries.size} 个版本"
+                        },
+                        onClick = { showAllLog = !showAllLog },
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+            }
 
             // ---------------- 设备信息 ----------------
             SectionHeader(s.deviceInfo)
             SettingCard {
                 KeyValueRow(s.version, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                /*
+                 * 检查更新放在版本号下面：用户看到版本号，下一个念头就是「有没有新版」。
+                 * 没有新版本时 trailing 只给一个箭头 —— 自动检查是静默的，
+                 * 用户没问过的事不必主动告诉他「已是最新」。
+                 */
+                SettingRow(
+                    title = s.updateCheck,
+                    // 状态放副标题、版本号放右侧：手表一行只有 205dp，
+                    // 「有新版本 1.15.19」挤在一行会把标题压成省略号
+                    subtitle = when (val u = updateState) {
+                        is UpdateState.Available -> s.updateNewVersion
+                        UpdateState.UpToDate -> s.updateUpToDate
+                        UpdateState.Checking -> s.updateChecking
+                        else -> null
+                    },
+                    trailing = when (val u = updateState) {
+                        is UpdateState.Available -> u.manifest.versionName
+                        else -> "›"
+                    },
+                    onClick = { nav.push(Screen.Update) },
+                )
                 info.forEach { (k, v) -> KeyValueRow(k, v) }
                 Spacer(Modifier.height(2.dp))
             }

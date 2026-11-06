@@ -21,6 +21,7 @@ import com.dshwatch.domain.model.WorkspaceLocation
 import com.dshwatch.net.backend.BackendRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -209,6 +210,14 @@ class AppContainer(private val app: Context) {
     ).also { CrashLog.mark("对话引擎已构造") }
 
     /**
+     * 应用内更新：检查、下载、安装的状态中心。
+     *
+     * 挂在容器上而不是页面里：检查可能在关于页发起、在更新页看结果，
+     * 下载还要能在用户退出页面后继续。
+     */
+    val updateCenter = com.dshwatch.domain.update.UpdateCenter(app, settingsRepo, appScope)
+
+    /**
      * 长期记忆压缩器。
      *
      * 单例：压缩是"后台悄悄发生"的事，每轮建一个新对象会让同一段时间内
@@ -281,6 +290,19 @@ class AppContainer(private val app: Context) {
                     // disabledTools 变化不需要重连，但需要重建表（工具会被过滤掉）
                     if (connectedAny || servers.isNotEmpty()) refreshToolRegistry()
                 }
+        }
+
+        appScope.launch {
+            /*
+             * 启动 10 秒后再查更新。
+             *
+             * 不能更早：首帧、设置加载、角色卡铺数据都在这个窗口里，
+             * 再插一次网络请求只会让首屏更慢（而且手表上用户根本不会在意
+             * 第 3 秒有没有查到新版本）。
+             * 具体是否真的发请求由 [UpdateCenter.autoCheckIfDue] 里的节流决定。
+             */
+            delay(10_000)
+            updateCenter.autoCheckIfDue()
         }
 
         appScope.launch {

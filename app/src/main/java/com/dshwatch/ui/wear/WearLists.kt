@@ -3,6 +3,7 @@ package com.dshwatch.ui.wear
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.focus.FocusRequester
@@ -10,44 +11,60 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.ScalingLazyListAnchorType
-import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
-import androidx.wear.compose.foundation.lazy.ScalingLazyListState
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnItemScope
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumnState
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.material3.lazy.TransformationSpec
+import androidx.wear.compose.material3.lazy.rememberTransformationSpec
+import androidx.wear.compose.material3.lazy.transformedHeight
 import com.dshwatch.ui.theme.LocalDeviceProfile
 
 /**
  * Wear OS 列表的基础件。
  *
- * ## 为什么用 ScalingLazyColumn
+ * ## 为什么是 TransformingLazyColumn 而不是 ScalingLazyColumn
  *
- * 它是 Wear 上「鱼眼」效果的正解：列表项越靠近屏幕中心越大（1.0），
- * 越靠近上下边缘越小（0.7）并逐渐透明，同时**自带旋转表冠支持**。
- * 自己用 graphicsLayer 去算缩放也能出效果，但拿不到表冠事件，
- * 而且滚动惯性、边界回弹、无障碍焦点都会跟着丢。
+ * 两者都能做「鱼眼」，差别在**锚点**：
  *
- * ## 为什么圆屏要单独收窄
+ * - `ScalingLazyColumn` 的默认锚点把第一项对齐**屏幕中心**。列表不满一屏时，
+ *   上方就空出一大块 —— 用户截图里设置页顶部那片空白正是这个造成的。
+ * - `TransformingLazyColumn` 从 contentPadding 顶部开始排，项随滚动**渐进变换**
+ *   （靠近上下边时缩小、淡出），既没有顶部空档，也不会在底部被圆周硬切。
  *
- * 圆屏的可用区域是一个内切于屏幕的圆：屏幕 205dp 宽时，贴着上下边缘那几行
- * 的可用宽度只有中间那一行的一半。ScalingLazyColumn 的缩放只改视觉大小，
- * 不改变布局宽度，所以还是要靠 contentPadding 把内容收进圆里。
+ * 圆屏上第二点尤其重要：屏幕是圆的，越靠边可用宽度越小。整块矩形列表只要
+ * 高度超过圆的中段，上下两端就必然出界；靠逐项缩放把内容「收」进圆里，
+ * 是 Wear 官方的解法，也是第三方同类应用（Wraive）的做法。
+ *
+ * ## 表冠
+ *
+ * `TransformingLazyColumn` 不内置表冠支持，要显式传 `rotaryScrollableBehavior`。
+ * 传 `RotaryScrollableDefaults.behavior(state)` —— state 本身就是 ScrollableState。
  */
 object WearLayout {
 
-    /** 列表左右留白：圆屏收得更狠，方屏只留一点点呼吸感 */
+    /**
+     * 列表左右留白。
+     *
+     * 圆屏给 0：外层 [com.dshwatch.ui.components.CircleScaffold] 已经把内容区
+     * 按弦长收成了内接矩形，这里再叠一层就是重复收窄 —— 上一版 16dp + 36dp 的
+     * 结果是把 223dp 的可用宽压到了 190dp。
+     */
     @Composable
     fun horizontalPadding(): Dp {
         val p = LocalDeviceProfile.current
         return when {
-            p.isRound -> 16.dp
+            LocalCircle.current != null -> 0.dp
             p.compact -> 8.dp
             else -> 10.dp
         }
@@ -56,13 +73,13 @@ object WearLayout {
     /**
      * 列表内边距。
      *
-     * 上下都留 26dp：顶部是给 TimeText 让位（Wear 的时间显示叠在内容上方），
-     * 底部是让最后一项能滚到「视觉中心」，而不是贴着屏幕下沿被裁掉一半。
+     * TransformingLazyColumn 从顶部开始排，所以上下不需要留「让第一项滚到中心」
+     * 的空间：给个 2dp 只是让卡片阴影不被容器边裁掉。
      */
     @Composable
     fun listPadding(): PaddingValues {
         val h = horizontalPadding()
-        return PaddingValues(start = h, end = h, top = 26.dp, bottom = 26.dp)
+        return PaddingValues(start = h, end = h, top = 2.dp, bottom = 2.dp)
     }
 
     /** 页面级左右内边距，给非列表内容（标题、单块卡片）用 */
@@ -76,18 +93,71 @@ object WearLayout {
 }
 
 /**
+ * [WearList] 的 scope。
+ *
+ * 存在的唯一理由是：给每一项套上 `transformedHeight` + 容器变换。
+ * `TransformingLazyColumn` 自己不会缩放内容 —— 变换要由调用方在 item 上应用，
+ * 这样框架才知道「这一项变换后占多高」，从而正确计算滚动范围。
+ */
+class WearListScope internal constructor(
+    private val scope: TransformingLazyColumnScope,
+    private val spec: TransformationSpec,
+) {
+    fun item(
+        key: Any? = null,
+        content: @Composable TransformingLazyColumnItemScope.() -> Unit,
+    ) {
+        scope.item(key = key) { FisheyeItem(spec, content) }
+    }
+
+    fun items(
+        count: Int,
+        key: ((index: Int) -> Any)? = null,
+        itemContent: @Composable TransformingLazyColumnItemScope.(index: Int) -> Unit,
+    ) {
+        scope.items(count = count, key = key) { index ->
+            FisheyeItem(spec) { itemContent(index) }
+        }
+    }
+}
+
+/**
+ * 单项的鱼眼变换。
+ *
+ * 两件事必须一起做，少一件就会错位：
+ * 1. `transformedHeight` —— 告诉布局「这项变换后只剩这么高」，否则滚动范围会按
+ *    原始高度算，最后一项永远滚不到底（正是用户说的「底部截断」）。
+ * 2. `applyContainerTransformation` —— 真正把这一项缩放、推移、淡出。
+ */
+@Composable
+private fun TransformingLazyColumnItemScope.FisheyeItem(
+    spec: TransformationSpec,
+    content: @Composable TransformingLazyColumnItemScope.() -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .transformedHeight(this, spec)
+            .graphicsLayer {
+                with(spec) {
+                    applyContainerTransformation(scrollProgress)
+                }
+            },
+    ) {
+        content()
+    }
+}
+
+/**
  * 带鱼眼效果的列表。
  *
- * 用法与 `LazyColumn` 基本一致，只是 scope 换成 `ScalingLazyListScope`：
+ * 用法与 `LazyColumn` 基本一致：
  * ```
  * WearList {
  *     item { ... }
  *     items(list.size) { i -> ... }
  * }
  * ```
- *
- * 注意单一项的高度不要超过一屏 —— 超过之后缩放会失真（整块一起缩小），
- * 那时应该改用普通 `Column` + 垂直滚动，或者把这项拆成多条。
  */
 @Composable
 fun WearList(
@@ -96,25 +166,25 @@ fun WearList(
      * 列表状态。
      *
      * 想在这个列表「返回后回到原位」时，传一个
-     * `rememberKeptScalingListState("页面名")`（见 ScrollMemory.kt）；
-     * 不传就是每次进页面从顶部开始。
+     * `rememberKeptListState("页面名")`（见 ScrollMemory.kt）。
      */
-    state: ScalingLazyListState = rememberScalingLazyListState(),
+    state: TransformingLazyColumnState = rememberTransformingLazyColumnState(),
     contentPadding: PaddingValues? = null,
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
-    content: ScalingLazyListScope.() -> Unit,
+    content: WearListScope.() -> Unit,
 ) {
-    ScalingLazyColumn(
+    val spec = rememberTransformationSpec()
+    val rotary = RotaryScrollableDefaults.behavior(state)
+    TransformingLazyColumn(
         modifier = modifier.fillMaxSize(),
         state = state,
         contentPadding = contentPadding ?: WearLayout.listPadding(),
         verticalArrangement = verticalArrangement,
         horizontalAlignment = Alignment.CenterHorizontally,
-        // ItemCenter：第一项和最后一项也能滚到屏幕正中，配合上下 26dp 的留白，
-        // 圆屏下不会出现「第一项被顶边切一半」的情况
-        anchorType = ScalingLazyListAnchorType.ItemCenter,
-        content = content,
-    )
+        rotaryScrollableBehavior = rotary,
+    ) {
+        WearListScope(this, spec).content()
+    }
 }
 
 /**

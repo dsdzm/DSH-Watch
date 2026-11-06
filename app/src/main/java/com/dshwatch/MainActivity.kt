@@ -7,8 +7,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
@@ -16,6 +20,8 @@ import com.dshwatch.core.CrashLog
 import com.dshwatch.ui.AppRoot
 import com.dshwatch.ui.nav.rememberWatchNavigator
 import com.dshwatch.ui.theme.DshWatchTheme
+import com.dshwatch.ui.wear.CircleGeometry
+import com.dshwatch.ui.wear.LocalCircle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -77,16 +83,32 @@ class MainActivity : ComponentActivity() {
                             CrashLog.endLaunch(this@MainActivity)
                         }
                     }
-                    AppRoot(
-                        container = container,
-                        settings = settings,
-                        nav = rememberWatchNavigator(),
-                    )
+                    /*
+                     * 圆屏几何在这里算一次，往下整棵树共享。
+                     *
+                     * 放在这一层而不是每个页面各算一遍：屏幕尺寸只有一个，
+                     * 而几乎所有圆屏组件（骨架、径向菜单、贴弧气泡）都要用它。
+                     * 方屏时传 null，组件据此走矩形分支 —— 而不是给一个「假圆」
+                     * 让方屏白白丢掉两个角。
+                     */
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val circle = if (profile.isRound) {
+                            CircleGeometry(maxWidth, maxHeight)
+                        } else {
+                            null
+                        }
+                        CompositionLocalProvider(LocalCircle provides circle) {
+                            AppRoot(
+                                container = container,
+                                settings = settings,
+                                nav = rememberWatchNavigator(),
+                            )
+                        }
+                    }
                 }
             }
         }
     }
-
     /**
      * Android 13（API 33）起通知是运行时权限，不申请就等于没有。
      *

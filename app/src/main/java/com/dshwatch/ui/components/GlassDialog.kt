@@ -110,6 +110,26 @@ fun GlassDialog(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val backdropBlurSupported = remember(ctx) { WindowBlur.isBackgroundBlurSupported(ctx) }
 
+    /*
+     * 圆屏：弹窗是个居中矩形，四角同样要落在圆周内。
+     *
+     * 方屏上弹窗是 `fillMaxWidth()` + 12dp 边距 —— 圆屏上就是 181dp 宽，
+     * 而一个居中矩形的四角能占多大，取决于它的高度：W² + H² ≤ (2r)²。
+     * 高度一超，四角立刻冲出圆周，**冲出去的是标题和底部按钮**，
+     * 用户看着弹窗在那里，点"确定"却毫无反应。
+     *
+     * 注意基准是**直径**不是屏幕高：这台机器 412×502，屏幕比圆高 72px。
+     *
+     * 所以两件事一起收：宽度 0.74d，正文上限压到 0.30d。
+     */
+    val circle = com.dshwatch.ui.wear.LocalCircle.current
+    val contentMax = if (circle == null) {
+        maxContentHeight.dp
+    } else {
+        minOf(maxContentHeight.toFloat(), circle.diameter.value * 0.30f).dp
+    }
+    val widthMod = if (circle == null) Modifier.fillMaxWidth() else Modifier.fillMaxWidth(0.74f)
+
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -209,7 +229,7 @@ fun GlassDialog(
         val swallowInteraction = remember { MutableInteractionSource() }
         Column(
             modifier = modifier
-                .fillMaxWidth()
+                .then(widthMod)
                 .padding(horizontal = 12.dp, vertical = 12.dp)
                 .clickable(
                     interactionSource = swallowInteraction,
@@ -262,13 +282,13 @@ fun GlassDialog(
                 modifier = if (scrollable) {
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(max = maxContentHeight.dp)
+                        .heightIn(max = contentMax)
                         .verticalScroll(rememberScrollState())
                 } else {
                     // 内容自己滚时只限高，绝不再叠一层滚动 —— 见 scrollable 的说明
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(max = maxContentHeight.dp)
+                        .heightIn(max = contentMax)
                 },
                 content = content,
             )
