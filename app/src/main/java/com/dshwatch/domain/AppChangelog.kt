@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.15.20",
+            date = "2026-11-06",
+            highlights = listOf(
+                "新增「帮助与教程」：设置里可查每个功能的用法，含状态面板语法、行动选项规则与导入格式",
+                "更新支持运行期主动复查，应用一直开着也会按天检查新版本",
+                "长期记忆改为按未压缩内容自动整理，长对话不再需要手动压缩",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.15.19",
             date = "2026-11-06",
             highlights = listOf(

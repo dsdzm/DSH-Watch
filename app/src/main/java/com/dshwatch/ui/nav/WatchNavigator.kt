@@ -19,6 +19,12 @@ sealed interface Screen {
 
     /** 检查更新：版本对比、更新说明、下载与安装 */
     data object Update : Screen
+
+    /** 帮助目录：所有功能的用法 */
+    data object Help : Screen
+
+    /** 单条教程 */
+    data class HelpTopic(val id: String) : Screen
     data object Diagnostics : Screen
     data object Workspace : Screen
     data class WorkspacePreview(val path: String) : Screen
@@ -153,6 +159,8 @@ class WatchNavigator internal constructor(
             Screen.Pair -> "pair"
             Screen.About -> "about"
             Screen.Update -> "update"
+            Screen.Help -> "help"
+            is Screen.HelpTopic -> "helptopic${SEP}${screen.id}"
             Screen.Diagnostics -> "diag"
             Screen.Workspace -> "ws"
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
@@ -187,6 +195,8 @@ class WatchNavigator internal constructor(
                 "pair" -> Screen.Pair
                 "about" -> Screen.About
                 "update" -> Screen.Update
+                "help" -> Screen.Help
+                "helptopic" -> Screen.HelpTopic(parts.getOrNull(1).orEmpty())
                 "diag" -> Screen.Diagnostics
                 "ws" -> Screen.Workspace
                 "exec" -> Screen.ExecSettings

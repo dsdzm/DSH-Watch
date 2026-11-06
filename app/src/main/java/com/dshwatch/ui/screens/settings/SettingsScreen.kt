@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
@@ -87,6 +88,22 @@ fun SettingsScreen(
                     subtitle = summaryOf(id, settings, s),
                     trailing = "›",
                     onClick = { nav.push(Screen.SettingsGroup(id)) },
+                )
+            }
+
+            /*
+             * 帮助放在所有设置分组之后，而不是塞进某一组。
+             *
+             * 它是「不知道去哪找才来点」的入口：混进「对话」或「运行」里，
+             * 用户在找一个面板语法时根本不会想到去那儿翻。
+             */
+            item {
+                WearCardRow(
+                    icon = Icons.Outlined.HelpOutline,
+                    title = s.helpTitle,
+                    subtitle = s.helpSubtitle,
+                    trailing = "›",
+                    onClick = { nav.push(Screen.Help) },
                 )
             }
         }

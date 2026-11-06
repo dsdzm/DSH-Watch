@@ -303,6 +303,9 @@ class AppContainer(private val app: Context) {
              */
             delay(10_000)
             updateCenter.autoCheckIfDue()
+            // 之后每 6 小时再看一眼（真正是否发请求仍由 24h 节流决定）。
+            // 手表上的 App 可能挂着好几天不关，只在启动时查一次等于永远不查。
+            updateCenter.startPeriodicCheck()
         }
 
         appScope.launch {

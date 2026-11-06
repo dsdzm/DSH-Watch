@@ -60,6 +60,7 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
     val center = container.updateCenter
 
     val state by center.state.collectAsStateWithLifecycle()
+    val settings by container.settings.collectAsStateWithLifecycle()
     var noSettingsPage by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf("") }
 
@@ -96,6 +97,9 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
 
             SettingCard {
                 KeyValueRow(s.updateCurrent, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                // 「上次检查」写在版本下面：用户点进来最常见的两个问题就是
+                // 「我是什么版本」和「上次到底查过没有」。
+                KeyValueRow(s.updateLastCheck, lastCheckText(settings.lastUpdateCheckAt))
                 (state as? UpdateState.Available)?.let { available ->
                     KeyValueRow(
                         s.updateLatest,
@@ -315,3 +319,14 @@ private fun humanSize(bytes: Long): String = when {
     bytes >= 1024 -> "${bytes / 1024} KB"
     else -> "$bytes B"
 }
+
+/**
+ * 上次检查的时间。
+ *
+ * 不写"3 小时前"这种相对时间：手表上的显示要能对照系统时间核对，
+ * 而且相对时间需要翻译（中文「3 小时前」/英文「3 hours ago」），
+ * 一个日期串两种语言都能读。
+ */
+private fun lastCheckText(at: Long): String =
+    if (at <= 0L) "—"
+    else java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(at))

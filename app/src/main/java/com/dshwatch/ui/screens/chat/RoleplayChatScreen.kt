@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
-import com.dshwatch.domain.TokenEstimator
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.MessageStatus
@@ -158,13 +157,12 @@ fun RoleplayChatScreen(
         if (card?.longTermMemory != true || cardId.isBlank()) return@LaunchedEffect
         val provider = settings.activeProvider ?: return@LaunchedEffect
         val window = provider.contextWindow
-        if (window <= 0) return@LaunchedEffect
-        val used = messages.sumOf { TokenEstimator.estimatePair(it.role.wire, it.content) }
+        // 判定挪进 MemoryCompressor：它才知道"未压缩的那一段"从哪开始。
+        // 这里过去是拿整个会话的 token 数去比，压缩过一次之后就再也不会触发。
         container.memoryCompressor.maybeCompress(
             conversationId = conversation?.id.orEmpty(),
             cardId = cardId,
             scene = scene,
-            contextTokens = used,
             contextWindow = window,
         )
     }
@@ -233,7 +231,6 @@ fun RoleplayChatScreen(
                                 conversationId = conversation?.id.orEmpty(),
                                 cardId = cardId,
                                 scene = scene,
-                                contextTokens = 1,
                                 contextWindow = provider?.contextWindow ?: 8000,
                                 force = true,
                             )

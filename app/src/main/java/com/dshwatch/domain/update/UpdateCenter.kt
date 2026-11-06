@@ -6,6 +6,7 @@ import com.dshwatch.data.settings.SettingsRepository
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -98,8 +99,35 @@ class UpdateCenter(
 
                 is UpdateResult.Failed -> _state.value = UpdateState.Failed(result.reason)
             }
+            // 手动查过也算一次：更新页那行「上次检查」要跟着动，
+            // 否则用户刚查完，回到页面还写着"三天前"
+            markChecked()
             checking.set(false)
         }
+    }
+
+    /**
+     * 运行期间的定期复查。
+     *
+     * 只在启动时查一次是不够的：手表上的 App 常常一挂就是好几天，
+     * 期间新版本发出来了，用户却要等到手杀进程再打开才知道。
+     * 这里每 [PERIODIC_MS] 看一眼，真正的频率仍由
+     * [autoCheckIfDue] 里的 24 小时节流决定 —— 醒着只是"有机会查"，
+     * 不是"每 6 小时必查一次"。
+     */
+    fun startPeriodicCheck() {
+        scope.launch {
+            while (true) {
+                delay(PERIODIC_MS)
+                autoCheckIfDue()
+            }
+        }
+    }
+
+    /** 记一次检查时间。写盘失败不影响流程 */
+    private suspend fun markChecked() {
+        val now = System.currentTimeMillis()
+        runCatching { settings.update { it.copy(lastUpdateCheckAt = now) } }
     }
 
     /** 下载当前待更新的包。重复点击无效 */
@@ -173,5 +201,8 @@ class UpdateCenter(
 
         /** 自动检查的间隔。一天一次，够用又不至于让手表一直联网 */
         const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
+
+        /** 运行期间多久看一眼"是不是该复查了"。真正的节流在 CHECK_INTERVAL_MS */
+        const val PERIODIC_MS = 6L * 60 * 60 * 1000
     }
 }

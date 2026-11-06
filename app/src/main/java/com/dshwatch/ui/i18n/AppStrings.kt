@@ -43,6 +43,11 @@ interface AppStrings {
     val homeContinue: String
     val navSessions: String
     val navSettings: String
+
+    // 帮助与教程
+    val helpTitle: String
+    val helpSubtitle: String
+    val helpCopyAll: String
     val backToBottom: String
     val navUsage: String
     val navProviders: String
@@ -393,6 +398,7 @@ interface AppStrings {
     val updateUpToDate: String
     val updateCurrent: String
     val updateLatest: String
+    val updateLastCheck: String
     val updateDownloadInstall: String
     val updateDownloading: String
     val updateInstall: String
@@ -588,6 +594,9 @@ object Zh : AppStrings {
     override val homeContinue = "继续对话"
     override val navSessions = "会话"
     override val navSettings = "设置"
+    override val helpTitle = "帮助与教程"
+    override val helpSubtitle = "面板 / 选项 / 导入格式"
+    override val helpCopyAll = "复制本页"
     override val backToBottom = "回到最新"
     override val navUsage = "用量"
     override val navProviders = "供应商"
@@ -919,6 +928,7 @@ object Zh : AppStrings {
     override val updateUpToDate = "已经是最新版本"
     override val updateCurrent = "当前版本"
     override val updateLatest = "最新版本"
+    override val updateLastCheck = "上次检查"
     override val updateDownloadInstall = "下载并安装"
     override val updateDownloading = "正在下载…"
     override val updateInstall = "安装"
@@ -1193,6 +1203,9 @@ object En : AppStrings {
     override val homeContinue = "Continue"
     override val navSessions = "Chats"
     override val navSettings = "Settings"
+    override val helpTitle = "Help"
+    override val helpSubtitle = "Panels / choices / import"
+    override val helpCopyAll = "Copy page"
     override val backToBottom = "Jump to latest"
     override val navUsage = "Usage"
     override val navProviders = "Providers"
@@ -1525,6 +1538,7 @@ object En : AppStrings {
     override val updateUpToDate = "You are up to date"
     override val updateCurrent = "Current"
     override val updateLatest = "Latest"
+    override val updateLastCheck = "Last checked"
     override val updateDownloadInstall = "Download and install"
     override val updateDownloading = "Downloading…"
     override val updateInstall = "Install"

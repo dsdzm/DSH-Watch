@@ -184,6 +184,11 @@ fun AppRoot(
                         container = container,
                         nav = nav,
                     )
+                    Screen.Help -> com.dshwatch.ui.screens.help.HelpListScreen(nav = nav)
+                    is Screen.HelpTopic -> com.dshwatch.ui.screens.help.HelpTopicScreen(
+                        topicId = page.id,
+                        nav = nav,
+                    )
                     Screen.GroupChat -> GroupChatScreen(nav = nav)
                     Screen.Donate -> DonateScreen(nav = nav)
                     Screen.Thanks -> ThanksScreen(nav = nav)

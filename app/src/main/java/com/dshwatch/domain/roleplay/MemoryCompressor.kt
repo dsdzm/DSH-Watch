@@ -3,8 +3,9 @@ package com.dshwatch.domain.roleplay
 import com.dshwatch.core.Logx
 import com.dshwatch.data.store.MemoryStore
 import com.dshwatch.domain.ChatEngine
-import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.ResponseProbe
+import com.dshwatch.domain.TokenEstimator
+import com.dshwatch.domain.model.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -42,30 +43,51 @@ class MemoryCompressor(
     /**
      * 一轮结束后调用。
      *
+     * 判定用 [MemoryPolicy]，输入是**未压缩的那一段**（`contextStart` 之后），
+     * 不是整个会话。细节见 [MemoryPolicy] 的注释：以前用全量算，
+     * 分母又默认 64k，于是永远够不到阈值，一次都没触发过。
+     *
      * @param conversationId 当前会话
      * @param cardId 这张卡（记忆按卡存，不同会话用同一张卡会共享记忆）
      * @param scene tavern / writing
-     * @param contextTokens 当前上下文估算量
-     * @param contextWindow 模型窗口
+     * @param contextWindow 模型窗口；<=0 表示未知
      * @param force 用户手动点「立即压缩」
      */
     fun maybeCompress(
         conversationId: String,
         cardId: String,
         scene: String,
-        contextTokens: Int,
         contextWindow: Int,
         force: Boolean = false,
     ) {
         if (cardId.isBlank() || conversationId.isBlank()) return
-        if (contextWindow <= 0) return
-        val ratio = contextTokens.toFloat() / contextWindow.toFloat()
-        if (!force && ratio < TRIGGER_RATIO) return
+
+        val tail = uncompressedTail()
+        val tokens = tail.sumOf { TokenEstimator.estimatePair(it.role.wire, it.content) }
+        if (!force && !MemoryPolicy.shouldCompress(tokens, tail.size, contextWindow)) return
+
+        /*
+         * 记一条 info 级的日志：这是「到底有没有触发」唯一能看见的地方。
+         * 之前的实现没有这一行，用户说「从来没触发过」时，
+         * 我们连"判定没通过"和"判定通过但请求失败"都分不出来。
+         */
+        Logx.i(
+            TAG,
+            "长期记忆触发：未压缩 ${tail.size} 条 / 约 $tokens token" +
+                "（阈值 ${MemoryPolicy.threshold(contextWindow)}）" + if (force) " · 手动" else "",
+        )
 
         scope.launch {
             runCatching { compress(conversationId, cardId, scene) }
                 .onFailure { Logx.w(TAG, "长期记忆压缩失败，本轮跳过", it) }
         }
+    }
+
+    /** 还没被压缩进记忆的那一段（下一次请求真正会带上的内容） */
+    private fun uncompressedTail(): List<ChatMessage> {
+        val all = engine.snapshotMessages()
+        val from = engine.contextStart().coerceIn(0, all.size)
+        return all.subList(from, all.size)
     }
 
     /**
@@ -79,7 +101,8 @@ class MemoryCompressor(
     suspend fun compress(conversationId: String, cardId: String, scene: String) {
         val all = engine.snapshotMessages()
         val from = engine.contextStart()
-        if (all.size <= from + 2) return // 没什么可压的
+        // 少于 MIN_MESSAGES 条就不值得花一次请求：摘要发出去的内容还没提示词长
+        if (all.size - from < MemoryPolicy.MIN_MESSAGES) return
 
         val pending = all.subList(from.coerceIn(0, all.size), all.size)
         val transcript = renderTranscript(pending)
@@ -122,9 +145,6 @@ class MemoryCompressor(
 
     companion object {
         private const val TAG = "MemoryCompressor"
-
-        /** 上下文用到模型窗口的多少比例时触发压缩 */
-        const val TRIGGER_RATIO = 0.55f
 
         /** 送去压缩的原文上限：太长就只给后半段，成本可控且信息量最大 */
         private const val TRANSCRIPT_BUDGET = 12_000
