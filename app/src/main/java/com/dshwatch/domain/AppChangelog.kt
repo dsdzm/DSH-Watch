@@ -22,30 +22,11 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        // 稳定版重发：以 1.15.22 的统一缩放实现为准，无新增能力，按约定不写条目
         ChangelogEntry(
-            version = "1.15.25",
+            version = "1.15.26",
             date = "2026-11-07",
-            highlights = listOf(
-                "手表布局把输入、发送、保存改到屏幕下缘的边键上，不再被圆周裁掉",
-                "对话页的会话、新建、切换场景、设置入口回到标题下方，随时可点",
-            ),
-        ),
-        ChangelogEntry(
-            version = "1.15.24",
-            date = "2026-11-07",
-            highlights = listOf(
-                "手表布局改用官方 ScreenScaffold：圆顶弧线时间、右侧滚动指示器、下缘返回键都由 Wear M3 提供",
-                "标题改为随内容滚动的 ListHeader，不再占用固定顶栏；设置与帮助列表换成官方 Card",
-                "按钮、开关、图标键换成 Wear M3 组件，尺寸与按下形变跟随系统规范",
-            ),
-        ),
-        ChangelogEntry(
-            version = "1.15.23",
-            date = "2026-11-07",
-            highlights = listOf(
-                "新增「手表」与「手机/大屏」两套布局主题：手表布局按 Wear OS 规范重排，顶栏显示时间，内容不会越出圆周",
-                "布局主题跟随设备自动选择，也可在「外观」里手动切换",
-            ),
+            highlights = emptyList(),
         ),
         ChangelogEntry(
             version = "1.15.22",

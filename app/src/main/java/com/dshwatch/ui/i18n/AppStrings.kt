@@ -121,10 +121,6 @@ interface AppStrings {
     val uiScaleReset: String
     /** 超过本机推荐值时的提醒，`%s` 是推荐值，如 `0.64×` */
     fun uiScaleOver(recommended: String): String
-    /** 布局主题（手表 / 手机） */
-    val layoutTheme: String
-    fun layoutThemeLabel(id: String): String
-    fun layoutThemeHint(id: String): String
     val fontSize: String
     val fontSmall: String
     val fontNormal: String
@@ -676,17 +672,6 @@ object Zh : AppStrings {
     override val uiScaleReset = "恢复自适应"
     override fun uiScaleOver(recommended: String) =
         "超过本机推荐 $recommended，边缘可能被切到"
-    override val layoutTheme = "布局主题"
-    override fun layoutThemeLabel(id: String) = when (id) {
-        com.dshwatch.domain.model.LayoutThemes.WATCH -> "手表"
-        com.dshwatch.domain.model.LayoutThemes.PHONE -> "手机 · 大屏"
-        else -> "跟随设备"
-    }
-    override fun layoutThemeHint(id: String) = when (id) {
-        com.dshwatch.domain.model.LayoutThemes.WATCH -> "按圆屏重排，文字与卡片始终等比，不会越出圆周"
-        com.dshwatch.domain.model.LayoutThemes.PHONE -> "现有的紧凑排版，可整体放大"
-        else -> "按屏幕宽度自动选择"
-    }
     override val fontSize = "字号"
     override val fontSmall = "小"
     override val fontNormal = "标准"
@@ -1303,18 +1288,6 @@ object En : AppStrings {
     override val uiScaleReset = "Use device fit"
     override fun uiScaleOver(recommended: String) =
         "Beyond $recommended for this screen — edges may be clipped"
-    override val layoutTheme = "Layout theme"
-    override fun layoutThemeLabel(id: String) = when (id) {
-        com.dshwatch.domain.model.LayoutThemes.WATCH -> "Watch"
-        com.dshwatch.domain.model.LayoutThemes.PHONE -> "Phone · large"
-        else -> "Match device"
-    }
-    override fun layoutThemeHint(id: String) = when (id) {
-        com.dshwatch.domain.model.LayoutThemes.WATCH ->
-            "Reflowed for round screens; text and cards stay in proportion and never leave the circle"
-        com.dshwatch.domain.model.LayoutThemes.PHONE -> "The compact layout you had, scalable as a whole"
-        else -> "Chosen from your screen width"
-    }
     override val fontSize = "Font size"
     override val fontSmall = "S"
     override val fontNormal = "M"

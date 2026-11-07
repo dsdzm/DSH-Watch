@@ -182,40 +182,18 @@ fun ProviderEditScreen(
         }
     }
 
-    val watchLayout = com.dshwatch.domain.model.LayoutThemes
-        .isWatchLayout(com.dshwatch.ui.theme.LocalLayoutTheme.current)
     WatchScaffold(
         title = if (existing == null) s.newProvider else s.editProvider,
         onBack = { nav.pop() },
-        /*
-         * 手表布局：保存是下缘边键，返回自动挪到标题行（WearScreen 的规则）。
-         * 一条横贯的「保存」按钮钉在圆底，两端会被圆周切掉。
-         */
-        edgeAction = if (watchLayout) {
-            {
-                com.dshwatch.ui.wear.WearEdgeAction(onClick = { persist() }) {
-                    androidx.wear.compose.material3.Text(
-                        text = s.save,
-                        style = androidx.wear.compose.material3.MaterialTheme.typography.labelLarge,
-                    )
-                }
-            }
-        } else {
-            null
-        },
-        bottom = if (watchLayout) {
-            null
-        } else {
-            {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .cornerSafe()
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+        bottom = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .cornerSafe()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
 
-                ) {
-                    PrimaryButton(text = s.save, onClick = { persist() })
-                }
+            ) {
+                PrimaryButton(text = s.save, onClick = { persist() })
             }
         },
     ) {

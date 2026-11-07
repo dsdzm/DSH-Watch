@@ -29,7 +29,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -169,7 +168,6 @@ fun WorkspaceScreen(
                 }
             }
         },
-        fullBleed = true,
     ) {
         SegmentedRow(
             options = listOf(s.workspaceFilterAll, s.workspaceArtifacts, s.workspaceSource),
@@ -223,28 +221,20 @@ fun WorkspaceScreen(
             return@WatchScaffold
         }
 
-        /*
-         * 这里不用 WearList：本页在列表之前还有筛选条、构建日志和空态，
-         * 它们不是列表项，塞不进 WearListScope。手表布局下外层 WatchScaffold
-         * 已经负责滚动与官方边距，直接用普通 Column 排下来即可 ——
-         * 工作区文件通常几十个，一次性渲染的开销可以忽略。
-         */
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .wearVerticalScroll(com.dshwatch.ui.wear.rememberKeptScrollState("workspace")),
+        WearList(
+            state = com.dshwatch.ui.wear.rememberKeptListState("workspace"),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            visible.forEach { entry ->
-                key(entry.path) {
-                    FileRow(
-                        entry = entry,
-                        isArtifact = isArtifactPath(entry.path),
-                        onOpen = { nav.push(Screen.WorkspacePreview(entry.path)) },
-                        onShare = { shareOrToast(context, store.resolveForUi(entry.path), s.shareFailed) },
-                        onDelete = { deleteTarget = entry },
-                    )
-                }
+            items(visible.size, key = { visible[it].path }) { index ->
+                val entry = visible[index]
+                FileRow(
+                    entry = entry,
+                    isArtifact = isArtifactPath(entry.path),
+                    onOpen = { nav.push(Screen.WorkspacePreview(entry.path)) },
+                    onShare = { shareOrToast(context, store.resolveForUi(entry.path), s.shareFailed) },
+                    onDelete = { deleteTarget = entry },
+                )
             }
         }
     }

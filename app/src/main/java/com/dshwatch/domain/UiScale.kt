@@ -83,68 +83,17 @@ object UiScale {
     fun recommended(widthDp: Int): Float = auto(widthDp)
 
     /**
-     * 当前布局下允许的**最大**缩放。
-     *
-     * 两套布局的安全上限完全不同，因为它们的"刚好"不是同一个数：
-     *
-     * - 手机布局按 **320dp 设计基准**铺开，206dp 的屏要 0.64× 才放得下，
-     *   但大屏上可以放大到 [MAX]（1.15×）—— 再多就开始横向裁切。
-     * - 手表布局**不再按 320dp 设计**，它按屏幕实际宽度重排（边距 8dp），
-     *   所以 1.0× 就是"刚好"，任何放大都只是在把内容推出圆周。
-     *
-     * 这个值必须和滑块上限、`resolve` 的夹取共用同一个来源，
-     * 否则会出现「滑块能拖到 1.15、界面却按 1.0 算」的错位。
-     */
-    fun cap(widthDp: Int, watchLayout: Boolean): Float =
-        if (watchLayout) 1f else MAX
-
-    /**
-     * 滑块的取值范围。
-     *
-     * 下限永远是 [MIN]：再小下去正文低于 10sp，在手表上属于「看不清」而不是「小」。
-     * 上限按 [cap] 走。区间为空时（极窄屏 + 手表布局）返回 `MIN..MIN`，
-     * 由 UI 侧判断 `start == endInclusive` 后置灰，而不是让 Slider 抛异常。
-     */
-    fun sliderRange(widthDp: Int, watchLayout: Boolean): ClosedFloatingPointRange<Float> {
-        val max = cap(widthDp, watchLayout).coerceAtLeast(MIN)
-        return MIN..max
-    }
-
-    /**
-     * 滑块的中间档数（Compose `Slider` 的 `steps`，0 表示连续）。
-     *
-     * 按 0.05 一档算，但**至少要留 1 段**：区间被压到 0.62~0.64 时，
-     * 写死 10 档会让每一档只有 0.0018，snap 之后出现重复值、手势还会抖。
-     */
-    fun sliderSteps(range: ClosedFloatingPointRange<Float>): Int {
-        val span = range.endInclusive - range.start
-        if (span <= STEP * 0.5f) return 0
-        return (((span / STEP).roundToInt()) - 1).coerceIn(1, 14)
-    }
-
-    /**
      * 解析最终生效的缩放值。
      *
      * @param value 用户手动设定的值（[autoEnabled] 为 true 时忽略）
      * @param autoEnabled 是否跟随本机自动
-     * @param widthDp 设备当前可用宽度（dp，**未缩放**）
-     * @param cap 上限，由 [cap] 按布局主题算出；默认 [MAX] 保持旧行为
-     * @param fitValue 「跟随本机」时该取的值。手机布局是按 320dp 基准算的
-     *   [auto]；手表布局按屏幕重排、不需要压缩，所以传 1f。
+     * @param widthDp 设备当前可用宽度（dp）
      */
-    fun resolve(
-        value: Float,
-        autoEnabled: Boolean,
-        widthDp: Int,
-        cap: Float = MAX,
-        fitValue: Float = auto(widthDp),
-    ): Float {
-        val ceiling = cap.coerceIn(MIN, MAX)
-        val base = fitValue.coerceIn(MIN, ceiling)
-        if (autoEnabled) return base
+    fun resolve(value: Float, autoEnabled: Boolean, widthDp: Int): Float {
+        if (autoEnabled) return auto(widthDp)
         // 存档里可能是旧版本写进去的 0 或 NaN，兜到本机推荐值而不是让整屏消失
-        if (!value.isFinite() || value <= 0f) return base
-        return value.coerceIn(MIN, ceiling)
+        if (!value.isFinite() || value <= 0f) return auto(widthDp)
+        return value.coerceIn(MIN, MAX)
     }
 
     /**

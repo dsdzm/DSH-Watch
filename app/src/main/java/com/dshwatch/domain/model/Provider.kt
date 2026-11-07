@@ -240,14 +240,6 @@ data class AppSettings(
     /** 屏幕形状：`auto` 跟随系统 / `round` 圆屏 / `square` 方屏 */
     val screenShape: String = ScreenShapes.AUTO,
 
-    /**
-     * 布局主题：`auto` 跟随设备 / `watch` 手表排版 / `phone` 手机大屏排版。
-     *
-     * 和 [screenShape] 是两件事：那个说「我的屏是圆的」，这个说「我要用哪套排版」。
-     * 详见 [LayoutThemes]。
-     */
-    val layoutTheme: String = LayoutThemes.AUTO,
-
     /** 对话页布局 id，见 [ChatLayouts] */
     val chatLayout: String = ChatLayouts.BUBBLE,
 

@@ -342,7 +342,6 @@ private fun AppearanceGroup(
     var editingAppearance by remember { mutableStateOf(false) }
     var editingAccent by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
-    var editingLayoutTheme by remember { mutableStateOf(false) }
     val dark = when (settings.themeMode) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
@@ -356,18 +355,6 @@ private fun AppearanceGroup(
     val layouts = ChatLayouts.available(profile.isRound)
 
     SettingCard {
-        /*
-         * 布局主题排在最上面：它是「整套界面长什么样」的最大开关，
-         * 排在配色/材质之前才符合从大到小的决策顺序。
-         */
-        SettingRow(
-            title = s.layoutTheme,
-            subtitle = s.layoutThemeHint(settings.layoutTheme),
-            trailing = s.layoutThemeLabel(settings.layoutTheme) + " ›",
-            showDivider = true,
-            onClick = { editingLayoutTheme = true },
-        )
-        Spacer(Modifier.height(2.dp))
         Text(
             text = s.theme,
             style = MaterialTheme.typography.bodyMedium,
@@ -441,25 +428,12 @@ private fun AppearanceGroup(
         val scaleAuto = settings.uiScaleAuto
         // 本机推荐值（按未缩放的屏幕宽度算）：超过它会开始有内容贴近圆周
         val recommended = com.dshwatch.ui.theme.LocalUiScaleRecommended.current
-        /*
-         * 上限由布局主题决定（见 UiScale.cap）：
-         *  - 手表布局：1.0。它按屏幕重排，再放大就是把内容推出圆周；
-         *  - 手机布局：1.15，大屏上还有余量。
-         *
-         * 这件事必须**在这里就夹死**，而不是拖过去再提示 —— 用户的原话是
-         * 「一下子拉太大还是会移出去」，提示不解决问题。
-         */
-        val maxScale = com.dshwatch.ui.theme.LocalUiScaleMax.current
-        val range = com.dshwatch.domain.UiScale.MIN..
-            maxScale.coerceAtLeast(com.dshwatch.domain.UiScale.MIN + 0.02f)
-        val adjustable = range.endInclusive - range.start > 0.005f
         WatchSlider(
             value = (if (scaleAuto) effectiveScale else settings.uiScale)
-                .coerceIn(range.start, range.endInclusive),
+                .coerceIn(com.dshwatch.domain.UiScale.MIN, com.dshwatch.domain.UiScale.MAX),
             onChange = { v -> update { it.copy(uiScale = v, uiScaleAuto = false) } },
-            valueRange = range,
-            steps = com.dshwatch.domain.UiScale.sliderSteps(range),
-            enabled = adjustable,
+            valueRange = com.dshwatch.domain.UiScale.MIN..com.dshwatch.domain.UiScale.MAX,
+            steps = 10,
             label = s.uiScale,
             valueText = if (scaleAuto) {
                 "自动 " + String.format(java.util.Locale.US, "%.2f×", effectiveScale)
@@ -467,18 +441,9 @@ private fun AppearanceGroup(
                 String.format(java.util.Locale.US, "%.2f×", effectiveScale)
             },
         )
-        if (!adjustable) {
-            // 极窄屏上区间会退化成一档：与其给一个拖不动的滑块，不如直说
-            Text(
-                text = s.uiScaleHint,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 2.dp, top = 2.dp, end = 2.dp),
-            )
-        }
         if (!scaleAuto && effectiveScale > recommended + 0.02f) {
-            // 手机布局下仍可能越过本机推荐值（上限是 1.15 而不是推荐值）：
-            // 只提醒、不拦，因为大屏上留一点余量是用户的正当选择
+            // 只提醒、不拦：宁可裁一点也要把字放大是用户的选择，
+            // 但得让他知道「这不是 App 坏了」，而是已经越过本机能放下的尺寸
             Text(
                 text = s.uiScaleOver(String.format(java.util.Locale.US, "%.2f×", recommended)),
                 style = MaterialTheme.typography.labelSmall,
@@ -762,30 +727,6 @@ private fun AppearanceGroup(
                 }
             },
             buttons = { GlassDialogButton(s.close, onClick = { editingLayout = false }) },
-        )
-    }
-
-    if (editingLayoutTheme) {
-        GlassDialog(
-            onDismissRequest = { editingLayoutTheme = false },
-            title = s.layoutTheme,
-            maxContentHeight = 260,
-            content = {
-                Column {
-                    com.dshwatch.domain.model.LayoutThemes.all.forEach { id ->
-                        PickRow(
-                            title = s.layoutThemeLabel(id),
-                            hint = s.layoutThemeHint(id),
-                            selected = com.dshwatch.domain.model.LayoutThemes.of(settings.layoutTheme) == id,
-                            onClick = {
-                                update { it.copy(layoutTheme = id) }
-                                editingLayoutTheme = false
-                            },
-                        )
-                    }
-                }
-            },
-            buttons = { GlassDialogButton(s.close, onClick = { editingLayoutTheme = false }) },
         )
     }
 }

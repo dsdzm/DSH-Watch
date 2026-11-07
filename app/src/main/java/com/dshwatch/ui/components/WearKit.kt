@@ -141,52 +141,6 @@ fun WearCardRow(
     trailing: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(
-            com.dshwatch.ui.theme.LocalLayoutTheme.current,
-        )
-    ) {
-        /*
-         * 手表布局交给官方 Card。
-         *
-         * 自绘的「左侧图标 + 标题 + 右侧箭头」是手机列表的形态：Wear 的列表项
-         * 就是一整块可点的 Card，高度由 `CardTokens` 定，点击态、形变、配色
-         * 都随主题 —— 自绘版本永远差那一口气。箭头也去掉：圆表上右侧
-         * 那颗 "›" 经常正好落在圆周外。
-         */
-        androidx.wear.compose.material3.Card(
-            onClick = withHaptic(onClick ?: {}),
-            modifier = modifier.fillMaxWidth(),
-            enabled = onClick != null,
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.wear.compose.material3.Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    androidx.wear.compose.material3.Text(
-                        text = title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!subtitle.isNullOrBlank()) {
-                        androidx.wear.compose.material3.Text(
-                            text = subtitle,
-                            style = androidx.wear.compose.material3.MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-        }
-        return
-    }
     Row(
         modifier = modifier
             .fillMaxWidth()

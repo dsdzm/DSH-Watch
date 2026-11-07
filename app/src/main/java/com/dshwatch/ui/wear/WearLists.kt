@@ -197,18 +197,6 @@ fun WearList(
  */
 @Composable
 fun Modifier.wearVerticalScroll(state: ScrollState): Modifier {
-    /*
-     * 手表布局下骨架已经在滚（见 WearScreen 的 LocalWearScroll）。
-     *
-     * 这时必须放弃自己的 scroll：套两层 verticalScroll 会立刻抛
-     * 「Vertically scrollable component was measured with an infinity
-     * maximum height constraints」—— 这是崩溃，不是样式问题。
-     * 而且只有复用同一个 state，ScreenScaffold 才知道滚到哪，
-     * 右侧指示器与下缘返回键的收起动画才动得起来。
-     */
-    val scaffoldScroll = LocalWearScroll.current
-    if (scaffoldScroll != null) return this
-
     val focus = remember { FocusRequester() }
     val behavior = RotaryScrollableDefaults.behavior(scrollableState = state)
     // 焦点要在组合完成后给，否则 requestFocus 会在节点还没挂上时抛异常

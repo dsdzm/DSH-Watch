@@ -41,36 +41,16 @@ class MainActivity : ComponentActivity() {
             val profile by container.profile.collectAsStateWithLifecycle()
 
             /*
-             * 布局主题要在**主题外**解析：它依赖设备画像，而主题内部只负责下发。
-             *
-             * AUTO 的判据（详见 LayoutThemes.resolve）用未缩放的原始宽度 ——
-             * 和下面 uiScale 用同一个来源，避免"缩放结果反过来影响自己的判据"。
-             */
-            val layout = com.dshwatch.domain.model.LayoutThemes.resolve(
-                choice = settings.layoutTheme,
-                isWatch = profile.isWatch,
-                isRound = profile.isRound,
-                widthDp = profile.screenWidthDp,
-            )
-            val watchLayout = com.dshwatch.domain.model.LayoutThemes.isWatchLayout(layout)
-
-            /*
              * 界面缩放要在主题之外算好：主题内部只知道「缩放多少」，
              * 不知道设备多宽；而按宽度推自动值需要 profile。
              *
              * 用 profile.screenWidthDp（系统密度下的 dp 宽）而不是缩放后的值，
              * 否则自动值会随着自身结果反复变化、来回震荡。
-             *
-             * 上限按布局主题走：手表布局夹死在 1.0 —— 它按屏幕重排，
-             * 放大只会把内容推出圆周。这就是「拉太大移出去」的根治点。
              */
-            val uiScaleCap = com.dshwatch.domain.UiScale.cap(profile.screenWidthDp, watchLayout)
             val uiScale = com.dshwatch.domain.UiScale.resolve(
                 value = settings.uiScale,
                 autoEnabled = settings.uiScaleAuto,
                 widthDp = profile.screenWidthDp,
-                cap = uiScaleCap,
-                fitValue = if (watchLayout) 1f else com.dshwatch.domain.UiScale.auto(profile.screenWidthDp),
             )
 
             DshWatchTheme(
@@ -80,8 +60,6 @@ class MainActivity : ComponentActivity() {
                 accentColor = settings.accentColor,
                 appearance = settings.appearance,
                 uiScale = uiScale,
-                layoutTheme = layout,
-                uiScaleMax = uiScaleCap,
                 appLanguage = settings.appLanguage,
                 perf = perf,
                 profile = profile,
@@ -133,27 +111,11 @@ class MainActivity : ComponentActivity() {
                             null
                         }
                         CompositionLocalProvider(LocalCircle provides circle) {
-                            /*
-                             * 手表布局套一层 Wear M3 外壳（官方 AppScaffold + 圆顶时间）。
-                             *
-                             * 必须在 AppRoot **外面**：AppScaffold 的 TimeText 是按整个
-                             * 屏幕的弧线定位的，包在页面里会按页面尺寸算，弧就歪了。
-                             */
-                            if (watchLayout) {
-                                com.dshwatch.ui.wear.WearAppFrame {
-                                    AppRoot(
-                                        container = container,
-                                        settings = settings,
-                                        nav = rememberWatchNavigator(),
-                                    )
-                                }
-                            } else {
-                                AppRoot(
-                                    container = container,
-                                    settings = settings,
-                                    nav = rememberWatchNavigator(),
-                                )
-                            }
+                            AppRoot(
+                                container = container,
+                                settings = settings,
+                                nav = rememberWatchNavigator(),
+                            )
                         }
                     }
                 }
