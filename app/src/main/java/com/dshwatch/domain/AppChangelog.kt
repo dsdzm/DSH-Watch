@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.15.25",
+            date = "2026-11-07",
+            highlights = listOf(
+                "手表布局把输入、发送、保存改到屏幕下缘的边键上，不再被圆周裁掉",
+                "对话页的会话、新建、切换场景、设置入口回到标题下方，随时可点",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.15.24",
             date = "2026-11-07",
             highlights = listOf(

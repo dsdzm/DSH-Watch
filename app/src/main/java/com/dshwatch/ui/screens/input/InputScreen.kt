@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardActions
@@ -15,6 +16,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,23 +99,54 @@ fun InputScreen(
         }
     }
 
+    val watchLayout = com.dshwatch.domain.model.LayoutThemes
+        .isWatchLayout(com.dshwatch.ui.theme.LocalLayoutTheme.current)
     WatchScaffold(
         title = s.inputHint,
         onBack = { nav.pop() },
-        bottom = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .cornerSafe(),
-
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PrimaryButton(
-                    text = s.send,
-                    modifier = Modifier.weight(1f),
-                    enabled = text.isNotBlank(),
+        /*
+         * 输入框自己吃满剩余高度并由它内部滚动，骨架不能再套一层
+         * verticalScroll —— 里面用了 weight(1f)，套上去会撞无限高约束。
+         */
+        scrollable = false,
+        /*
+         * 手表布局：发送是下缘边键，和 Wraive 的输入页一致 ——
+         * 一条只有「发送」的横条钉在圆底，会被圆周切掉两端。
+         */
+        edgeAction = if (watchLayout) {
+            {
+                com.dshwatch.ui.wear.WearEdgeAction(
                     onClick = { submit() },
-                )
+                    enabled = text.isNotBlank(),
+                ) {
+                    androidx.wear.compose.material3.Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = s.send,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        } else {
+            null
+        },
+        bottom = if (watchLayout) {
+            null
+        } else {
+            {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .cornerSafe(),
+
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PrimaryButton(
+                        text = s.send,
+                        modifier = Modifier.weight(1f),
+                        enabled = text.isNotBlank(),
+                        onClick = { submit() },
+                    )
+                }
             }
         },
     ) {

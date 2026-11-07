@@ -23,11 +23,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.ScrollInfoProvider
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.EdgeButtonSize
 import androidx.wear.compose.material3.Icon
@@ -51,29 +53,24 @@ import com.dshwatch.ui.i18n.LocalStrings
 val LocalWearScroll = staticCompositionLocalOf<ScrollState?> { null }
 
 /**
- * 手表布局的页面骨架 —— 表单 / 单卡片 / 长文这类**不自带列表**的页面。
+ * 手表布局的页面骨架。
  *
- * ## 这一版是照官方结构写的
+ * ## 结构照 Wraive（youshen2/Wraive）来
  *
- * 上一版是手搓的：自己画时钟、自己压顶栏、自己按弦长算边距、自己加渐隐。
- * 结果是「看起来像手表，但不是 Wear」—— 顶栏没有官方的时间曲线、没有滚动指示器、
- * 内容被钉在一条固定高度带里。
+ * 参考项目里没有一处「常驻底栏」：Wear M3 的屏幕正下方只归 `EdgeButton`
+ * （返回 / 发送 / 输入），其它动作一律是内容里的列表项。原因是圆的：底栏
+ * 下沿那一行的弦宽只有屏宽的 0.5~0.6，任何 `fillMaxWidth` 的横条都会被圆周
+ * 啃掉两端 —— 1.15.24 之前那版就是照手机习惯把输入条钉在底部，结果整条被
+ * 裁掉，看起来像「控件消失了」。
  *
- * 现在换成 `androidx.wear.compose.material3.ScreenScaffold`：
+ * 所以这个骨架的规则是：
  *
- *  - **时间**由外层 `AppScaffold` 的 `TimeText` 沿圆顶弧线绘制，进页淡入；
- *  - **内容边距**由 `ScreenScaffoldDefaults.contentPadding` 给（横向 5.2%、
- *    纵向 10%），这是官方按圆屏算好的比例，不是我们猜的 16dp；
- *  - **返回**用 `EdgeButton`，官方规定它就贴在屏幕下缘，随滚动方向收起/展开；
- *  - **滚动指示器**由 `ScreenScaffold` 自己画，只要给它滚动状态。
- *
- * 标题不是顶栏，是 `ListHeader` —— Wear M3 没有 top app bar，标题属于内容，
- * 滚动时跟着走。这也是「完全按圆屏来」的关键：任何常驻横条都会在圆顶两侧被切掉。
- *
- * ## 底栏
- *
- * 没有 `onBack` 的页面（对话页）把 `bottom` 钉在底部；有返回键的页面让 `bottom`
- * 跟在内容末尾 —— 否则返回的 `EdgeButton` 和底栏会抢屏幕正下方同一块地方。
+ *  - `edgeAction` 有值 → 它占 `EdgeButton`，页面主操作永远够得着；
+ *  - 此时 `onBack` 挪到标题行左侧的小箭头（一个屏幕只有一个「下缘」）；
+ *  - `bottom` 只在**没有** `edgeAction` 时，排在内容末尾随手指滚动，
+ *    绝不静默丢弃 —— 这是 1.15.24 丢控件的直接原因；
+ *  - 内容横向不吃满：`ScreenScaffoldDefaults.contentPadding` 按圆屏算好了
+ *    左右 5.2%、上下 10%，这比任何手算弦长都准。
  */
 @Composable
 fun WearScreen(
@@ -81,28 +78,45 @@ fun WearScreen(
     onBack: (() -> Unit)? = null,
     subtitle: String? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
-    bottom: (@Composable () -> Unit)? = null,
     /**
-     * 保留参数只为与 `WatchScaffold` 签名对齐：手表骨架下底栏的位置由 [onBack] 决定。
+     * 页面底栏。**手机布局专用**。
+     *
+     * 手表布局下：给了 [edgeAction] 就忽略它（动作已在边键上）；没给就把它
+     * 排到内容末尾。两种都不会让它凭空消失。
      */
+    bottom: (@Composable () -> Unit)? = null,
     @Suppress("UNUSED_PARAMETER") bottomOverlay: Boolean = false,
     @Suppress("UNUSED_PARAMETER") fullBleed: Boolean = false,
     /**
      * 内容是否由骨架负责滚动。
      *
-     * 对话页那种「LazyColumn + weight(1f) + 自己管滚动」的页面必须传 false：
-     * 外面再套一层 `verticalScroll`，里面的 `weight` 就会撞上无限高度约束直接崩。
+     * 对话页那种「LazyColumn + weight(1f) + 自己管滚动」、输入页那种
+     * 「TextField + weight(1f)」的页面必须传 false：外面再套一层
+     * `verticalScroll`，里面的 `weight` 就会撞上无限高度约束直接崩。
      */
     scrollable: Boolean = true,
+    /**
+     * 主操作，渲染成屏幕下缘的 [EdgeButton]。
+     *
+     * 内容只放图标或短文字：边键宽度受圆周限制（ExtraSmall ≈ 屏宽的 60%），
+     * 塞长句会被截断。需要说明的操作放内容里当列表项。
+     */
+    edgeAction: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scroll = rememberScrollState()
-    val pinBottom = bottom != null && onBack == null
+    // 一个屏幕只有一个「下缘」：边键被主操作占了，返回就只能上到标题行
+    val backInHeader = edgeAction != null && onBack != null
+    // 没有边键动作时，底栏排在内容末尾随手指滚动
+    val bottomAtEnd = bottom != null && edgeAction == null
 
     ScreenScaffold(
         scrollInfoProvider = ScrollInfoProvider(scroll),
         edgeButton = {
-            if (onBack != null) WearBackEdgeButton(onClick = onBack)
+            when {
+                edgeAction != null -> edgeAction.invoke()
+                onBack != null -> WearBackEdgeButton(onClick = onBack)
+            }
         },
     ) { padding ->
         CompositionLocalProvider(
@@ -116,30 +130,33 @@ fun WearScreen(
                     .then(if (scrollable) Modifier.verticalScroll(scroll) else Modifier)
                     .padding(padding),
             ) {
-                WearHeader(title = title, subtitle = subtitle)
+                if (backInHeader) {
+                    WearHeaderWithBack(title = title, subtitle = subtitle, onBack = onBack)
+                } else {
+                    WearHeader(title = title, subtitle = subtitle)
+                }
                 if (actions != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                         content = actions,
                     )
                 }
                 content()
-                // 有底栏时在末尾留出它的高度，否则最后一行永远压在按钮下面
-                Spacer(Modifier.height(if (pinBottom) 56.dp else 12.dp))
-            }
-        }
-
-        if (pinBottom) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                bottom?.invoke()
+                if (bottomAtEnd) {
+                    Spacer(Modifier.height(10.dp))
+                    bottom?.invoke()
+                }
+                /*
+                 * 末尾留白：最后一项不该贴着圆周，也要躲开下缘的边键。
+                 *
+                 * 只在骨架自己滚动时加：不自滚的页面（对话/输入）内容已经
+                 * `fillMaxSize` 吃掉剩余高度，再塞一个 Spacer 只会被排到屏幕外。
+                 */
+                if (scrollable) {
+                    Spacer(Modifier.height(if (edgeAction != null) 44.dp else 16.dp))
+                }
             }
         }
     }
@@ -222,6 +239,7 @@ fun WearListScreen(
             WearListScope(this, spec).content()
         }
 
+        // 列表页没有边键动作，底栏浮在屏幕下方；圆屏下已经收进官方边距里
         if (bottom != null) {
             Box(
                 modifier = Modifier
@@ -255,6 +273,51 @@ private fun WearHeader(title: String, subtitle: String?) {
 }
 
 /**
+ * 有边键主操作时的标题行：左侧一颗返回箭头 + 标题。
+ *
+ * 这不是「又做了一条顶栏」：它没有背景、没有固定高度、跟着内容一起滚走，
+ * 只是把「返回」从被别人占掉的下缘挪到一眼能找到的位置。
+ */
+@Composable
+private fun WearHeaderWithBack(title: String, subtitle: String?, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.wear.compose.material3.IconButton(
+            onClick = onBack,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = LocalStrings.current.back,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
  * 返回键。
  *
  * 用官方的 `EdgeButton` 而不是自己画一颗 40dp 圆钮：Wear M3 规定返回就贴屏幕
@@ -272,5 +335,41 @@ private fun WearBackEdgeButton(onClick: () -> Unit) {
             contentDescription = LocalStrings.current.back,
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+/**
+ * 主操作边键。
+ *
+ * 尺寸与 Wraive 的用法一致：`EdgeButtonSize.ExtraSmall` + `fillMaxWidth()`，
+ * 让边键贴着圆周铺开；图标单独控制大小，文字用 `labelMedium` —— 这是
+ * Wear M3 对 EdgeButton 的规格，不是随手给的数。
+ */
+@Composable
+fun WearEdgeAction(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    EdgeButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth(),
+        buttonSize = EdgeButtonSize.ExtraSmall,
+        colors = if (danger) {
+            ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        } else {
+            ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+        },
+    ) {
+        content()
     }
 }

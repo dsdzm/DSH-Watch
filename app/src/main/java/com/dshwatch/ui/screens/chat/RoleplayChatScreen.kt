@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
@@ -184,13 +186,17 @@ fun RoleplayChatScreen(
                 }
                 showInfo = !showInfo
             }
-            if (!watchLayout) {
-                ScenePill(scene) {
-                    scope.launch {
-                        container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
-                    }
-                    nav.popToRoot()
+            /*
+             * 「切回编程场景」在手表布局里也要留：它原来因为「顶栏弦宽不够」
+             * 被收掉，结果是用户进了酒馆/写作就找不到回去的路，只能翻设置。
+             * 现在这一行是内容（骨架排在标题下），跟着消息一起滚，
+             * 三颗合计约 130dp，206dp 的表盘放得下。
+             */
+            ScenePill(scene) {
+                scope.launch {
+                    container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
                 }
+                nav.popToRoot()
             }
             // 对话页也要能进设置：这一页是从角色列表 push 上来的，
             // 如果只在列表页放设置，用户聊到一半想改模型/外观就得先退出去。
@@ -202,14 +208,38 @@ fun RoleplayChatScreen(
         fullBleed = true,
         // 消息区自带 LazyColumn，骨架不再套滚动
         scrollable = false,
-        bottom = {
-            RoleplayInputBar(
-                streaming = streaming,
-                hint = if (isWriting) "接着写，或说说你想怎么改" else "说点什么…",
-                onOpenInput = { nav.push(Screen.Input()) },
-                onSend = { nav.push(Screen.Input()) },
-                onStop = { engine.stop() },
-            )
+        /*
+         * 手表布局：输入变成下缘边键（Wraive 的做法），不再钉一条横贯底栏。
+         * 底栏在最下面那一行只剩屏宽一半的弦，钉在那里必然被圆周切掉。
+         */
+        edgeAction = if (watchLayout) {
+            {
+                com.dshwatch.ui.wear.WearEdgeAction(
+                    onClick = { if (streaming) engine.stop() else nav.push(Screen.Input()) },
+                    danger = streaming,
+                ) {
+                    androidx.wear.compose.material3.Icon(
+                        imageVector = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
+                        contentDescription = if (streaming) "停止" else "输入",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        } else {
+            null
+        },
+        bottom = if (watchLayout) {
+            null
+        } else {
+            {
+                RoleplayInputBar(
+                    streaming = streaming,
+                    hint = if (isWriting) "接着写，或说说你想怎么改" else "说点什么…",
+                    onOpenInput = { nav.push(Screen.Input()) },
+                    onSend = { nav.push(Screen.Input()) },
+                    onStop = { engine.stop() },
+                )
+            }
         },
     ) {
         banner?.let { b ->
@@ -299,7 +329,11 @@ fun RoleplayChatScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 4.dp),
+            contentPadding = PaddingValues(
+                top = 4.dp,
+                // 手表布局的下缘是输入边键，最后一条消息要躲开它
+                bottom = if (watchLayout) 44.dp else 4.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             itemsIndexed(messages, key = { _, m -> m.id }) { index, m ->

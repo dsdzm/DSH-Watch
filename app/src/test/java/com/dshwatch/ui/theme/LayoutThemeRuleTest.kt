@@ -25,6 +25,51 @@ class LayoutThemeRuleTest {
     }
 
     @Test
+    fun `底栏和主操作绝不能被静默丢弃`() {
+        /*
+         * 1.15.24 的真实事故：`bottom` 只在「没有返回键」时才渲染，
+         * 而手表布局的对话/输入/供应商编辑页都有返回键 —— 于是保存、发送、
+         * 输入这些控件整块消失，屏幕上什么都点不到。
+         *
+         * 这条断言守两件事：
+         * 1. 骨架里必须真的 invoke bottom（要么在边键上，要么排在内容末尾）；
+         * 2. 五个有主操作的页面必须给手表布局提供 edgeAction。
+         */
+        val screen = code("ui/wear/WearScreen.kt")
+        assertTrue(
+            "WearScreen 必须把 bottom 挂在 edgeAction 之外的分支上，不能只判 onBack",
+            screen.contains("bottomAtEnd") && screen.contains("bottom?.invoke()"),
+        )
+
+        listOf(
+            "ui/screens/chat/ChatScreen.kt",
+            "ui/screens/chat/RoleplayChatScreen.kt",
+            "ui/screens/input/InputScreen.kt",
+            "ui/screens/provider/ProviderEditScreen.kt",
+        ).forEach { path ->
+            val s = code(path)
+            assertTrue(
+                "$path 必须在手表布局下提供 edgeAction —— 否则这块主操作没有任何入口",
+                s.contains("edgeAction = if (watchLayout)"),
+            )
+        }
+    }
+
+    @Test
+    fun `对话页的输入必须挂在屏幕下缘的边键上`() {
+        val chat = code("ui/screens/chat/ChatScreen.kt")
+        assertTrue(
+            "输入动作要用 WearEdgeAction（官方 EdgeButton），不能再用横贯的底栏 —— " +
+                "圆底那一行只有屏宽一半的弦，横条两端必被切掉",
+            chat.contains("WearEdgeAction("),
+        )
+        assertTrue(
+            "手表布局不能同时给 bottom：一个屏幕只有一个下缘",
+            chat.contains("bottom = if (watchLayout)"),
+        )
+    }
+
+    @Test
     fun `WatchScaffold 必须按布局主题分派到官方骨架`() {
         val common = code("ui/components/Common.kt")
         assertTrue(

@@ -102,6 +102,13 @@ fun WatchScaffold(
      */
     fullBleed: Boolean = false,
     scrollable: Boolean = true,
+    /**
+     * 手表布局下屏幕下缘的主操作（Wear 的 `EdgeButton`）。
+     *
+     * 手机布局忽略它 —— 那边的主操作在 [bottom] 里。两套布局各用各的表达，
+     * 页面同时提供，由骨架按当前布局挑一个，页面自己不用判断。
+     */
+    edgeAction: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     /*
@@ -123,6 +130,7 @@ fun WatchScaffold(
             bottomOverlay = bottomOverlay,
             fullBleed = fullBleed,
             scrollable = scrollable,
+            edgeAction = edgeAction,
             content = content,
         )
         return

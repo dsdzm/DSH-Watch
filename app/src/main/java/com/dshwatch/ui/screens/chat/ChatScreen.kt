@@ -290,54 +290,75 @@ fun ChatScreen(
         .isWatchLayout(com.dshwatch.ui.theme.LocalLayoutTheme.current)
     WatchScaffold(
         title = conversation?.displayTitle ?: s.appName,
-        // 对话页是根：没有返回，靠右滑去设置（手表布局改为返回会话列表）
-        onBack = if (watchLayout) ({ nav.push(Screen.Sessions) }) else null,
+        // 对话页是根：没有返回，靠右滑去设置
+        onBack = null,
         actions = {
-            if (!watchLayout) {
-                /*
-                 * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
-                 *
-                 * 圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap —— 圆屏顶栏那一行
-                 * 的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
-                 *
-                 * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
-                 * 只有图标和标题，不和内容争地盘。
-                 */
-                val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
-                    { icon, desc, onClick ->
-                        if (round) {
-                            CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
-                        } else {
-                            IconTap(icon = icon, contentDescription = desc, onClick = onClick)
-                        }
+            /*
+             * 四颗：历史 / 新建 / 切换模式 / 设置。
+             *
+             * 手表布局下它们**不是**顶栏的一部分，而是骨架排在标题下的内容行
+             * （见 WearScreen）—— 跟着消息一起滚走，不占正文，也不会被圆周切掉。
+             * 圆屏用 32dp 的 CircleIconTap，四颗合计 128dp，在 206dp 的表盘上
+             * 正好落在最宽那一行的弦内。
+             */
+            val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
+                { icon, desc, onClick ->
+                    if (round) {
+                        CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                    } else {
+                        IconTap(icon = icon, contentDescription = desc, onClick = onClick)
                     }
-                tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
-                if (codingScene) {
-                    tap(Icons.Outlined.Add, s.newChat) {
-                        // 显式写死 scene：默认值 "" 在引擎里等同 coding，
-                        // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
-                        scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
-                    }
-                    tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
                 }
-                tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
+            tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
+            if (codingScene) {
+                tap(Icons.Outlined.Add, s.newChat) {
+                    // 显式写死 scene：默认值 "" 在引擎里等同 coding，
+                    // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
+                    scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
+                }
+                tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
             }
+            tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         // 圆屏的底栏是 46dp 圆 FAB，浮在内容上，不占竖向空间
         bottomOverlay = round,
         // 消息区本身就是 LazyColumn + weight(1f)，不能由骨架再套一层滚动
         scrollable = false,
         fullBleed = true,
-        bottom = {
-            ChatBottomBar(
-                settings = settings,
-                streaming = streaming,
-                round = round,
-                onOpenInput = { nav.push(Screen.Input()) },
-                onSend = { nav.push(Screen.Input()) },
-                onStop = { engine.stop() },
-                onModelClick = { showModelPicker = true },
-            )
+        /*
+         * 手表布局的输入不再是底栏，而是屏幕下缘的边键（Wraive 的做法）：
+         * 横贯的底栏在最下面那一行只有屏宽一半的弦，必然被圆啃掉两端。
+         */
+        edgeAction = if (watchLayout) {
+            {
+                com.dshwatch.ui.wear.WearEdgeAction(
+                    onClick = { if (streaming) engine.stop() else nav.push(Screen.Input()) },
+                    danger = streaming,
+                ) {
+                    androidx.wear.compose.material3.Icon(
+                        imageVector = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
+                        contentDescription = if (streaming) s.stop else s.inputHint,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        } else {
+            null
+        },
+        bottom = if (watchLayout) {
+            null
+        } else {
+            {
+                ChatBottomBar(
+                    settings = settings,
+                    streaming = streaming,
+                    round = round,
+                    onOpenInput = { nav.push(Screen.Input()) },
+                    onSend = { nav.push(Screen.Input()) },
+                    onStop = { engine.stop() },
+                    onModelClick = { showModelPicker = true },
+                )
+            }
         },
     ) {
         if (provider == null) {
@@ -386,9 +407,22 @@ fun ChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    /*
+                     * 手表布局给它一个「确定的高度」，不是让它按内容长。
+                     *
+                     * 不加 weight 时它有 112dp 吉祥物 + 两行说明 + 胶囊那么高，
+                     * 超出圆屏也不报错 —— 就是画到屏幕外面被切掉（用户看到的
+                     * 「胶囊只剩一半」）。weight 把高度夹在可用范围内，
+                     * 下面的 verticalScroll 才有东西可滚。
+                     */
+                    .then(if (watchLayout) Modifier.weight(1f) else Modifier)
                     .padding(horizontal = sidePad, vertical = safePad)
                     .then(
-                        if (round) Modifier.wearVerticalScroll(rememberScrollState()) else Modifier
+                        if (round || watchLayout) {
+                            Modifier.wearVerticalScroll(rememberScrollState())
+                        } else {
+                            Modifier
+                        }
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
