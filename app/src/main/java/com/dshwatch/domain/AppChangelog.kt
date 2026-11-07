@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.15.23",
+            date = "2026-11-07",
+            highlights = listOf(
+                "新增「手表」与「手机/大屏」两套布局主题：手表布局按 Wear OS 规范重排，顶栏显示时间，内容不会越出圆周",
+                "布局主题跟随设备自动选择，也可在「外观」里手动切换",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.15.22",
             date = "2026-11-06",
             highlights = listOf(

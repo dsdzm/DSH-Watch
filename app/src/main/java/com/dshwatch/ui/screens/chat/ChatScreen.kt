@@ -280,41 +280,52 @@ fun ChatScreen(
         t
     }
 
+    /*
+     * 手表布局的顶栏放不下四颗图标：206dp 表盘那一行弦宽只有约 128dp，
+     * 返回键 40 + 四颗 40 会把标题压成 0 宽。所以手表布局下改成
+     * 「返回 → 会话列表」，图标全部收掉，设置从列表面进 —— 这也是 Wear 上
+     * 更自然的层级：对话是列表的下级，不是根。
+     */
+    val watchLayout = com.dshwatch.domain.model.LayoutThemes
+        .isWatchLayout(com.dshwatch.ui.theme.LocalLayoutTheme.current)
     WatchScaffold(
         title = conversation?.displayTitle ?: s.appName,
-        // 对话页是根：没有返回，靠右滑去设置
-        onBack = null,
+        // 对话页是根：没有返回，靠右滑去设置（手表布局改为返回会话列表）
+        onBack = if (watchLayout) ({ nav.push(Screen.Sessions) }) else null,
         actions = {
-            /*
-             * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
-             *
-             * 圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap —— 圆屏顶栏那一行
-             * 的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
-             *
-             * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
-             * 只有图标和标题，不和内容争地盘。
-             */
-            val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
-                { icon, desc, onClick ->
-                    if (round) {
-                        CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
-                    } else {
-                        IconTap(icon = icon, contentDescription = desc, onClick = onClick)
+            if (!watchLayout) {
+                /*
+                 * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
+                 *
+                 * 圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap —— 圆屏顶栏那一行
+                 * 的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
+                 *
+                 * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
+                 * 只有图标和标题，不和内容争地盘。
+                 */
+                val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
+                    { icon, desc, onClick ->
+                        if (round) {
+                            CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                        } else {
+                            IconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                        }
                     }
+                tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
+                if (codingScene) {
+                    tap(Icons.Outlined.Add, s.newChat) {
+                        // 显式写死 scene：默认值 "" 在引擎里等同 coding，
+                        // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
+                        scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
+                    }
+                    tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
                 }
-            tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
-            if (codingScene) {
-                tap(Icons.Outlined.Add, s.newChat) {
-                    // 显式写死 scene：默认值 "" 在引擎里等同 coding，
-                    // 但会话一旦被标成 tavern 再回来新建，就得靠这个字段把场景掰回来。
-                    scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
-                }
-                tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
+                tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
             }
-            tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         // 圆屏的底栏是 46dp 圆 FAB，浮在内容上，不占竖向空间
         bottomOverlay = round,
+        fullBleed = true,
         bottom = {
             ChatBottomBar(
                 settings = settings,

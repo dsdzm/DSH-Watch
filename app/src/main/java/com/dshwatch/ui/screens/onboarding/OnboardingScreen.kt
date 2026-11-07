@@ -584,12 +584,17 @@ private fun ThemeStep(
      */
     val effectiveScale = LocalUiScale.current
     val scaleText = String.format(java.util.Locale.US, "%.2f×", effectiveScale)
+    // 上限由布局主题决定（手表布局 1.0、手机布局 1.15），见 UiScale.cap
+    val maxScale = com.dshwatch.ui.theme.LocalUiScaleMax.current
+    val range = com.dshwatch.domain.UiScale.MIN..
+        maxScale.coerceAtLeast(com.dshwatch.domain.UiScale.MIN + 0.02f)
     WatchSlider(
         value = (if (settings.uiScaleAuto) effectiveScale else settings.uiScale)
-            .coerceIn(com.dshwatch.domain.UiScale.MIN, com.dshwatch.domain.UiScale.MAX),
+            .coerceIn(range.start, range.endInclusive),
         onChange = onPickUiScale,
-        valueRange = com.dshwatch.domain.UiScale.MIN..com.dshwatch.domain.UiScale.MAX,
-        steps = 10,
+        valueRange = range,
+        steps = com.dshwatch.domain.UiScale.sliderSteps(range),
+        enabled = range.endInclusive - range.start > 0.005f,
         label = s.uiScale,
         valueText = if (settings.uiScaleAuto) "自动 $scaleText" else scaleText,
     )

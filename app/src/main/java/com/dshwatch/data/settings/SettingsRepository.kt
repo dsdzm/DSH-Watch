@@ -123,6 +123,12 @@ class SettingsRepository(
         val appearance = com.dshwatch.domain.model.Appearances.of(out.appearance)
         if (appearance != out.appearance) out = out.copy(appearance = appearance)
 
+        // 归一化布局主题：未知 id（或老存档没这个字段）落回 auto。
+        // 这里**只做合法性**，不解析成 watch/phone —— 那需要设备画像，
+        // 而 migrate 拿不到 Context，和 uiScale 的 resolve 放在 MainActivity 是同一个原因。
+        val layout = com.dshwatch.domain.model.LayoutThemes.of(out.layoutTheme)
+        if (layout != out.layoutTheme) out = out.copy(layoutTheme = layout)
+
         /*
          * v1.15.22：字号并入界面大小。
          *

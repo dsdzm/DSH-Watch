@@ -58,6 +58,7 @@ fun ProvidersScreen(
                 nav.push(Screen.ProviderEdit(null))
             }
         },
+        fullBleed = true,
     ) {
         if (settings.providers.isEmpty()) {
             EmptyState(title = s.addProvider, hint = s.typeOpenAiHint)

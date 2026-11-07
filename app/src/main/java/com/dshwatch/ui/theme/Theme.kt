@@ -80,6 +80,27 @@ val LocalUiScale = staticCompositionLocalOf { 1f }
 val LocalUiScaleRecommended = staticCompositionLocalOf { 1f }
 
 /**
+ * 当前生效的布局主题（只会是 [com.dshwatch.domain.model.LayoutThemes.WATCH] 或 `PHONE`）。
+ *
+ * 组件用它决定「这次按哪套尺寸画」：
+ *  - 骨架：`WatchScaffold` 据此分派到 `WearM3Scaffold` 还是旧的 `CircleScaffold`
+ *  - 控件：按钮高度、开关尺寸、行距
+ *  - 页面：`ChatScreen` 的气泡宽度、`InputScreen` 的容器结构
+ *
+ * 用 String 而不是布尔：以后若加第三套布局（例如桌面/平板），不用再改一遍所有
+ * 调用点的真假判断。比较时统一走 [com.dshwatch.domain.model.LayoutThemes.isWatchLayout]。
+ */
+val LocalLayoutTheme = staticCompositionLocalOf { com.dshwatch.domain.model.LayoutThemes.WATCH }
+
+/**
+ * 当前布局下界面缩放的上限。
+ *
+ * 手表布局是 1.0（按屏重排，不需要压缩），手机布局是 1.15。
+ * 设置页的滑块上限必须用它，否则会出现「滑到 1.15 但实际按 1.0 算」的错位。
+ */
+val LocalUiScaleMax = staticCompositionLocalOf { com.dshwatch.domain.UiScale.MAX }
+
+/**
  * 手表的尺寸常量。
  * 目标屏宽按 200dp 设计（1.4~1.8 寸方表常见换算值），
  * 所有点击区域 ≥ 40dp，兼顾手指而不是笔尖。
@@ -156,6 +177,14 @@ fun DshWatchTheme(
      * 比例恒定 ⇒ 数学上不可能出现「字比卡片大」。
      */
     uiScale: Float = 1f,
+    /**
+     * 布局主题，已解析成 WATCH / PHONE。默认手表：这个 App 的第一场景就是圆表。
+     */
+    layoutTheme: String = com.dshwatch.domain.model.LayoutThemes.WATCH,
+    /**
+     * 当前布局下的缩放上限，由 [com.dshwatch.domain.UiScale.cap] 算出。
+     */
+    uiScaleMax: Float = com.dshwatch.domain.UiScale.MAX,
     appLanguage: String = AppLanguage.SYSTEM,
     perf: PerfProfile = PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID),
     profile: DeviceProfile = DeviceProfileDefaults.fallback,
@@ -236,9 +265,11 @@ fun DshWatchTheme(
         com.dshwatch.domain.UiScale.rescale(profile, uiScale)
     }
 
-    // 推荐值要用**缩放前**的宽度算：profile 是 MainActivity 传进来的原始画像
-    val uiScaleRecommended = remember(profile) {
-        com.dshwatch.domain.UiScale.recommended(profile.screenWidthDp)
+    // 推荐值要用**缩放前**的宽度算：profile 是 MainActivity 传进来的原始画像。
+    // 手表布局按屏幕重排，不压缩 320dp 设计，所以推荐值就是 1.0。
+    val uiScaleRecommended = remember(profile, layoutTheme) {
+        if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(layoutTheme)) 1f
+        else com.dshwatch.domain.UiScale.recommended(profile.screenWidthDp)
     }
 
     // 语言要跟着「设置值」和「配置里的 locale」一起变：
@@ -255,13 +286,19 @@ fun DshWatchTheme(
         LocalPerf provides perf,
         LocalDeviceProfile provides scaledProfile,
         LocalUiScale provides uiScale,
+        LocalUiScaleMax provides uiScaleMax,
+        LocalLayoutTheme provides layoutTheme,
         LocalUiScaleRecommended provides uiScaleRecommended,
         LocalStrings provides strings,
         LocalGlass provides glass,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = DshTypography,
+            typography = if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(layoutTheme)) {
+                WearTypography
+            } else {
+                DshTypography
+            },
             shapes = DshShapes,
         ) {
             if (glass) {

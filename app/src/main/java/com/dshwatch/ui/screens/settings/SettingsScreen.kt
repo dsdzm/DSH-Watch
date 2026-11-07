@@ -75,7 +75,7 @@ fun SettingsScreen(
      * 顶部 56dp 的标题栏、列表里 16dp 的左右 padding 全是方屏的数值 ——
      * 用户看到的就是「设置列表没有适配」：卡片顶到圆周外、上下两端被切掉。
      */
-    WatchScaffold(title = s.navSettings, onBack = { nav.pop() }) {
+    WatchScaffold(title = s.navSettings, onBack = { nav.pop() }, fullBleed = true) {
         WearList(
             state = com.dshwatch.ui.wear.rememberKeptListState("settings"),
             verticalArrangement = Arrangement.spacedBy(8.dp),

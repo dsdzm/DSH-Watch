@@ -167,6 +167,13 @@ fun RoleplayChatScreen(
         )
     }
 
+    /*
+     * 手表布局的顶栏弦宽只有约 128dp，三颗图标会把标题压成 0 宽。
+     * 这里去掉「切回编程场景」那颗 —— 它是回根页才能用的跳转，不是高频操作；
+     * 记忆和设置留下，两者都是「聊到一半就要用」的入口。
+     */
+    val watchLayout = com.dshwatch.domain.model.LayoutThemes
+        .isWatchLayout(com.dshwatch.ui.theme.LocalLayoutTheme.current)
     WatchScaffold(
         title = card?.displayName ?: if (isWriting) "写作" else "酒馆",
         onBack = { nav.popToRoot() },
@@ -177,11 +184,13 @@ fun RoleplayChatScreen(
                 }
                 showInfo = !showInfo
             }
-            ScenePill(scene) {
-                scope.launch {
-                    container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
+            if (!watchLayout) {
+                ScenePill(scene) {
+                    scope.launch {
+                        container.settingsRepo.update { it.copy(useScene = Scenes.CODING) }
+                    }
+                    nav.popToRoot()
                 }
-                nav.popToRoot()
             }
             // 对话页也要能进设置：这一页是从角色列表 push 上来的，
             // 如果只在列表页放设置，用户聊到一半想改模型/外观就得先退出去。
@@ -190,6 +199,7 @@ fun RoleplayChatScreen(
                 nav.push(Screen.Settings)
             }
         },
+        fullBleed = true,
         bottom = {
             RoleplayInputBar(
                 streaming = streaming,

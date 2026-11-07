@@ -104,6 +104,50 @@ class UiScaleTest {
     }
 
     @Test
+    fun `watch layout caps the scale at one`() {
+        // 手表布局按屏幕重排，1.0 就是「刚好」；放大只会把内容推出圆周。
+        // 这是「拉太大移出去」的根治点，不能退化成 MAX。
+        assertThat(UiScale.cap(206, watchLayout = true)).isEqualTo(1f)
+        assertThat(UiScale.cap(320, watchLayout = true)).isEqualTo(1f)
+        // 手机布局仍允许在大屏上放大到上限
+        assertThat(UiScale.cap(206, watchLayout = false)).isEqualTo(UiScale.MAX)
+    }
+
+    @Test
+    fun `watch slider cannot exceed one`() {
+        val range = UiScale.sliderRange(206, watchLayout = true)
+        assertThat(range.start).isEqualTo(UiScale.MIN)
+        assertThat(range.endInclusive).isEqualTo(1f)
+        // 0.62~1.0 跨度 0.38，0.05 一档 → 7 段 → steps = 7 - 1
+        assertThat(UiScale.sliderSteps(range)).isIn(6..8)
+    }
+
+    @Test
+    fun `phone slider keeps the old ceiling`() {
+        val range = UiScale.sliderRange(320, watchLayout = false)
+        assertThat(range.endInclusive).isEqualTo(UiScale.MAX)
+        assertThat(UiScale.sliderSteps(range)).isAtLeast(1)
+    }
+
+    @Test
+    fun `degenerate range still yields a usable step count`() {
+        // 极窄屏 + 手表布局：区间可能只剩几百分之一，steps 不能是负数或 0 以外的怪值
+        val range = UiScale.sliderRange(190, watchLayout = true)
+        assertThat(UiScale.sliderSteps(range)).isAtLeast(0)
+        assertThat(UiScale.sliderSteps(UiScale.MIN..UiScale.MIN)).isEqualTo(0)
+    }
+
+    @Test
+    fun `resolve clamps to the layout cap`() {
+        // 存档里存着 1.15，但当前是手表布局 → 生效值只能是 1.0
+        assertThat(UiScale.resolve(1.15f, autoEnabled = false, widthDp = 206, cap = 1f))
+            .isEqualTo(1f)
+        // 自动模式下也不能超过 cap
+        assertThat(UiScale.resolve(1f, autoEnabled = true, widthDp = 320, cap = 1f, fitValue = 1f))
+            .isEqualTo(1f)
+    }
+
+    @Test
     fun `corner inset grows in dp so its physical size stays put`() {
         val scaled = UiScale.rescale(wide, 0.64f)
         // 16dp @ scale 0.64 → 25dp，物理像素不变，圆角才避得开

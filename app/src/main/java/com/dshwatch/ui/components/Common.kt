@@ -54,6 +54,7 @@ import com.dshwatch.domain.model.TokenUsage
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalGlass
+import com.dshwatch.ui.theme.LocalLayoutTheme
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
@@ -95,14 +96,39 @@ fun WatchScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     bottom: (@Composable () -> Unit)? = null,
     bottomOverlay: Boolean = false,
+    /**
+     * 内容是否吃满宽度。只有列表页（`WearList`）该传 true ——
+     * 它靠逐项缩放淡出保证不越圆，再套内接矩形就白窄了。
+     */
+    fullBleed: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     /*
-     * 圆屏走另一套骨架。
+     * 布局主题在这里分派 —— 这是**唯一**的分派点。
      *
-     * 不是「同一套换个 padding」—— 圆屏的顶栏必须整体下压（最顶一行的可用宽度是 0），
-     * 横向边距必须由弦长算出（写死 16dp 会把 174dp 的可用宽压到 142dp），
-     * 图标必须收到 40dp（48dp 放不下两个）。三条都是硬约束，见 CircleScaffold 的注释。
+     * 20 多个页面都调这个函数，它们只关心「给我一个带标题和底栏的壳」。
+     * 把两套骨架放在这后面，页面签名一个都不用改，也就不可能在某个页面上
+     * 出现「一半手表一半手机」的拼贴。
+     */
+    if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
+        com.dshwatch.ui.wear.WearM3Scaffold(
+            title = title,
+            onBack = onBack,
+            subtitle = subtitle,
+            actions = actions,
+            bottom = bottom,
+            bottomOverlay = bottomOverlay,
+            fullBleed = fullBleed,
+            content = content,
+        )
+        return
+    }
+    /*
+     * 手机/大屏布局：1.15.22 及以前那套。
+     *
+     * 圆屏走 CircleScaffold —— 不是「同一套换个 padding」：顶栏必须整体下压
+     * （最顶一行的可用宽度是 0），横向边距必须由弦长算出，图标必须收到 40dp。
+     * 三条都是硬约束，见 CircleScaffold 的注释。
      */
     if (com.dshwatch.ui.wear.LocalCircle.current != null) {
         CircleScaffold(
@@ -357,7 +383,13 @@ fun SettingRow(
                 .fillMaxWidth()
                 .heightIn(min = WatchDimens.touchMin)
                 .then(if (onClick != null) Modifier.tap(onClick = withHaptic(onClick)) else Modifier)
-                .padding(vertical = 7.dp),
+                // 手表布局的行距收到 4dp：Wear 的列表节奏比手机紧，
+                // 且 48dp 的最小行高已经保证了触控目标
+                .padding(
+                    vertical = if (
+                        com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)
+                    ) 4.dp else 7.dp,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -640,7 +672,13 @@ fun Chip(
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall,
+            // 32dp 高的 chip 里，10sp 的 labelSmall 在手表上等于看不清；
+            // Wear 的 chip 文案用 labelLarge（14sp），行高 18dp 仍装得下
+            style = if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
+                MaterialTheme.typography.labelLarge
+            } else {
+                MaterialTheme.typography.labelSmall
+            },
             color = if (selected) {
                 MaterialTheme.colorScheme.onPrimaryContainer
             } else {
@@ -659,10 +697,12 @@ fun PrimaryButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // 手表布局按 Wear M3 的 48dp 按钮；手机布局沿用原来的 54dp（更厚的点击面）
+    val watch = com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(WatchDimens.buttonHeight + 6.dp)
+            .height(if (watch) WatchDimens.buttonHeight else WatchDimens.buttonHeight + 6.dp)
             .glassSurface(
                 shape = CircleShape,
                 tint = if (enabled) {
@@ -692,7 +732,14 @@ fun PrimaryButton(
         }
         Text(
             text = text,
-            style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
+            // 手表布局用 typography 自己的 titleSmall（16sp，Wear 规范值）；
+            // 手机布局仍按旧排版压到 15sp —— 两者差 1sp，但语义不同：一个是规范值，
+            // 一个是当年为了在 320dp 里塞下按钮手调的。
+            style = if (watch) {
+                MaterialTheme.typography.titleSmall
+            } else {
+                MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp)
+            },
             color = if (enabled) {
                 MaterialTheme.colorScheme.onPrimary
             } else {

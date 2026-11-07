@@ -168,6 +168,7 @@ fun WorkspaceScreen(
                 }
             }
         },
+        fullBleed = true,
     ) {
         SegmentedRow(
             options = listOf(s.workspaceFilterAll, s.workspaceArtifacts, s.workspaceSource),

@@ -61,7 +61,7 @@ fun HelpListScreen(nav: WatchNavigator) {
     val s = LocalStrings.current
     val chinese = s === Zh
 
-    WatchScaffold(title = s.helpTitle, onBack = { nav.pop() }) {
+    WatchScaffold(title = s.helpTitle, onBack = { nav.pop() }, fullBleed = true) {
         WearList(
             state = rememberKeptListState("help"),
             verticalArrangement = Arrangement.spacedBy(8.dp),
