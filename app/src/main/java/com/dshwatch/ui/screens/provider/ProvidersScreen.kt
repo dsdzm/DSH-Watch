@@ -30,6 +30,7 @@ import com.dshwatch.domain.model.ProviderType
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.components.WatchListScaffold
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
@@ -50,7 +51,7 @@ fun ProvidersScreen(
     // activeProviderId 为空时 settings.activeProvider 会退化成第一个，这里保持一致
     val activeId = settings.activeProvider?.id.orEmpty()
 
-    WatchScaffold(
+    WatchListScaffold(
         title = s.providersTitle,
         onBack = { nav.pop() },
         actions = {
@@ -58,17 +59,14 @@ fun ProvidersScreen(
                 nav.push(Screen.ProviderEdit(null))
             }
         },
-        fullBleed = true,
+        state = com.dshwatch.ui.wear.rememberKeptListState("providers"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (settings.providers.isEmpty()) {
-            EmptyState(title = s.addProvider, hint = s.typeOpenAiHint)
-            return@WatchScaffold
-        }
-        WearList(
-            state = com.dshwatch.ui.wear.rememberKeptListState("providers"),
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+            item {
+                EmptyState(title = s.addProvider, hint = s.typeOpenAiHint)
+            }
+        } else {
             item(key = "__hint__") {
                 Text(
                     text = "聊天固定使用「${settings.activeProvider?.name ?: "未配置"}」，点下面的「${s.setActive}」可切换",
@@ -94,7 +92,6 @@ fun ProvidersScreen(
         }
     }
 }
-
 @Composable
 private fun ProviderRow(
     provider: Provider,

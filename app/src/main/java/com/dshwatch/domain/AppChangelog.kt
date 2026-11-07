@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.15.24",
+            date = "2026-11-07",
+            highlights = listOf(
+                "手表布局改用官方 ScreenScaffold：圆顶弧线时间、右侧滚动指示器、下缘返回键都由 Wear M3 提供",
+                "标题改为随内容滚动的 ListHeader，不再占用固定顶栏；设置与帮助列表换成官方 Card",
+                "按钮、开关、图标键换成 Wear M3 组件，尺寸与按下形变跟随系统规范",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.15.23",
             date = "2026-11-07",
             highlights = listOf(

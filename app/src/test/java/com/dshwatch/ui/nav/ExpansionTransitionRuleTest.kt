@@ -256,9 +256,13 @@ class ExpansionTransitionRuleTest {
             "ui/screens/workspace/WorkspaceScreen.kt" to "workspace",
         ).forEach { (path, key) ->
             val s = stripComments(read(path))
+            // 列表页用 rememberKeptListState；工作区改成表单式滚动后
+            // 用的是 rememberKeptScrollState —— 两条路都必须带记忆
             assertTrue(
-                "$path 必须用 rememberKeptListState(\"$key\")，否则返回后跳回顶部",
-                s.contains("rememberKeptListState(\"$key\")"),
+                "$path 必须用 rememberKeptListState(\"$key\") 或 rememberKeptScrollState(\"$key\")，" +
+                    "否则返回后跳回顶部",
+                s.contains("rememberKeptListState(\"$key\")") ||
+                    s.contains("rememberKeptScrollState(\"$key\")"),
             )
         }
     }

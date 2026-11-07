@@ -39,6 +39,7 @@ import com.dshwatch.domain.help.HelpContent
 import com.dshwatch.domain.help.HelpKind
 import com.dshwatch.domain.help.HelpTopic
 import com.dshwatch.ui.components.WatchGhostButton
+import com.dshwatch.ui.components.WatchListScaffold
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.WearCardRow
 import com.dshwatch.ui.i18n.LocalStrings
@@ -61,11 +62,12 @@ fun HelpListScreen(nav: WatchNavigator) {
     val s = LocalStrings.current
     val chinese = s === Zh
 
-    WatchScaffold(title = s.helpTitle, onBack = { nav.pop() }, fullBleed = true) {
-        WearList(
-            state = rememberKeptListState("help"),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    WatchListScaffold(
+        title = s.helpTitle,
+        onBack = { nav.pop() },
+        state = rememberKeptListState("help"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
             items(HelpContent.topics.size) { index ->
                 val topic = HelpContent.topics[index]
                 WearCardRow(
@@ -76,7 +78,6 @@ fun HelpListScreen(nav: WatchNavigator) {
                     onClick = { nav.push(Screen.HelpTopic(topic.id)) },
                 )
             }
-        }
     }
 }
 

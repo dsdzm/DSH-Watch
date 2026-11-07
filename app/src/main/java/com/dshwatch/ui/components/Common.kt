@@ -93,7 +93,7 @@ fun WatchScaffold(
     title: String,
     onBack: (() -> Unit)? = null,
     subtitle: String? = null,
-    actions: @Composable RowScope.() -> Unit = {},
+    actions: (@Composable RowScope.() -> Unit)? = null,
     bottom: (@Composable () -> Unit)? = null,
     bottomOverlay: Boolean = false,
     /**
@@ -101,6 +101,7 @@ fun WatchScaffold(
      * 它靠逐项缩放淡出保证不越圆，再套内接矩形就白窄了。
      */
     fullBleed: Boolean = false,
+    scrollable: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     /*
@@ -109,9 +110,11 @@ fun WatchScaffold(
      * 20 多个页面都调这个函数，它们只关心「给我一个带标题和底栏的壳」。
      * 把两套骨架放在这后面，页面签名一个都不用改，也就不可能在某个页面上
      * 出现「一半手表一半手机」的拼贴。
+     *
+     * 手表这一侧是官方 `ScreenScaffold`，不是自绘骨架 —— 详见 WearScreen 的注释。
      */
     if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
-        com.dshwatch.ui.wear.WearM3Scaffold(
+        com.dshwatch.ui.wear.WearScreen(
             title = title,
             onBack = onBack,
             subtitle = subtitle,
@@ -119,10 +122,12 @@ fun WatchScaffold(
             bottom = bottom,
             bottomOverlay = bottomOverlay,
             fullBleed = fullBleed,
+            scrollable = scrollable,
             content = content,
         )
         return
     }
+    val rowActions: @Composable RowScope.() -> Unit = actions ?: {}
     /*
      * 手机/大屏布局：1.15.22 及以前那套。
      *
@@ -135,7 +140,7 @@ fun WatchScaffold(
             title = title,
             onBack = onBack,
             subtitle = subtitle,
-            actions = actions,
+            actions = rowActions,
             bottom = bottom,
             bottomOverlay = bottomOverlay,
             content = content,
@@ -150,7 +155,7 @@ fun WatchScaffold(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        WatchTopBar(title = title, onBack = onBack, subtitle = subtitle, actions = actions)
+        WatchTopBar(title = title, onBack = onBack, subtitle = subtitle, actions = rowActions)
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -159,6 +164,58 @@ fun WatchScaffold(
             content = content,
         )
         bottom?.invoke()
+    }
+}
+
+/**
+ * 列表页骨架：内容是一个 [com.dshwatch.ui.wear.WearList]。
+ *
+ * ## 为什么列表页要单独一个入口
+ *
+ * `ScreenScaffold` 的滚动指示器和 `EdgeButton` 的收起动画，都靠**和列表同一个**
+ * 滚动状态驱动。所以列表的 state 必须由骨架创建、再交给内容 —— 而
+ * `WatchScaffold` 的 `content` 是 `ColumnScope`，拿不到这个 state。
+ *
+ * 手机布局下它就是「WatchScaffold + 一个填满剩余高度的列表」，和原来写法等价；
+ * 手表布局下换成 `WearListScreen`（官方 `TransformingLazyColumn` + `ListHeader`）。
+ */
+@Composable
+fun WatchListScaffold(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    subtitle: String? = null,
+    actions: (@Composable RowScope.() -> Unit)? = null,
+    bottom: (@Composable () -> Unit)? = null,
+    state: androidx.wear.compose.foundation.lazy.TransformingLazyColumnState =
+        androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState(),
+    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
+    content: com.dshwatch.ui.wear.WearListScope.() -> Unit,
+) {
+    if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
+        com.dshwatch.ui.wear.WearListScreen(
+            title = title,
+            onBack = onBack,
+            subtitle = subtitle,
+            actions = actions,
+            bottom = bottom,
+            state = state,
+            verticalArrangement = verticalArrangement,
+            content = content,
+        )
+        return
+    }
+    WatchScaffold(
+        title = title,
+        onBack = onBack,
+        subtitle = subtitle,
+        actions = actions,
+        bottom = bottom,
+        fullBleed = true,
+    ) {
+        com.dshwatch.ui.wear.WearList(
+            state = state,
+            verticalArrangement = verticalArrangement,
+        ) { content() }
     }
 }
 
@@ -214,6 +271,24 @@ fun IconTap(
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
+        /*
+         * Wear M3 的 IconButton：自带 52dp 触控目标与官方形变，
+         * 这里收成 40dp 是为了顶栏一行能放下 3~4 颗（206dp 的表盘放不下 4×52）。
+         */
+        androidx.wear.compose.material3.IconButton(
+            onClick = withHaptic(onClick),
+            modifier = Modifier.size(40.dp),
+            enabled = enabled,
+        ) {
+            androidx.wear.compose.material3.Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        return
+    }
     Box(
         modifier = Modifier
             .size(WatchDimens.iconButton)
@@ -433,6 +508,30 @@ fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    if (com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)) {
+        /*
+         * 手表布局用官方 SwitchButton：整行就是一个可点的开关卡片，
+         * 开关本体在右侧，点击任意处都能切换 —— 这是 Wear 的列表项语义。
+         * 自绘的「文字 + M3 Switch」在 206dp 的表盘上会把开关挤成 30dp 宽。
+         */
+        androidx.wear.compose.material3.SwitchButton(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = {
+                androidx.wear.compose.material3.Text(text = title, maxLines = 2)
+            },
+            secondaryLabel = subtitle?.takeIf { it.isNotBlank() }?.let { sub ->
+                {
+                    androidx.wear.compose.material3.Text(
+                        text = sub,
+                        maxLines = 2,
+                    )
+                }
+            },
+        )
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -699,6 +798,32 @@ fun PrimaryButton(
 ) {
     // 手表布局按 Wear M3 的 48dp 按钮；手机布局沿用原来的 54dp（更厚的点击面）
     val watch = com.dshwatch.domain.model.LayoutThemes.isWatchLayout(LocalLayoutTheme.current)
+    if (watch) {
+        /*
+         * 手表布局直接用官方 Button。
+         *
+         * 不自己画「胶囊 + 玻璃 + 光斑」：Wear M3 的按钮高度、圆角、按下形变
+         * 都是 `ButtonDefaults` 里算好的，自绘版本只会看起来「像但不是」。
+         * 文字必须用 Wear 的 Text —— 它读的是 Wear 的 LocalContentColor，
+         * 手机 Text 在 primary 容器里会拿到 onSurface，黑底黑字。
+         */
+        androidx.wear.compose.material3.Button(
+            onClick = withHaptic(onClick),
+            modifier = modifier.fillMaxWidth(),
+            enabled = enabled,
+        ) {
+            if (icon != null) {
+                androidx.wear.compose.material3.Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            androidx.wear.compose.material3.Text(text = text, maxLines = 1)
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()

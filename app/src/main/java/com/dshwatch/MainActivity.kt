@@ -133,11 +133,27 @@ class MainActivity : ComponentActivity() {
                             null
                         }
                         CompositionLocalProvider(LocalCircle provides circle) {
-                            AppRoot(
-                                container = container,
-                                settings = settings,
-                                nav = rememberWatchNavigator(),
-                            )
+                            /*
+                             * 手表布局套一层 Wear M3 外壳（官方 AppScaffold + 圆顶时间）。
+                             *
+                             * 必须在 AppRoot **外面**：AppScaffold 的 TimeText 是按整个
+                             * 屏幕的弧线定位的，包在页面里会按页面尺寸算，弧就歪了。
+                             */
+                            if (watchLayout) {
+                                com.dshwatch.ui.wear.WearAppFrame {
+                                    AppRoot(
+                                        container = container,
+                                        settings = settings,
+                                        nav = rememberWatchNavigator(),
+                                    )
+                                }
+                            } else {
+                                AppRoot(
+                                    container = container,
+                                    settings = settings,
+                                    nav = rememberWatchNavigator(),
+                                )
+                            }
                         }
                     }
                 }

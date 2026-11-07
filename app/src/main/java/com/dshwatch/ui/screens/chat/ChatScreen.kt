@@ -325,6 +325,8 @@ fun ChatScreen(
         },
         // 圆屏的底栏是 46dp 圆 FAB，浮在内容上，不占竖向空间
         bottomOverlay = round,
+        // 消息区本身就是 LazyColumn + weight(1f)，不能由骨架再套一层滚动
+        scrollable = false,
         fullBleed = true,
         bottom = {
             ChatBottomBar(

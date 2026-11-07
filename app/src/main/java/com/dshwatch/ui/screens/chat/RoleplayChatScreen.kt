@@ -200,6 +200,8 @@ fun RoleplayChatScreen(
             }
         },
         fullBleed = true,
+        // 消息区自带 LazyColumn，骨架不再套滚动
+        scrollable = false,
         bottom = {
             RoleplayInputBar(
                 streaming = streaming,

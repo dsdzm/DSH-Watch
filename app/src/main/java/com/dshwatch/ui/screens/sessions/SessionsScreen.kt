@@ -60,6 +60,7 @@ import com.dshwatch.ui.components.HintText
 import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.components.ShareResult
 import com.dshwatch.ui.components.WatchGhostButton
+import com.dshwatch.ui.components.WatchListScaffold
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.shareFile
 import com.dshwatch.ui.components.tap
@@ -119,7 +120,7 @@ fun SessionsScreen(
         }
     }
 
-    WatchScaffold(
+    WatchListScaffold(
         title = if (filtered && cardTitle.isNotBlank()) cardTitle else s.sessionsTitle,
         onBack = { nav.pop() },
         actions = {
@@ -145,15 +146,9 @@ fun SessionsScreen(
                 }
             }
         },
-        fullBleed = true,
+        state = com.dshwatch.ui.wear.rememberKeptListState("sessions"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 外层 WatchScaffold 已经给了横向留白，这里只补上下的呼吸空间，
-        // 否则会叠成两层内边距，在 205dp 的表盘上白白浪费 20dp 宽度
-        WearList(
-            state = com.dshwatch.ui.wear.rememberKeptListState("sessions"),
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
             /*
              * 空列表也要把「导入对话」摆出来 —— 这是最需要它的时刻：
              * 用户手里只有一段从别处整理的记录，还没有任何会话。
@@ -199,7 +194,6 @@ fun SessionsScreen(
                     onClick = { showImport = true },
                 )
             }
-        }
     }
 
     menuTarget?.let { conv ->
