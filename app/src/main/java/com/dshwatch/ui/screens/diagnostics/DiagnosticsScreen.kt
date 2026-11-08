@@ -73,12 +73,18 @@ fun DiagnosticsScreen(
         provider?.id?.let { container.keyStore.getServerToken(it) }.orEmpty()
     }
     val keyMask = remember(provider?.id) {
-        provider?.id?.let {
-            container.keyStore.masked(
-                it,
-                if (provider.type == ProviderType.DSH_SERVER) SecureKeyStore.KeyType.SERVER_TOKEN
-                else SecureKeyStore.KeyType.API_KEY,
-            )
+        provider?.let { p ->
+            // 内置项连掩码都不给：掩码照样会带出内置 Key 的前几位，
+            // 而这一栏对内置通道本来就该只写「内置通道」
+            if (p.isBuiltin) {
+                "内置通道"
+            } else {
+                container.keyStore.masked(
+                    p.id,
+                    if (p.type == ProviderType.DSH_SERVER) SecureKeyStore.KeyType.SERVER_TOKEN
+                    else SecureKeyStore.KeyType.API_KEY,
+                )
+            }
         }.orEmpty()
     }
 
