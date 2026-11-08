@@ -78,7 +78,9 @@ class SettingsRepository(
     }
 
     private fun decode(raw: String?): AppSettings {
-        if (raw.isNullOrBlank()) return AppSettings()
+        // 空存档也要走一遍 migrate：内置供应商是在迁移里注入的，
+        // 直接 return AppSettings() 会让全新安装的用户看不到它。
+        if (raw.isNullOrBlank()) return migrate(AppSettings())
         val parsed = runCatching { json.decodeFromString(AppSettings.serializer(), raw) }
             .getOrElse {
                 Logx.w("Settings", "设置解析失败，回退默认值: ${it.message}")
@@ -148,6 +150,30 @@ class SettingsRepository(
                 )
             }
             out = out.copy(uiScale = merged, fontScale = 1f)
+        }
+
+        /*
+         * 注入内置供应商。
+         *
+         * 目的很明确：新用户装完就能发第一条消息，不必先去搞一个 API Key。
+         * 这是「手表上配置一个供应商」的门槛决定的 —— 在小屏幕上敲 baseUrl、
+         * 敲 key、再点一次拉模型列表，多数人会在第二步放弃。
+         *
+         * 三个约束：
+         *  - 幂等：已经存在就什么都不做；
+         *  - 用户删得掉：删掉时置 builtinDismissed，之后不再补回来
+         *    （否则会变成「删了又出现」的鬼打墙）；
+         *  - 不抢占选择：activeProviderId 已有值时不改，只在新装时兜底。
+         */
+        if (!out.builtinDismissed &&
+            out.providers.none { it.id == com.dshwatch.domain.model.BuiltinProvider.ID }
+        ) {
+            out = out.copy(
+                providers = listOf(com.dshwatch.domain.model.BuiltinProvider.make()) + out.providers,
+                activeProviderId = out.activeProviderId.ifBlank {
+                    com.dshwatch.domain.model.BuiltinProvider.ID
+                },
+            )
         }
         return out
     }

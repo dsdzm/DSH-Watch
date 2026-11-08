@@ -98,6 +98,17 @@ class AppContainer(private val app: Context) {
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
     val backends = BackendRegistry(json)
 
+    /** 图片 / 视频生成通道，与聊天后端并列 */
+    val mediaApi = com.dshwatch.net.media.MediaApi(json)
+
+    /**
+     * 媒体落盘根目录。
+     *
+     * 放 filesDir 而不是工作空间：工作空间是给 agent 用、用户能删能改的地方，
+     * 而会话里的图是**会话数据的一部分**，删了消息就变成一张裂图。
+     */
+    val mediaRoot: File = File(app.filesDir, "media")
+
     /**
      * 应用级后台作用域。
      *
@@ -207,6 +218,8 @@ class AppContainer(private val app: Context) {
         roleCard = { id -> roleCardStore.load(id) },
         memoryReader = { id -> memoryStore.read(id) },
         json = json,
+        mediaApi = mediaApi,
+        mediaRoot = { mediaRoot },
     ).also { CrashLog.mark("对话引擎已构造") }
 
     /**

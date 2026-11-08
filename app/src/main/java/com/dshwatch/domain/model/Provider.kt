@@ -55,8 +55,20 @@ data class Provider(
     val pairedAt: Long = 0L,
     /** DSH_SERVER 专用：远端会话 id 缓存 */
     val lastRemoteSession: String = "",
+
+    /**
+     * 是否允许把图片作为多模态输入发出去。
+     *
+     * 默认开：用户主动附图就是要图生文，此时不发等于骗人。
+     * 少数中转站见到 `content` 是数组会直接 400，那种情况下用户可以在供应商页关掉，
+     * 关掉后附图仍会显示在会话里，只是不进请求。
+     */
+    val visionInput: Boolean = true,
 ) {
     val isDshServer: Boolean get() = type == ProviderType.DSH_SERVER
+
+    /** 是不是内置供应商（列表固定、不联网刷新） */
+    val isBuiltin: Boolean get() = id == BuiltinProvider.ID
 
     val hasApiKey: Boolean get() = false // 实际判断在 SecureKeyStore，避免把密钥带进内存快照
 
@@ -236,6 +248,23 @@ data class AppSettings(
      * false 时 [com.dshwatch.ui.AppRoot] 直接进引导页，不渲染任何主界面。
      */
     val onboardingDone: Boolean = false,
+
+    /**
+     * 是否看完新手教学（引导页之后的「什么是 API Key / 温度怎么调」那几页）。
+     *
+     * 与 [onboardingDone] 分开：引导页选的是外观与场景，教学页讲的是配置概念。
+     * 拆成两个标记是为了让老用户升级后**也能看到**教学页 ——
+     * 他们的 onboardingDone 早就是 true 了，合并成一个标记等于永远不展示。
+     */
+    val tutorialDone: Boolean = false,
+
+    /**
+     * 用户是否主动删掉了内置供应商。
+     *
+     * 删掉之后不再自动补回来 —— 否则每次读设置都会重新注入，
+     * 表现为「删了又出现」，比没有这个功能更让人困惑。
+     */
+    val builtinDismissed: Boolean = false,
 
     /** 屏幕形状：`auto` 跟随系统 / `round` 圆屏 / `square` 方屏 */
     val screenShape: String = ScreenShapes.AUTO,

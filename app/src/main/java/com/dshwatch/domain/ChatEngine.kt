@@ -23,6 +23,10 @@ import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.ChatTurn
 import com.dshwatch.domain.model.Conversation
 import com.dshwatch.domain.model.MessageStatus
+import com.dshwatch.domain.model.MediaKind
+import com.dshwatch.domain.model.MediaModels
+import com.dshwatch.domain.model.MediaRef
+import com.dshwatch.domain.model.MediaStatus
 import com.dshwatch.domain.model.Provider
 import com.dshwatch.domain.model.ProviderType
 import com.dshwatch.domain.model.Role
@@ -121,6 +125,15 @@ class ChatEngine(
     /** 长期记忆文档（空实现即可，默认不读不写） */
     private val memoryReader: (suspend (String) -> String)? = null,
     private val json: Json,
+    /**
+     * 图片 / 视频生成通道。
+     *
+     * 允许为 null：单测构造引擎时不关心媒体，也不该为此准备一个网络客户端。
+     * 为 null 时选中出图模型会得到一句明确的提示，而不是崩溃。
+     */
+    private val mediaApi: com.dshwatch.net.media.MediaApi? = null,
+    /** 媒体落盘根目录（通常是 filesDir/media） */
+    private val mediaRoot: () -> java.io.File = { java.io.File("") },
 ) {
 
     private val _conversation = MutableStateFlow<Conversation?>(null)
@@ -411,8 +424,31 @@ class ChatEngine(
             _banner.value = Banner("正在生成中，先停止或等待完成")
             return false
         }
-        job = appScope.launch { guardedRun { runSend(trimmed, regenerateOf = "") } }
+        job = appScope.launch {
+            guardedRun {
+                /*
+                 * 出图 / 出视频模型走另一条链。
+                 *
+                 * 判定放在这里而不是界面上：三个入口（输入页、快捷选项、重发）
+                 * 都汇聚到 send()，判一次就都对了；让每个入口各自判，
+                 * 迟早漏一个 —— 漏掉的那个会对着 image 模型发 /chat/completions，
+                 * 拿回一句「我是 image 模型，请用 /v1/images/generations」。
+                 */
+                val kind = mediaKindOfActiveModel()
+                if (kind != null) runMediaSend(trimmed, kind, reuseUserMessage = false)
+                else runSend(trimmed, regenerateOf = "")
+            }
+        }
         return true
+    }
+
+    /** 当前选中的模型若是出图 / 出视频模型，返回类型；文本模型返回 null */
+    private suspend fun mediaKindOfActiveModel(): MediaKind? {
+        val settings = settingsRepo.current()
+        val provider = settings.activeProvider ?: return null
+        if (provider.type != ProviderType.OPENAI_COMPAT) return null
+        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        return MediaModels.kindOf(model)
     }
 
     /** 重新生成某条助手消息（丢弃它及其之后的消息，用它的父消息再跑一遍） */
@@ -427,7 +463,19 @@ class ChatEngine(
         val target = list[index]
         val parent = target.parentId
         val kept = list.take(index)
-        job = appScope.launch { guardedRun { runSend(regenerateOf = parent, existingHistory = kept) } }
+        val media = target.media.firstOrNull()
+        job = appScope.launch {
+            guardedRun {
+                if (media != null && media.prompt.isNotBlank()) {
+                    // 媒体消息没有「父消息」概念：用户那条提示还在 kept 里，直接复用，
+                    // 否则会多出一条一模一样的用户消息
+                    _messages.value = kept
+                    runMediaSend(media.prompt, media.kind, reuseUserMessage = true)
+                } else {
+                    runSend(regenerateOf = parent, existingHistory = kept)
+                }
+            }
+        }
     }
 
     /** 用户主动点「停止」 */
@@ -529,6 +577,184 @@ class ChatEngine(
             _live.value = LiveDelta()
             _banner.value = Banner("发送失败：${t.javaClass.simpleName}\n${t.message.orEmpty().take(200)}")
         }
+    }
+
+    // ---------------- 媒体生成（图 / 视频） ----------------
+
+    /**
+     * 出图 / 出视频。
+     *
+     * 和 [runSend] 的差别只在「怎么拿到结果」：那边是一个字节流，这边是一次 HTTP 返回
+     * 或一个异步任务。**消息模型完全一样** —— 两条消息（用户 + 助手），助手消息上挂
+     * [MediaRef]。这样列表渲染、落盘、删除、重发都不需要为媒体写第二套逻辑。
+     *
+     * @param reuseUserMessage 重新生成时为 true：用户那条提示已经在列表里，不再追加
+     */
+    private suspend fun runMediaSend(
+        text: String,
+        kind: MediaKind,
+        reuseUserMessage: Boolean,
+    ) {
+        val settings = settingsRepo.current()
+        val provider = settings.activeProvider
+        if (provider == null) {
+            _banner.value = Banner("还没有配置供应商，请到「供应商」里新增一个")
+            return
+        }
+        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        if (model.isBlank()) {
+            _banner.value = Banner("供应商「${provider.name}」还没有选择模型")
+            return
+        }
+        val api = mediaApi
+        if (api == null) {
+            _banner.value = Banner("当前版本没有可用的媒体通道")
+            return
+        }
+        val key = keyStore.getApiKey(provider.id).orEmpty()
+        if (key.isBlank()) {
+            _banner.value = Banner("「${provider.name}」缺少 API Key，请到供应商设置里填写")
+            return
+        }
+
+        var conv = _conversation.value ?: startNew(settings)
+        val dir = java.io.File(mediaRoot(), conv.id).apply { mkdirs() }
+        val parentId = if (reuseUserMessage) _messages.value.lastOrNull()?.id.orEmpty() else ""
+
+        val userMsg = if (reuseUserMessage) {
+            null
+        } else {
+            ConversationStore.newMessage(
+                role = Role.USER,
+                content = text,
+                model = model,
+                providerId = provider.id,
+            )
+        }
+
+        val mediaId = Ids.new()
+        val placeholder = MediaRef(
+            id = mediaId,
+            kind = kind,
+            prompt = text,
+            model = model,
+            status = MediaStatus.PENDING,
+        )
+        val assistant = ConversationStore.newMessage(
+            role = Role.ASSISTANT,
+            content = "",
+            status = MessageStatus.STREAMING,
+            model = model,
+            providerId = provider.id,
+            parentId = userMsg?.id ?: parentId,
+            media = listOf(placeholder),
+        )
+
+        if (conv.title.isBlank() || conv.title == "新对话") conv = conv.copy(title = autoTitle(text))
+        conv = conv.copy(
+            providerId = provider.id,
+            model = model,
+            updatedAt = System.currentTimeMillis(),
+        )
+        _conversation.value = conv
+        _messages.value = _messages.value + listOfNotNull(userMsg) + assistant
+        _banner.value = null
+        runCatching { persist(conv) }
+        setStreaming(true)
+
+        val baseUrl = provider.normalizedBaseUrl()
+        try {
+            val remote = when (kind) {
+                MediaKind.IMAGE -> api.generateImage(
+                    baseUrl = baseUrl,
+                    apiKey = key,
+                    model = model,
+                    prompt = text,
+                    destDir = dir,
+                    fileName = "$mediaId.png",
+                )
+
+                MediaKind.VIDEO -> api.generateVideo(
+                    baseUrl = baseUrl,
+                    apiKey = key,
+                    model = model,
+                    prompt = text,
+                ) { pct, _ ->
+                    patchMedia(assistant.id, mediaId) {
+                        it.copy(
+                            status = MediaStatus.RUNNING,
+                            progress = pct,
+                        )
+                    }
+                }
+            }
+
+            // 远端地址可能是签名链接（几小时后失效），必须先落盘
+            val file = if (remote.startsWith("http")) {
+                val target = java.io.File(dir, mediaId + guessExt(kind, remote))
+                api.download(remote, target, key)
+                target
+            } else {
+                java.io.File(remote)
+            }
+            val info = com.dshwatch.net.media.MediaProbe.of(file)
+
+            patchMedia(assistant.id, mediaId) {
+                it.copy(
+                    url = remote.takeIf { u -> u.startsWith("http") }.orEmpty(),
+                    path = file.absolutePath,
+                    mime = info.mime.ifBlank { if (kind == MediaKind.VIDEO) "video/mp4" else "image/jpeg" },
+                    width = info.width,
+                    height = info.height,
+                    durationMs = info.durationMs,
+                    sizeBytes = file.length(),
+                    status = MediaStatus.DONE,
+                    progress = 100,
+                    error = "",
+                )
+            }
+            patchMessage(assistant.id) { it.copy(status = MessageStatus.DONE) }
+        } catch (c: CancellationException) {
+            patchMedia(assistant.id, mediaId) { it.copy(status = MediaStatus.CANCELED) }
+            patchMessage(assistant.id) { it.copy(status = MessageStatus.STOPPED) }
+            throw c
+        } catch (t: Throwable) {
+            val msg = (t as? DshError)?.describeForUser()
+                ?: "${t.javaClass.simpleName}: ${t.message.orEmpty().take(200)}"
+            patchMedia(assistant.id, mediaId) {
+                it.copy(status = MediaStatus.FAILED, error = msg)
+            }
+            patchMessage(assistant.id) {
+                it.copy(status = MessageStatus.ERROR, error = msg)
+            }
+            _banner.value = Banner(msg)
+            Logx.w(TAG, "媒体生成失败 kind=$kind model=$model", t)
+        } finally {
+            setStreaming(false)
+            runCatching {
+                _conversation.value?.let { persist(it) }
+            }
+        }
+    }
+
+    /** 只改某条消息里的某个媒体（视频轮询每 1.5s 会调一次） */
+    private fun patchMedia(messageId: String, mediaId: String, block: (MediaRef) -> MediaRef) {
+        patchMessage(messageId) { m ->
+            m.copy(media = m.media.map { if (it.id == mediaId) block(it) else it })
+        }
+    }
+
+    private fun patchMessage(messageId: String, block: (ChatMessage) -> ChatMessage) {
+        val cur = _messages.value
+        val idx = cur.indexOfFirst { it.id == messageId }
+        if (idx < 0) return
+        _messages.value = cur.toMutableList().also { it[idx] = block(it[idx]) }
+    }
+
+    private fun guessExt(kind: MediaKind, url: String): String {
+        val fromUrl = url.substringBefore('?').substringAfterLast('.', "")
+        if (fromUrl.length in 2..5 && fromUrl.all { it.isLetterOrDigit() }) return ".$fromUrl"
+        return if (kind == MediaKind.VIDEO) ".mp4" else ".png"
     }
 
     // ---------------- Agent 主循环 ----------------
@@ -680,6 +906,10 @@ class ChatEngine(
         val fullSeq = if (droppedPrefix.isEmpty()) workingList else droppedPrefix + workingList
         val fromIndex = if (isRoleplay) contextStart.coerceIn(0, fullSeq.size) else 0
         var turns: List<ChatTurn> = fullSeq.drop(fromIndex).flatMap { it.toTurns() }
+        // 供应商不支持图片输入时，图仍留在会话里可回看，但不进请求
+        if (!provider.visionInput) {
+            turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
+        }
         // 用户在这次任务里拒绝过的工具：后续同一工具不再弹窗，直接静默拒绝
         val deniedTools = mutableSetOf<String>()
         // 已经把「被拒绝」回灌给模型一次；如果再被拒一次就收手，避免无限循环
@@ -1498,8 +1728,22 @@ class ChatEngine(
             }
         }
 
-        if (content.isBlank()) return emptyList()
-        return listOf(ChatTurn(role = role.wire, content = content))
+        if (content.isBlank() && media.none { it.kind == MediaKind.IMAGE && it.isReady }) {
+            return emptyList()
+        }
+        /*
+         * 只带用户消息的图。
+         *
+         * 助手消息上挂的是「模型生成的图」，把它当输入再发回去既没意义
+         * （模型看不见自己刚生成的产物），又会让下一轮请求体白白翻倍。
+         */
+        val images = if (role == Role.USER) {
+            media.filter { it.kind == MediaKind.IMAGE && it.isReady }
+                .mapNotNull { it.localFile()?.absolutePath }
+        } else {
+            emptyList()
+        }
+        return listOf(ChatTurn(role = role.wire, content = content, images = images))
     }
 
     private fun setStreaming(value: Boolean) {

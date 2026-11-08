@@ -1022,6 +1022,10 @@ private fun MessageItem(
     val reasoning = live?.reasoning ?: message.reasoning
     val isUser = message.role == Role.USER
     val isStreaming = live != null
+    // 查看器挂在消息内部：退出就是关一个 Dialog，不会把导航栈搞乱
+    var viewingMedia by remember(message.id) {
+        mutableStateOf<com.dshwatch.domain.model.MediaRef?>(null)
+    }
 
     /*
      * 自定义界面：整段 HTML 文档不当作正文渲染。
@@ -1101,6 +1105,20 @@ private fun MessageItem(
             Spacer(Modifier.height(6.dp))
         }
 
+        /*
+         * 媒体放在正文之前。
+         *
+         * 出图 / 出视频的回复，正文通常只有一句「画好了」甚至完全为空 ——
+         * 用户要的是那张图。把图塞在文字下面，等于每次都要先划过一行废话。
+         */
+        if (message.media.isNotEmpty()) {
+            com.dshwatch.ui.media.MediaStrip(
+                media = message.media,
+                onOpen = { viewingMedia = it },
+            )
+            if (bodyText.isNotBlank()) Spacer(Modifier.height(6.dp))
+        }
+
         if (htmlDoc != null) {
             com.dshwatch.ui.html.InlineHtml(
                 html = htmlDoc.html,
@@ -1168,19 +1186,24 @@ private fun MessageItem(
             )
         }
 
-        // 操作行常显：复制 / 重试 / 删除不该藏在「先点一下消息」后面
-        if (!isStreaming && body.isNotBlank()) {
+        // 操作行常显：复制 / 重试 / 删除不该藏在「先点一下消息」后面。
+        // 纯媒体消息（出图 / 出视频）没有正文，但「重新生成」恰恰是它最常用的操作。
+        if (!isStreaming && (body.isNotBlank() || message.hasMedia)) {
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MsgAction(text = s.copy) { onCopy(body) }
+                if (body.isNotBlank()) MsgAction(text = s.copy) { onCopy(body) }
                 if (!isUser) {
                     MsgAction(text = s.regenerate) { onRegenerate() }
                     MsgAction(text = s.delete) { onDelete() }
                 }
             }
+        }
+
+        viewingMedia?.let { ref ->
+            com.dshwatch.ui.media.MediaViewer(ref = ref, onClose = { viewingMedia = null })
         }
     }
 }

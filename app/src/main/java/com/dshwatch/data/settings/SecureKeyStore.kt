@@ -71,7 +71,29 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
 
     // ---------------- 读写 ----------------
 
-    override fun getApiKey(providerId: String): String? = get(k(providerId, FIELD_API_KEY))
+    /**
+     * 取某个供应商的 API Key。
+     *
+     * 内置供应商有一条额外规则：用户没填、或填了空串时，回落到编译期注入的
+     * [com.dshwatch.BuildConfig.BUILTIN_API_KEY]。这样「开箱能用」和
+     * 「用户可以换成自己的 key」两件事可以共存 —— 用户一旦填写，就永久覆盖内置值，
+     * 想退回内置值只需把输入框清空再保存。
+     */
+    override fun getApiKey(providerId: String): String? {
+        val stored = get(k(providerId, FIELD_API_KEY))
+        if (!stored.isNullOrBlank()) return stored
+        if (com.dshwatch.domain.model.BuiltinProvider.isBuiltin(providerId)) {
+            return com.dshwatch.BuildConfig.BUILTIN_API_KEY.takeIf { it.isNotBlank() }
+        }
+        return null
+    }
+
+    /** 内置 key 是否可用（设置页/诊断页用来提示「内置额度已就绪」） */
+    fun hasBuiltinKey(): Boolean = com.dshwatch.BuildConfig.BUILTIN_API_KEY.isNotBlank()
+
+    /** 用户是否覆盖过内置 key */
+    fun isBuiltinOverridden(providerId: String): Boolean =
+        !get(k(providerId, FIELD_API_KEY)).isNullOrBlank()
 
     fun putApiKey(providerId: String, value: String?) = put(k(providerId, FIELD_API_KEY), value)
 

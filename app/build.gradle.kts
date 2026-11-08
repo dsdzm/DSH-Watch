@@ -31,6 +31,47 @@ val keystoreProps = Properties().apply {
 }
 val hasKeystore = keystoreProps.getProperty("storeFile")?.let { file(it).exists() } == true
 
+/**
+ * 内置供应商（Agnes）的 API Key。
+ *
+ * ## 为什么不在源码里写死
+ *
+ * 本仓库是**公开**的。把 key 写进 .kt 文件，等于同时做两件事：
+ * 让全世界拿到这把 key，并且让它永久留在 git 历史里（删掉文件也删不掉历史）。
+ *
+ * 读取顺序（先到先得）：
+ *  1. 环境变量 `AGNES_API_KEY` —— CI / 命令行构建用；
+ *  2. Gradle 属性 `-PagnesApiKey=...`；
+ *  3. 工程根目录 `local.properties` 里的 `agnes.apiKey=...` —— 已被 .gitignore 排除，
+ *     Android Studio 本地构建走这条。
+ *
+ * 三者都为空时编出来是空串：App 仍能启动，内置供应商会提示「需要先填 key」，
+ * 其他供应商不受影响。**不会**因为缺 key 而编译失败。
+ *
+ * ⚠️ 即便这样，key 最终仍会以字符串常量进到 APK 里 —— 客户端内置密钥
+ * 天生可被反编译提取。它的定位是「让用户开箱能用」，
+ * 真正的防线是服务端的额度与限流，不是这层混淆。
+ */
+val builtinApiKey: String = run {
+    val env = System.getenv("AGNES_API_KEY")?.trim().orEmpty()
+    if (env.isNotEmpty()) return@run env
+    val prop = providers.gradleProperty("agnesApiKey").orNull?.trim().orEmpty()
+    if (prop.isNotEmpty()) return@run prop
+    val local = rootProject.file("local.properties")
+    if (local.exists()) {
+        val p = Properties().apply { local.inputStream().use { load(it) } }
+        p.getProperty("agnes.apiKey")?.trim().orEmpty()
+    } else {
+        ""
+    }
+}
+
+/** 转义成合法的 Java 字符串字面量，避免 key 里带引号/反斜杠把 buildConfigField 写坏 */
+val builtinApiKeyLiteral: String = builtinApiKey
+    .replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+
+
 android {
     namespace = "com.dshwatch"
     compileSdk = 35
@@ -40,12 +81,15 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 49
-        versionName = "1.15.26"
+        versionCode = 50
+        versionName = "1.16.0"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
         resourceConfigurations += listOf("zh", "en")
+
+        // 内置供应商的 key，来源见文件顶部 builtinApiKey 的注释
+        buildConfigField("String", "BUILTIN_API_KEY", "\"$builtinApiKeyLiteral\"")
 
         // androidx 自带少量 .so；需要单 ABI 时用 -Pabi 裁掉其余架构。
         if (targetAbi != null) {

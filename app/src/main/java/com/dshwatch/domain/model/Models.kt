@@ -111,8 +111,16 @@ data class ChatTurn(
     val content: String = "",
     val toolCalls: List<ToolCallRecord> = emptyList(),
     val toolCallId: String = "",
+    /**
+     * 随这条消息一起发出去的图片（本地绝对路径）。
+     *
+     * 只有视觉模型才会带；序列化时统一转成 `data:` URL。
+     * 用路径而不是 Bitmap：请求构造在 IO 线程，编解码必须在那一刻做，
+     * 提前塞进内存会让长会话把整段历史都钉在堆里。
+     */
+    val images: List<String> = emptyList(),
 ) {
-    val isEmpty: Boolean get() = content.isBlank() && toolCalls.isEmpty()
+    val isEmpty: Boolean get() = content.isBlank() && toolCalls.isEmpty() && images.isEmpty()
 }
 
 @Serializable
@@ -134,10 +142,22 @@ data class ChatMessage(
     val toolCalls: List<ToolCallRecord> = emptyList(),
     /** Agent 模式下的第几步，从 1 开始；0 表示普通对话 */
     val stepIndex: Int = 0,
+    /**
+     * 这条消息附带的图片 / 视频。
+     *
+     * 用户消息：手动挑的图（作为多模态输入发给视觉模型）。
+     * 助手消息：模型生成的结果（`agnes-image-*` / `agnes-video-*`）。
+     * 默认空列表，老会话的 JSON 反序列化不受影响。
+     */
+    val media: List<MediaRef> = emptyList(),
 ) {
     val isStreaming: Boolean get() = status == MessageStatus.STREAMING
     val hasReasoning: Boolean get() = reasoning.isNotBlank()
     val hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
+    val hasMedia: Boolean get() = media.isNotEmpty()
+
+    /** 还在生成中的媒体（界面据此显示进度而不是空图） */
+    val pendingMedia: MediaRef? get() = media.firstOrNull { it.isBusy }
 }
 
 @Serializable

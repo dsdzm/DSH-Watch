@@ -477,7 +477,32 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
 
             else -> addJsonObject {
                 put("role", turn.role)
-                put("content", turn.content)
+                /*
+                 * 多模态：有图时 content 必须是数组，纯文本时仍用字符串。
+                 *
+                 * 不能一律发数组 —— 一部分老中转站只认字符串 content，
+                 * 见到数组直接 400（甚至更糟：静默当成非视觉请求，图被丢掉）。
+                 * 所以只在真的有图时才切换形态。
+                 */
+                val images = turn.images.mapNotNull { ImagePayload.dataUrl(it) }
+                if (images.isEmpty()) {
+                    put("content", turn.content)
+                } else {
+                    putJsonArray("content") {
+                        if (turn.content.isNotBlank()) {
+                            addJsonObject {
+                                put("type", "text")
+                                put("text", turn.content)
+                            }
+                        }
+                        images.forEach { dataUrl ->
+                            addJsonObject {
+                                put("type", "image_url")
+                                putJsonObject("image_url") { put("url", dataUrl) }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

@@ -64,6 +64,21 @@ fun AppRoot(
     }
 
     /*
+     * 引导页之后的教学页。
+     *
+     * 用独立标记 tutorialDone 而不是复用 onboardingDone：老用户升级后
+     * 同样要走一遍 —— 「内置模型」「温度怎么调」是他们在旧版本里没见过的东西。
+     * 只在引导页末尾直接跳进去会让这批人永远看不到。
+     */
+    if (!settings.tutorialDone) {
+        com.dshwatch.ui.screens.onboarding.TutorialScreen(
+            container = container,
+            settings = settings,
+        )
+        return
+    }
+
+    /*
      * 系统返回手势 / 返回键：直接出栈。
      *
      * 页面切换的淡入淡出由 ExpansionHost 监听 current 变化自动播放，

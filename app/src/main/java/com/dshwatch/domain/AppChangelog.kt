@@ -22,6 +22,16 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.16.0",
+            date = "2026-11-08",
+            highlights = listOf(
+                "新增内置 Agnes 通道：5 个免费模型（文本 / 出图 / 出视频），装完即可对话",
+                "对话页直接显示图片与视频：可放大、播放并分享，媒体随会话保存在本机",
+                "新增新手教学：讲清 API Key、供应商地址、模型选择、上下文窗口与温度",
+                "支持把图片作为多模态输入，视觉模型可直接读图",
+            ),
+        ),
         // 稳定版重发：以 1.15.22 的统一缩放实现为准，无新增能力，按约定不写条目
         ChangelogEntry(
             version = "1.15.26",

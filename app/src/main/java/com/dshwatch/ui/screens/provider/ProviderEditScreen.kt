@@ -344,7 +344,18 @@ fun ProviderEditScreen(
                     })
                     Chip(
                         text = if (busy == "models") s.fetchingModels else s.fetchModels,
-                        onClick = { if (busy.isEmpty()) fetchModels() },
+                        // 内置供应商不联网拉列表：官方 /v1/models 会把付费的 Pro 系列一起列出来，
+                        // 用户点了只会得到「额度不足」。这里固定只给免费档（见 BuiltinProvider）。
+                        onClick = { if (busy.isEmpty() && !draft.isBuiltin) fetchModels() },
+                    )
+                }
+                if (draft.isBuiltin) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "内置通道固定 5 个免费模型（两个文本、两个出图、一个出视频），不联网刷新；" +
+                            "Pro 系列按量付费，不在此列。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
                     )
                 }
                 if (draft.models.isNotEmpty()) {
@@ -563,6 +574,8 @@ fun ProviderEditScreen(
                             } else {
                                 st.activeProviderId
                             },
+                            // 内置供应商被删掉后不再自动补回，否则会出现「删了又出现」
+                            builtinDismissed = st.builtinDismissed || existing.isBuiltin,
                         )
                     }
                     nav.pop()
