@@ -104,7 +104,8 @@ fun GeometryView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (compact) 170.dp else 260.dp)
+            // 全屏时交给外层撑满（见 MindMapView 同处注释）
+            .then(if (compact) Modifier.height(170.dp) else Modifier.fillMaxSize())
             .clip(RoundedCornerShape(10.dp))
             .background(Color.White.copy(alpha = 0.04f))
             .pointerInput(scene) {

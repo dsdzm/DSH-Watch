@@ -75,7 +75,8 @@ fun MindMapView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (compact) 150.dp else 240.dp)
+            // 全屏时交给外层撑满：写死高度会让「全屏」只剩中间一条
+            .then(if (compact) Modifier.height(150.dp) else Modifier.fillMaxSize())
             .clip(RoundedCornerShape(10.dp))
             .background(Color.White.copy(alpha = 0.04f))
             .pointerInput(placed) {
