@@ -278,10 +278,10 @@ private fun tutorialPages(zh: Boolean): List<TutorialPage> = if (zh) {
             icon = Icons.Outlined.Tune,
             title = "已经给你接好了",
             body = listOf(
-                "内置了一条 Agnes 通道，装了 5 个免费模型：两个文本、两个出图、一个出视频。",
-                "不用填任何东西，回到对话页就能发第一条消息。Pro 系列按量收费，没有放进来。",
+                "内置了两条通道：Agnes 装了 5 个免费模型（两个文本、两个出图、一个出视频），智谱 GLM 装了 3 个（文本、视觉、出图）。",
+                "不用填任何东西，回到对话页就能发第一条消息。按量收费的模型都没有放进来。",
             ),
-            tip = "想用自己的账号：供应商 → Agnes 内置 → 把 API Key 换成自己的，清空即恢复内置额度。",
+            tip = "内置项只让你调参数（温度、上下文等），Key 与地址由应用托管、不显示也不能改；想用自己的账号就新建一个供应商。",
         ),
         TutorialPage(
             icon = Icons.Outlined.Memory,
@@ -335,10 +335,12 @@ private fun tutorialPages(zh: Boolean): List<TutorialPage> = if (zh) {
             icon = Icons.Outlined.Tune,
             title = "Already wired up",
             body = listOf(
-                "A built-in Agnes channel ships with 5 free models: two text, two image, one video.",
-                "No setup needed — just start chatting. Paid Pro models are left out on purpose.",
+                "Two channels ship built in: Agnes with 5 free models (2 text, 2 image, 1 video) " +
+                    "and Zhipu GLM with 3 (text, vision, image).",
+                "No setup needed — just start chatting. Paid models are left out on purpose.",
             ),
-            tip = "To use your own account: Providers → Agnes Built-in → replace the key. Clear it to fall back.",
+            tip = "Built-in entries only expose model parameters. Keys and URLs are managed by the app; " +
+                "create your own provider if you want to use your account.",
         ),
         TutorialPage(
             icon = Icons.Outlined.Memory,

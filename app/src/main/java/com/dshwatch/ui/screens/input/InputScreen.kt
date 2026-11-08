@@ -1,6 +1,8 @@
 package com.dshwatch.ui.screens.input
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,18 +20,25 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.data.attachment.AttachmentStore
 import com.dshwatch.domain.DeepSeekPricing
+import com.dshwatch.domain.model.Attachment
+import com.dshwatch.domain.model.AttachmentKinds
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.DeepSeekPriceBar
 import com.dshwatch.ui.components.PrimaryButton
@@ -42,6 +51,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.graphics.Color
 import com.dshwatch.ui.components.glassSurface
 import com.dshwatch.ui.theme.LocalGlass
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 手表上的输入页。
@@ -62,6 +74,36 @@ fun InputScreen(
     val focusRequester = remember { FocusRequester() }
     val settings by container.settings.collectAsStateWithLifecycle()
     val conversation by container.engine.conversation.collectAsStateWithLifecycle()
+
+    /*
+     * 附件。
+     *
+     * 用 OpenDocument 而不是 GetContent：前者拿到的 uri 在页面重建后仍然有效
+     * （附件要跟着消息走，用户可能退出输入页再回来），后者只是一次性授权。
+     * mime 传「任意类型」：手表上的文件管理器往往不认更细的类别，限死只会让可选文件为空。
+     */
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val attachments = remember { mutableStateListOf<Attachment>() }
+    var attachBusy by remember { mutableStateOf(false) }
+    var attachNote by remember { mutableStateOf("") }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (attachments.size >= AttachmentKinds.MAX_FILES) {
+            attachNote = "一次最多带 ${AttachmentKinds.MAX_FILES} 个文件"
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            attachBusy = true
+            attachNote = ""
+            val att = withContext(Dispatchers.IO) {
+                AttachmentStore.import(context, context.filesDir, uri)
+            }
+            attachments.add(att)
+            if (!att.ok) attachNote = "${att.name}：${att.error}"
+            attachBusy = false
+        }
+    }
 
     // 只有 DeepSeek 才有峰谷计价，别的供应商显示这行只会是噪音
     val provider = settings.activeProvider
@@ -88,8 +130,9 @@ fun InputScreen(
      */
     fun submit() {
         val value = text.trim()
-        if (value.isEmpty()) return
-        if (container.engine.send(value)) {
+        // 只带附件不写字是合法用法：上传一份文件直接问「这份合同有什么风险」
+        if (value.isEmpty() && attachments.isEmpty()) return
+        if (container.engine.send(value, attachments.filter { it.ok })) {
             nav.pop()
         } else {
             busy = true
@@ -110,7 +153,7 @@ fun InputScreen(
                 PrimaryButton(
                     text = s.send,
                     modifier = Modifier.weight(1f),
-                    enabled = text.isNotBlank(),
+                    enabled = text.isNotBlank() || attachments.isNotEmpty(),
                     onClick = { submit() },
                 )
             }
@@ -173,6 +216,58 @@ fun InputScreen(
                 OutlinedTextFieldDefaults.colors()
             },
         )
+
+        Spacer(Modifier.height(6.dp))
+
+        /*
+         * 附件区。
+         *
+         * 放在输入框和快捷指令之间：这两个都是「发送前最后一次调整」的东西，
+         * 挨在一起比塞进顶栏更容易被发现。已选文件连同「提取出多少字」一起显示 ——
+         * 用户需要知道这份 PDF 到底有没有读出内容，否则会得到一次基于空文档的回答。
+         */
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Chip(
+                text = when {
+                    attachBusy -> "读取中…"
+                    attachments.isEmpty() -> "＋ 文件"
+                    else -> "＋ 再加一个"
+                },
+                onClick = {
+                    if (!attachBusy) picker.launch(arrayOf("*/*"))
+                },
+            )
+            attachments.forEach { att ->
+                Chip(
+                    text = "${att.name.take(12)} · ${att.summary()}  ✕",
+                    onClick = { attachments.remove(att) },
+                )
+            }
+        }
+        if (attachNote.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = attachNote,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (attachments.any { it.ok && it.kind != AttachmentKinds.IMAGE }) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "文本会在发送时随消息一起交给模型（最多 6 万字/文件）",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
 
         Spacer(Modifier.height(6.dp))
 

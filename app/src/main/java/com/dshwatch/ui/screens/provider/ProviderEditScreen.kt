@@ -52,6 +52,7 @@ import com.dshwatch.ui.components.TextRow
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.domain.model.BuiltinProviders
 import com.dshwatch.ui.components.GlassDialog
 import com.dshwatch.ui.components.GlassDialogButton
 import com.dshwatch.ui.components.GlassDialogRow
@@ -239,121 +240,168 @@ fun ProviderEditScreen(
 
             SectionHeader("基础")
             SettingCard {
-                TextRow(
-                    label = s.providerName,
-                    value = draft.name,
-                    onValueChange = { draft = draft.copy(name = it) },
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = s.providerType,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(4.dp))
-                SegmentedRow(
-                    options = listOf(s.typeOpenAi, s.typeDsh),
-                    selectedIndex = if (draft.type == ProviderType.OPENAI_COMPAT) 0 else 1,
-                    onSelect = { index ->
-                        draft = draft.copy(
-                            type = if (index == 0) ProviderType.OPENAI_COMPAT else ProviderType.DSH_SERVER,
-                        )
-                    },
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = if (draft.type == ProviderType.OPENAI_COMPAT) s.typeOpenAiHint else s.typeDshHint,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
+                if (draft.isBuiltin) {
+                    // 内置项的名称与类型都锁定：改名字会让人以为这是自己新建的供应商，
+                    // 把类型改成 DSH_SERVER 则会把这个 id 指向一个根本不存在的配对设备
+                    Text(
+                        text = draft.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = "内置通道 · 类型与名称固定，只能调整下面的模型参数",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                } else {
+                    TextRow(
+                        label = s.providerName,
+                        value = draft.name,
+                        onValueChange = { draft = draft.copy(name = it) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = s.providerType,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    SegmentedRow(
+                        options = listOf(s.typeOpenAi, s.typeDsh),
+                        selectedIndex = if (draft.type == ProviderType.OPENAI_COMPAT) 0 else 1,
+                        onSelect = { index ->
+                            draft = draft.copy(
+                                type = if (index == 0) ProviderType.OPENAI_COMPAT else ProviderType.DSH_SERVER,
+                            )
+                        },
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = if (draft.type == ProviderType.OPENAI_COMPAT) s.typeOpenAiHint else s.typeDshHint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
             }
 
             SectionHeader("连接")
             SettingCard {
-                TextRow(
-                    label = s.baseUrl,
-                    value = draft.baseUrl,
-                    placeholder = s.baseUrlHint,
-                    keyboardType = KeyboardType.Uri,
-                    onValueChange = { draft = draft.copy(baseUrl = it) },
-                )
-                Spacer(Modifier.height(6.dp))
-                if (draft.type == ProviderType.OPENAI_COMPAT) {
-                    TextRow(
-                        label = s.apiKey,
-                        value = apiKey,
-                        placeholder = s.apiKeyHint,
-                        isSecret = true,
-                        onValueChange = { apiKey = it },
-                    )
-                } else {
-                    TextRow(
-                        label = s.pairedDevice,
-                        value = serverToken,
-                        placeholder = "配对后自动填入",
-                        isSecret = true,
-                        onValueChange = { serverToken = it },
+                if (draft.isBuiltin) {
+                    /*
+                     * 内置通道：地址与 key 都不展示。
+                     *
+                     * 不是「藏起来但可改」—— 是这两项对用户没有意义：
+                     * 地址写死才不会让内置额度打到别的服务上，key 也不能换
+                     * （换了就不是内置通道了，用户想要自己的 key 应该新建一个供应商）。
+                     * 留一个测试按钮，是为了让「额度是不是用完了」这种问题能自查。
+                     */
+                    Text(
+                        text = BuiltinProviders.of(draft.id)?.note.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(6.dp))
-                    GhostButton(text = s.pairTitle, onClick = { nav.push(Screen.Pair) })
-                }
-                Spacer(Modifier.height(6.dp))
-                if (busy == "test") {
-                    GhostButton(
-                        text = s.testing,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {},
-                    )
+                    if (busy == "test") {
+                        GhostButton(
+                            text = s.testing,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {},
+                        )
+                    } else {
+                        GhostButton(
+                            text = s.testConnection,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { test() },
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
                 } else {
-                    GhostButton(
-                        text = s.testConnection,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { test() },
+                    TextRow(
+                        label = s.baseUrl,
+                        value = draft.baseUrl,
+                        placeholder = s.baseUrlHint,
+                        keyboardType = KeyboardType.Uri,
+                        onValueChange = { draft = draft.copy(baseUrl = it) },
                     )
+                    Spacer(Modifier.height(6.dp))
+                    if (draft.type == ProviderType.OPENAI_COMPAT) {
+                        TextRow(
+                            label = s.apiKey,
+                            value = apiKey,
+                            placeholder = s.apiKeyHint,
+                            isSecret = true,
+                            onValueChange = { apiKey = it },
+                        )
+                    } else {
+                        TextRow(
+                            label = s.pairedDevice,
+                            value = serverToken,
+                            placeholder = "配对后自动填入",
+                            isSecret = true,
+                            onValueChange = { serverToken = it },
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        GhostButton(text = s.pairTitle, onClick = { nav.push(Screen.Pair) })
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    if (busy == "test") {
+                        GhostButton(
+                            text = s.testing,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {},
+                        )
+                    } else {
+                        GhostButton(
+                            text = s.testConnection,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { test() },
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
                 }
-                Spacer(Modifier.height(5.dp))
             }
 
             SectionHeader(s.modelsTitle)
             SettingCard {
-                TextRow(
-                    label = s.defaultModel,
-                    value = draft.defaultModel,
-                    placeholder = "deepseek-chat",
-                    onValueChange = { draft = draft.copy(defaultModel = it.trim()) },
-                )
-                Spacer(Modifier.height(6.dp))
-                TextRow(
-                    label = s.addModelManually,
-                    value = manualModel,
-                    placeholder = s.modelNameInput,
-                    onValueChange = { manualModel = it },
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip(text = s.add, onClick = {
-                        val m = manualModel.trim()
-                        if (m.isNotBlank() && m !in draft.models) {
-                            draft = draft.copy(
-                                models = draft.models + m,
-                                defaultModel = draft.defaultModel.ifBlank { m },
-                            )
-                        }
-                        manualModel = ""
-                    })
-                    Chip(
-                        text = if (busy == "models") s.fetchingModels else s.fetchModels,
-                        // 内置供应商不联网拉列表：官方 /v1/models 会把付费的 Pro 系列一起列出来，
-                        // 用户点了只会得到「额度不足」。这里固定只给免费档（见 BuiltinProvider）。
-                        onClick = { if (busy.isEmpty() && !draft.isBuiltin) fetchModels() },
+                if (!draft.isBuiltin) {
+                    TextRow(
+                        label = s.defaultModel,
+                        value = draft.defaultModel,
+                        placeholder = "deepseek-chat",
+                        onValueChange = { draft = draft.copy(defaultModel = it.trim()) },
                     )
-                }
-                if (draft.isBuiltin) {
+                    Spacer(Modifier.height(6.dp))
+                    TextRow(
+                        label = s.addModelManually,
+                        value = manualModel,
+                        placeholder = s.modelNameInput,
+                        onValueChange = { manualModel = it },
+                    )
                     Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Chip(text = s.add, onClick = {
+                            val m = manualModel.trim()
+                            if (m.isNotBlank() && m !in draft.models) {
+                                draft = draft.copy(
+                                    models = draft.models + m,
+                                    defaultModel = draft.defaultModel.ifBlank { m },
+                                )
+                            }
+                            manualModel = ""
+                        })
+                        Chip(
+                            text = if (busy == "models") s.fetchingModels else s.fetchModels,
+                            // 内置供应商不联网拉列表：官方 /v1/models 会把付费档一起列出来，
+                            // 用户点了只会得到「额度不足」。这里固定只给免费档（见 BuiltinProviders）。
+                            onClick = { if (busy.isEmpty() && !draft.isBuiltin) fetchModels() },
+                        )
+                    }
+                } else {
                     Text(
-                        text = "内置通道固定 5 个免费模型（两个文本、两个出图、一个出视频），不联网刷新；" +
-                            "Pro 系列按量付费，不在此列。",
+                        text = "内置通道的模型是固定的免费档，只能在这里选，不能增删；" +
+                            "列表不联网刷新，避免选到按量计费的模型。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -574,8 +622,15 @@ fun ProviderEditScreen(
                             } else {
                                 st.activeProviderId
                             },
-                            // 内置供应商被删掉后不再自动补回，否则会出现「删了又出现」
-                            builtinDismissed = st.builtinDismissed || existing.isBuiltin,
+                            // 内置供应商被删掉后不再自动补回，否则会出现「删了又出现」。
+                            // 逐家记 id：删 Agnes 不该连累智谱（见 AppSettings.builtinDismissedIds）
+                            builtinDismissed = st.builtinDismissed ||
+                                existing.id == com.dshwatch.domain.model.BuiltinProviders.AGNES_ID,
+                            builtinDismissedIds = if (existing.isBuiltin) {
+                                st.builtinDismissedIds + existing.id
+                            } else {
+                                st.builtinDismissedIds
+                            },
                         )
                     }
                     nav.pop()

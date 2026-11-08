@@ -65,6 +65,10 @@ object BiliTools {
         DmTool,
         DynTool,
         LikeTool,
+        FavFoldersTool,
+        FavListTool,
+        CoinTool,
+        FavTool,
     )
 
     /** 日报放在工作空间根的 `bili/` 下：跨会话共享，换会话不会丢配额与判重记录 */
@@ -1024,6 +1028,218 @@ object BiliTools {
 
     /** 点赞的当日记录。和发言记录分开：点赞不占「对外发言」额度 */
     private fun likePath(): String = "$DIR/likes/${today()}.md"
+
+    private fun coinPath(): String = "$DIR/coins/${today()}.md"
+
+    private fun favPath(): String = "$DIR/favs/${today()}.md"
+
+    // ------------------------------------------------------------------
+    // 11. 收藏夹
+    // ------------------------------------------------------------------
+
+    /**
+     * 看我的收藏夹。
+     *
+     * 这是「读」能力里最安全的一个：不动账号状态、不消耗任何东西，
+     * 所以不设开关 —— 只要刷B站开着就能用。
+     */
+    object FavFoldersTool : AgentTool {
+        override val name = "bili_fav_folders"
+        override val description =
+            "列出我这个账号的收藏夹（含默认收藏夹、每个夹里有多少条）。" +
+                "想知道自己收藏过什么、或者要指定收藏到哪个夹时先用它。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(properties = emptyMap())
+
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            if (ctx.biliCookie().isBlank()) return ToolResult.fail("还没登录 B站，读不到收藏夹。")
+            return runCatching { api(ctx).favFolders() }.fold(
+                onSuccess = { list ->
+                    if (list.isEmpty()) return ToolResult.ok("这个账号下没有收藏夹。")
+                    ToolResult.ok(
+                        buildString {
+                            append("共 ${list.size} 个收藏夹：\n")
+                            list.forEach { f ->
+                                append("- ${f.title}（id=${f.id}，${f.count} 条")
+                                if (f.isDefault) append("，默认")
+                                if (f.isPrivate) append("，私密")
+                                append("）\n")
+                            }
+                        },
+                    )
+                },
+                onFailure = { ToolResult.fail(errText(it)) },
+            )
+        }
+
+        override fun summarize(args: JsonObject) = "查看收藏夹"
+    }
+
+    /**
+     * 看某个收藏夹里的视频。
+     *
+     * 不传 folder_id 时取默认收藏夹 —— 绝大多数人只有一个默认夹，
+     * 强制先查 id 再传只会多一次往返。
+     */
+    object FavListTool : AgentTool {
+        override val name = "bili_fav_list"
+        override val description =
+            "列出某个收藏夹里的视频（标题、BV 号、UP 主、时长）。" +
+                "不传 folder_id 就看默认收藏夹。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "folder_id" to Schema.str("收藏夹 id，可不填（不填=默认收藏夹）"),
+                "page" to Schema.int("第几页，默认 1", 1, 100),
+                "num" to Schema.int("一页几条，默认 10，上限 20", 1, 20),
+            ),
+        )
+
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            if (ctx.biliCookie().isBlank()) return ToolResult.fail("还没登录 B站，读不到收藏夹。")
+            val page = args.intOf("page") ?: 1
+            val num = args.intOf("num") ?: 10
+            return runCatching {
+                val api = api(ctx)
+                val id = args.strOf("folder_id")?.toLongOrNull()?.takeIf { it > 0 }
+                    ?: (api.favFolders().firstOrNull { it.isDefault } ?: api.favFolders().firstOrNull())
+                        ?.id
+                    ?: throw BiliException("账号下没有收藏夹")
+                id to api.favVideos(id, page, num)
+            }.fold(
+                onSuccess = { (id, p) ->
+                    if (p.items.isEmpty()) return ToolResult.ok("收藏夹 $id 第 $page 页没有内容。")
+                    ToolResult.ok(
+                        buildString {
+                            append("收藏夹 $id 第 $page 页（${p.items.size} 条")
+                            if (p.hasMore) append("，还有下一页")
+                            append("）：\n")
+                            p.items.forEach { v ->
+                                append("- ${v.bvid}｜${v.title}")
+                                if (v.author.isNotBlank()) append("｜UP ${v.author}")
+                                append("｜${Fmt.duration(v.durationSec * 1000L)}\n")
+                            }
+                        },
+                    )
+                },
+                onFailure = { ToolResult.fail(errText(it)) },
+            )
+        }
+
+        override fun summarize(args: JsonObject) = "看收藏夹内容"
+    }
+
+    // ------------------------------------------------------------------
+    // 12. 投币
+    // ------------------------------------------------------------------
+
+    /**
+     * 投币。
+     *
+     * 硬币是**不可逆的存量资源**：投出去收不回来，每天靠登录/观看才回几个。
+     * 所以这里的设计比点赞严得多：
+     *  - 默认关（[AppSettings.biliCoinEnabled]），必须用户自己打开；
+     *  - 单条上限 1 枚（接口允许 2，但那是给「特别喜欢」留的，模型没有这个判断力）；
+     *  - 每天单独计数，与点赞/发言额度互不占用；
+     *  - 已投过的直接跳过，靠 relation 查，不赌接口幂等。
+     */
+    object CoinTool : AgentTool {
+        override val name = "bili_coin"
+        override val description =
+            "给一个视频投 1 枚硬币。硬币不可撤销、每天数量有限，" +
+                "所以只在这条视频对你确实有实质帮助时才用，不要每看完一条就投。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf("bvid" to Schema.str("视频 BV 号")),
+            required = listOf("bvid"),
+        )
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliCoinEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            val bvid = args.strOf("bvid")?.trim()?.takeIf { it.isNotBlank() }
+                ?: return ToolResult.fail("缺少 bvid")
+            if (!ctx.settings().biliCoinEnabled) {
+                return ToolResult.fail("设置里没打开「允许投币」。要开请让用户去 设置 → 刷B站 → 允许投币。")
+            }
+            if (ctx.biliCookie().isBlank()) return ToolResult.fail("还没登录 B站，投不了币。")
+
+            val log = coinPath()
+            val done = ctx.workspace.read(log, maxChars = 100_000).orEmpty()
+                .lineSequence().any { it.contains("coin $bvid") }
+            if (done) return ToolResult.ok("今天已经给 $bvid 投过币了，跳过。")
+
+            return runCatching { api(ctx).coin(bvid, count = 1) }.fold(
+                onSuccess = { msg ->
+                    ctx.workspace.append(log, "${stamp()} coin $bvid\n")
+                    ToolResult.ok("$msg（$bvid）")
+                },
+                onFailure = { ToolResult.fail("投币失败：${errText(it)}") },
+            )
+        }
+
+        override fun summarize(args: JsonObject) = "投币 " + (args.strOf("bvid") ?: "—")
+    }
+
+    // ------------------------------------------------------------------
+    // 13. 收藏
+    // ------------------------------------------------------------------
+
+    /**
+     * 收藏 / 取消收藏。
+     *
+     * 收藏不消耗资源，但会往用户自己整理过的空间里塞东西 —— 那是他的地盘。
+     * 所以默认关，且只往默认收藏夹（或用户指定的夹）放，不新建夹。
+     */
+    object FavTool : AgentTool {
+        override val name = "bili_fav"
+        override val description =
+            "把一个视频收藏到我的收藏夹（或取消收藏）。只在你判断这条视频值得以后再看时用。"
+        override val safety = ToolSafety.NETWORK
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "bvid" to Schema.str("视频 BV 号"),
+                "add" to Schema.bool("true 收藏（默认），false 取消收藏"),
+                "folder_id" to Schema.str("收藏夹 id，可不填（不填=默认收藏夹）"),
+            ),
+            required = listOf("bvid"),
+        )
+        override val enabled: (AppSettings) -> Boolean = { it.biliEnabled && it.biliFavEnabled }
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
+            val bvid = args.strOf("bvid")?.trim()?.takeIf { it.isNotBlank() }
+                ?: return ToolResult.fail("缺少 bvid")
+            val settings = ctx.settings()
+            if (!settings.biliFavEnabled) {
+                return ToolResult.fail("设置里没打开「允许收藏」。要开请让用户去 设置 → 刷B站 → 允许收藏。")
+            }
+            if (ctx.biliCookie().isBlank()) return ToolResult.fail("还没登录 B站，收藏不了。")
+            val add = args.boolOf("add") ?: true
+            val folder = args.strOf("folder_id")?.toLongOrNull()?.takeIf { it > 0 }
+                ?: settings.biliFavFolderId.toLongOrNull()?.takeIf { it > 0 }
+                ?: 0L
+
+            val log = favPath()
+            val done = ctx.workspace.read(log, maxChars = 100_000).orEmpty()
+                .lineSequence().any { it.contains("fav $bvid") }
+            if (add && done) return ToolResult.ok("今天已经收藏过 $bvid 了，跳过。")
+
+            return runCatching { api(ctx).favorite(bvid, add, folder) }.fold(
+                onSuccess = { msg ->
+                    if (add) ctx.workspace.append(log, "${stamp()} fav $bvid\n")
+                    ToolResult.ok("$msg（$bvid）")
+                },
+                onFailure = { ToolResult.fail("收藏失败：${errText(it)}") },
+            )
+        }
+
+        override fun summarize(args: JsonObject) =
+            (if (args.boolOf("add") != false) "收藏 " else "取消收藏 ") + (args.strOf("bvid") ?: "—")
+    }
+
 
     /**
      * 把设置里的动态选题转成人话。

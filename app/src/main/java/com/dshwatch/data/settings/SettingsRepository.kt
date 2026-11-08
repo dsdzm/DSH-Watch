@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.model.BuiltinProviders
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
@@ -161,18 +162,25 @@ class SettingsRepository(
          *
          * 三个约束：
          *  - 幂等：已经存在就什么都不做；
-         *  - 用户删得掉：删掉时置 builtinDismissed，之后不再补回来
+         *  - 用户删得掉：删掉时记进 builtinDismissedIds，之后不再补回来
          *    （否则会变成「删了又出现」的鬼打墙）；
          *  - 不抢占选择：activeProviderId 已有值时不改，只在新装时兜底。
+         *
+         * 1.17 起有多家内置通道，必须**逐家**判断是否被删过：
+         * 用一个全局布尔的话，用户删掉 Agnes 会连带让智谱也不再注入，
+         * 而他其实从没碰过智谱。旧存档里的 [AppSettings.builtinDismissed]
+         * 只代表「Agnes 被删过」，所以只对 Agnes 生效。
          */
-        if (!out.builtinDismissed &&
-            out.providers.none { it.id == com.dshwatch.domain.model.BuiltinProvider.ID }
-        ) {
+        val missingBuiltins = BuiltinProviders.all.filter { spec ->
+            val dismissed = spec.id in out.builtinDismissedIds ||
+                (spec.id == BuiltinProviders.AGNES_ID && out.builtinDismissed)
+            !dismissed && out.providers.none { it.id == spec.id }
+        }
+        if (missingBuiltins.isNotEmpty()) {
+            val injected = missingBuiltins.map { BuiltinProviders.make(it) }
             out = out.copy(
-                providers = listOf(com.dshwatch.domain.model.BuiltinProvider.make()) + out.providers,
-                activeProviderId = out.activeProviderId.ifBlank {
-                    com.dshwatch.domain.model.BuiltinProvider.ID
-                },
+                providers = injected + out.providers,
+                activeProviderId = out.activeProviderId.ifBlank { injected.first().id },
             )
         }
         return out

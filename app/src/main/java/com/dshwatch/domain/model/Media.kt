@@ -86,7 +86,12 @@ data class MediaRef(
 object MediaModels {
 
     private val VIDEO_HINTS = listOf("video", "veo", "sora", "kling", "wan-")
-    private val IMAGE_HINTS = listOf("image", "dall-e", "dalle", "flux", "imagen", "sd-", "stable-diffusion")
+    private val IMAGE_HINTS = listOf(
+        "image", "dall-e", "dalle", "flux", "imagen", "sd-", "stable-diffusion",
+        // 智谱：cogview 是出图模型，名字里没有 image，靠 hints 猜会漏成「文本模型」，
+        // 然后对着它发 /chat/completions 拿回 400
+        "cogview",
+    )
 
     fun kindOf(model: String): MediaKind? {
         val m = model.lowercase()

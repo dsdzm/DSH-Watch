@@ -332,6 +332,7 @@ class ConversationStore(
             providerId: String = "",
             parentId: String = "",
             media: List<com.dshwatch.domain.model.MediaRef> = emptyList(),
+            attachments: List<com.dshwatch.domain.model.Attachment> = emptyList(),
         ): ChatMessage = ChatMessage(
             id = Ids.new(),
             role = role,
@@ -342,6 +343,7 @@ class ConversationStore(
             providerId = providerId,
             parentId = parentId,
             media = media,
+            attachments = attachments,
         )
     }
 }

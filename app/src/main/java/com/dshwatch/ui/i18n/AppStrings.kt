@@ -244,6 +244,12 @@ interface AppStrings {
     val biliDynTopicMasterHint: String
     val biliLike: String
     val biliLikeHint: String
+    val biliCoin: String
+    val biliCoinHint: String
+    val biliFav: String
+    val biliFavHint: String
+    val biliFavFolder: String
+    val biliFavFolderHint: String
     val communityTitle: String
     val communityHint: String
     val communityGroup: String
@@ -794,6 +800,12 @@ object Zh : AppStrings {
     override val biliDynTopicMasterHint = "跟着你、被你使唤、嘴上嫌心里舍不得"
     override val biliLike = "自动点赞"
     override val biliLikeHint = "觉得好才点，同一条视频一天只点一次"
+    override val biliCoin = "允许投币"
+    override val biliCoinHint = "硬币不可撤销，默认关闭；打开后单条最多 1 枚，每天单独计数"
+    override val biliFav = "允许收藏"
+    override val biliFavHint = "会往你的收藏夹里塞东西，默认关闭"
+    override val biliFavFolder = "收藏夹 ID"
+    override val biliFavFolderHint = "留空 = 默认收藏夹；填了只往这个夹里放"
     override val communityTitle = "Bug 反馈群"
     override val communityHint = "遇到问题、想提需求，扫码进来"
     override val communityGroup = "群号"
@@ -1035,13 +1047,15 @@ object Zh : AppStrings {
     override val techStack = "开发技术栈"
     override val inspiredBy = "借鉴项目"
     override val appFeatures = "功能"
-    override val techStackText = "Kotlin 2.0 + Jetpack Compose（Material 3）\n" +
+    override val techStackText = "Kotlin + Jetpack Compose（Wear Material 3）\n" +
         "自研 Markdown 渲染，不用 WebView（省 30–60MB 常驻内存）\n" +
+        "自研 LaTeX 排版 · 思维导图布局 · 几何画板，纯 Canvas 绘制，不引图库\n" +
         "手写 SSE 流式解析 · 自研递归下降表达式求值\n" +
         "OkHttp + kotlinx.serialization\n" +
         "DataStore + Keystore 加密存储 · 文件级会话持久化\n" +
-        "单模块，R8 全量混淆后约 4.8MB"
+        "单模块，R8 全量混淆"
     override val inspiredByText = "DSH 服务器模式参考 dsh-workspace 的配对协议形态；\n" +
+        "B站读写接口参考开源第三方 B站终端（bili 终端类项目）的网页端实现；\n" +
         "产品形态参考社区 DSH 客户端（如 dsh-android-app）的思路。\n" +
         "本项目为独立实现，未复用上述项目的代码；\n" +
         "界面与工程全部自研，针对手表屏幕从零设计。"
@@ -1067,12 +1081,13 @@ object Zh : AppStrings {
     override val agentAskPlaceholder = "也可以自己输入…"
 
     override val shareFailed = "导出失败"
-    override val appFeaturesText = "双后端：直连自己的 API（DeepSeek / 中转站 / 本地 Ollama），" +
-        "或连电脑上的 DSH 服务器\n" +
-        "AI Agent：13 个本地工具 + 多步工具循环，不依赖电脑\n" +
-        "本地工作空间：真正建文件 → 校验 → 打包成单文件 HTML，可预览可导出\n" +
-        "Token 用量看板：按天 / 按模型统计，估算花费\n" +
-        "手表适配：性能分档、大 R 角安全边距、流式节流"
+    override val appFeaturesText = "双内置通道：Agnes 与智谱 GLM 免费档，开箱即用；密钥由应用托管，用户只调参数\n" +
+        "多模态：对话页直接显示图片与视频，可附图提问\n" +
+        "文件问答：txt / md / docx / pdf / 代码，本地提取文本后随消息发送\n" +
+        "画布：LaTeX 公式、思维导图、几何图，AI 生成后可直接看、可全屏\n" +
+        "AI Agent：本地工具 + 多步循环，含真实 B站读写（收藏夹 / 点赞 / 投币 / 收藏）\n" +
+        "本地工作空间：真建文件 → 校验 → 打包成单文件 HTML，可预览可导出\n" +
+        "Token 用量看板 · 手表性能分档与圆屏安全边距"
 
     // ---------------- 执行与云端编译 ----------------
     override val execSectionTitle = "执行与编译"
@@ -1192,6 +1207,11 @@ object Zh : AppStrings {
         "bili_dm" -> "发私信"
         "bili_dyn" -> "发动态"
         "bili_like" -> "点赞"
+        // 标题限 8 字：工具卡只有一行，超了会被截成省略号（ToolTitleTest 会红）
+        "bili_fav_folders" -> "看收藏夹"
+        "bili_fav_list" -> "收藏夹内容"
+        "bili_coin" -> "投币"
+        "bili_fav" -> "收藏视频"
         else -> tool
     }
 }
@@ -1410,6 +1430,12 @@ object En : AppStrings {
     override val biliDynTopicMasterHint = "Follows you around, complains but stays"
     override val biliLike = "Auto like"
     override val biliLikeHint = "Only when it genuinely likes something; once per video per day"
+    override val biliCoin = "Allow coin tipping"
+    override val biliCoinHint = "Coins are irreversible, off by default; max 1 per video, counted separately"
+    override val biliFav = "Allow favourites"
+    override val biliFavHint = "It will add items to your favourites folder; off by default"
+    override val biliFavFolder = "Favourites folder ID"
+    override val biliFavFolderHint = "Empty = default folder; otherwise only that folder is used"
     override val communityTitle = "Bug report group"
     override val communityHint = "Scan to join; report bugs or request features"
     override val communityGroup = "Group ID"
@@ -1652,13 +1678,15 @@ object En : AppStrings {
     override val techStack = "Tech stack"
     override val inspiredBy = "Inspired by"
     override val appFeatures = "Features"
-    override val techStackText = "Kotlin 2.0 + Jetpack Compose (Material 3)\n" +
+    override val techStackText = "Kotlin + Jetpack Compose (Wear Material 3)\n" +
         "Custom Markdown renderer, no WebView (saves 30-60MB RSS)\n" +
+        "Custom LaTeX layout, mind-map layout and geometry board, pure Canvas, no chart libs\n" +
         "Hand-written SSE parser · custom recursive-descent expression evaluator\n" +
         "OkHttp + kotlinx.serialization\n" +
         "DataStore + Keystore encryption · file-backed conversation storage\n" +
-        "Single module, ~4.8MB after full R8 shrinking"
+        "Single module, full R8 shrinking"
     override val inspiredByText = "The DSH server mode follows the pairing protocol shape of dsh-workspace;\n" +
+        "Bilibili read/write calls follow the web endpoints used by open-source bili terminal projects;\n" +
         "the product concept draws on community DSH clients (e.g. dsh-android-app).\n" +
         "This project is an independent implementation and reuses none of their code;\n" +
         "the UI and engineering are built from scratch for watch-sized screens."
@@ -1684,12 +1712,15 @@ object En : AppStrings {
     override val agentAskPlaceholder = "Or type your own…"
 
     override val shareFailed = "Export failed"
-    override val appFeaturesText = "Two backends: your own API (DeepSeek / gateways / local Ollama) " +
-        "or a DSH server on your computer\n" +
-        "AI Agent: 13 on-device tools with a multi-step loop, no computer required\n" +
+    override val appFeaturesText = "Two built-in channels: Agnes and Zhipu GLM free tier, ready out of the box; " +
+        "keys are managed by the app, you only tune parameters\n" +
+        "Multimodal: images and videos shown inline in chat; ask questions about pictures\n" +
+        "File Q&A: txt / md / docx / pdf / code, text extracted on-device and sent with the message\n" +
+        "Canvas: LaTeX formulas, mind maps and geometry figures rendered in chat, expandable full screen\n" +
+        "AI Agent: on-device tools with a multi-step loop, including real Bilibili actions " +
+        "(favourites / like / coin / favourite)\n" +
         "Local workspace: real files -> validation -> bundled single-file HTML, preview & export\n" +
-        "Token dashboard: by day / by model, with estimated cost\n" +
-        "Watch tuning: performance tiers, rounded-corner safe insets, stream throttling"
+        "Token dashboard · watch performance tiers and round-screen safe insets"
 
     // ---------------- Execution & cloud build ----------------
     override val execSectionTitle = "Run & build"
@@ -1810,6 +1841,10 @@ object En : AppStrings {
         "bili_dm" -> "Send DM"
         "bili_dyn" -> "Publish"
         "bili_like" -> "Like"
+        "bili_fav_folders" -> "Fav folders"
+        "bili_fav_list" -> "Folder videos"
+        "bili_coin" -> "Toss a coin"
+        "bili_fav" -> "Fav video"
         else -> tool
     }
 }

@@ -546,6 +546,191 @@ class BiliApi(private val cookie: () -> String) {
         return if (on) "已点赞" else "已取消点赞"
     }
 
+    // ------------------------------------------------------------------
+    // 收藏夹 / 投币 / 收藏
+    // ------------------------------------------------------------------
+
+    /**
+     * 我创建的收藏夹列表。
+     *
+     * `list-all` 一次返回全部（含默认夹），不像 v2 那样分页 —— 手表上没人有 50 个收藏夹，
+     * 真到了那个量级再谈分页。`attr` 位标记：0=公开 1=私密 2=默认收藏夹。
+     */
+    suspend fun favFolders(): List<FavFolder> {
+        val mid = selfMid()
+        if (mid <= 0) {
+            throw BiliException("Cookie 里没有 DedeUserID，读不到收藏夹；请重新扫码登录")
+        }
+        val data = call(
+            url = "$API/x/v3/fav/folder/created/list-all",
+            params = mapOf("up_mid" to mid.toString()),
+            signed = false,
+        )
+        val list = data["list"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return list.mapNotNull { it as? JsonObject }.map { o ->
+            val attr = o.int("attr")
+            FavFolder(
+                id = o.long("id"),
+                title = o.str("title"),
+                count = o.int("media_count"),
+                isDefault = attr and 2 == 2,
+                isPrivate = attr and 1 == 1,
+            )
+        }
+    }
+
+    /**
+     * 某个收藏夹里的视频。
+     *
+     * 用 `platform=web` 而不是默认的 `api`：后者返回的 `medias` 缺 `bvid`，
+     * 只有 `id`（aid），而这个项目的所有后续调用（字幕、评论）都按 bvid 走。
+     */
+    suspend fun favVideos(mediaId: Long, page: Int = 1, size: Int = 20): FavPage {
+        if (mediaId <= 0) throw BiliException("收藏夹 id 无效")
+        val ps = size.coerceIn(1, 20)
+        val data = call(
+            url = "$API/x/v3/fav/resource/list",
+            params = mapOf(
+                "media_id" to mediaId.toString(),
+                "pn" to page.coerceAtLeast(1).toString(),
+                "ps" to ps.toString(),
+                "order" to "mtime",
+                "type" to "0",
+                "platform" to "web",
+            ),
+            signed = false,
+        )
+        val medias = data["medias"] as? kotlinx.serialization.json.JsonArray ?: return FavPage(emptyList(), false)
+        val items = medias.mapNotNull { it as? JsonObject }.mapNotNull { o ->
+            val bvid = o.str("bvid")
+            if (bvid.isBlank()) return@mapNotNull null
+            val upper = o["upper"] as? JsonObject
+            FavVideo(
+                bvid = bvid,
+                aid = o.long("id"),
+                title = o.str("title"),
+                author = upper?.str("name").orEmpty(),
+                durationSec = o.int("duration"),
+                // 收藏夹列表里这个字段叫 cnt_info，且 play 才是播放量
+                play = (o["cnt_info"] as? JsonObject)?.long("play") ?: 0,
+            )
+        }
+        return FavPage(items, hasMore = data["has_more"]?.toString()?.toBoolean() == true)
+    }
+
+    /**
+     * 我对某个视频的操作状态。
+     *
+     * 用来做幂等判断：投币和收藏都不是「重复调用无副作用」的接口 ——
+     * 重复投币会真的扣第二枚，重复收藏会报错。所以动作之前必须先读这个。
+     */
+    suspend fun relation(bvid: String): VideoRelation {
+        val data = call(
+            url = "$API/x/web-interface/archive/relation",
+            params = mapOf("bvid" to bvid),
+            signed = false,
+        )
+        return VideoRelation(
+            like = data.int("like") == 1,
+            coin = data.int("coin"),
+            favorite = data.int("favorite") == 1,
+        )
+    }
+
+    /**
+     * 投币。
+     *
+     * 硬币不可逆，所以这里做了两道闸：单次最多 2 枚（B站接口本身的上限），
+     * 且投之前先查 [relation] —— 已经投过的直接返回，不赌接口幂等。
+     *
+     * `select_like=1` 是「投币同时点赞」，B站会顺带把赞点上。默认关：
+     * 点赞另有开关，两件事不该在一个动作里被悄悄合并。
+     */
+    suspend fun coin(bvid: String, count: Int = 1, alsoLike: Boolean = false): String {
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法投币")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct，无法投币")
+        val detail = video(bvid)
+        if (detail.aid <= 0) throw BiliException("查不到 $bvid 的 aid，投币失败")
+        val self = selfMid()
+        if (self > 0 && detail.ownerMid == self) throw BiliException("不能给自己的视频投币")
+
+        val already = runCatching { relation(bvid).coin }.getOrDefault(0)
+        if (already >= 2) throw BiliException("这条视频已经投满 2 枚了")
+        val want = count.coerceIn(1, 2)
+        val actual = if (already > 0) 1 else want
+        if (already > 0 && want > 1) {
+            // 已经投过 1 枚时再投只能补 1 枚，接口不接受超过总额度
+            return runCoin(bvid, detail.aid, 1, alsoLike, csrf, note = "（之前已投过 1 枚，本次补 1 枚）")
+        }
+        return runCoin(bvid, detail.aid, actual, alsoLike, csrf)
+    }
+
+    private suspend fun runCoin(
+        bvid: String,
+        aid: Long,
+        count: Int,
+        alsoLike: Boolean,
+        csrf: String,
+        note: String = "",
+    ): String {
+        val (code, message) = postAction(
+            path = "/x/web-interface/coin/add",
+            bvid = bvid,
+            params = linkedMapOf(
+                "aid" to aid.toString(),
+                "multiply" to count.toString(),
+                "select_like" to if (alsoLike) "1" else "0",
+                "csrf" to csrf,
+            ),
+        )
+        return when (code) {
+            0 -> "已投 $count 枚硬币$note"
+            -403 -> throw BiliException("硬币不够了（B站返回 -403）")
+            34005 -> throw BiliException("这条视频的投币数已到上限")
+            34006 -> throw BiliException("不能给自己的视频投币")
+            else -> throw BiliException("B站拒绝了这次投币：$code $message（${friendlyCode(code)}）")
+        }
+    }
+
+    /**
+     * 收藏 / 取消收藏。
+     *
+     * `type=2` 是视频（1 是音频）。`folderId` 传 0 时用一个默认夹：
+     * 优先 `attr&2` 的那个，没有就取第一个 —— 让调用方不必先知道 id 才能用。
+     */
+    suspend fun favorite(bvid: String, add: Boolean = true, folderId: Long = 0L): String {
+        val raw = cookie().trim()
+        if (raw.isBlank()) throw BiliException("没有配置 B站 Cookie，无法收藏")
+        val csrf = cookieValue(raw, "bili_jct") ?: throw BiliException("Cookie 里缺少 bili_jct，无法收藏")
+        val aid = video(bvid).aid
+        if (aid <= 0) throw BiliException("查不到 $bvid 的 aid，收藏失败")
+
+        val target = if (folderId > 0) {
+            folderId
+        } else {
+            val folders = runCatching { favFolders() }.getOrDefault(emptyList())
+            (folders.firstOrNull { it.isDefault } ?: folders.firstOrNull())?.id
+                ?: throw BiliException("你的账号下没有可用收藏夹，先到 B站 建一个")
+        }
+
+        val (code, message) = postAction(
+            path = "/x/v3/fav/resource/deal",
+            bvid = bvid,
+            params = linkedMapOf(
+                "rid" to aid.toString(),
+                "type" to "2",
+                "add_media_ids" to if (add) target.toString() else "",
+                "del_media_ids" to if (add) "" else target.toString(),
+                "csrf" to csrf,
+            ),
+        )
+        if (code != 0) {
+            throw BiliException("B站拒绝了这次收藏：$code $message（${friendlyCode(code)}）")
+        }
+        return if (add) "已收藏到「$target」" else "已取消收藏"
+    }
+
     /**
      * 点赞的请求骨架：**参数只放 form 表单**，不签名、不往 query 里塞第二份。
      *
@@ -1182,6 +1367,33 @@ data class Comment(
 )
 
 data class BiliUser(val mid: Long, val name: String, val face: String = "")
+
+/** 我创建的收藏夹。`isDefault` 对应 attr 的 bit1，取消收藏时需要它 */
+data class FavFolder(
+    val id: Long,
+    val title: String,
+    val count: Int,
+    val isDefault: Boolean = false,
+    val isPrivate: Boolean = false,
+)
+
+data class FavVideo(
+    val bvid: String,
+    val aid: Long,
+    val title: String,
+    val author: String,
+    val durationSec: Int,
+    val play: Long,
+)
+
+data class FavPage(val items: List<FavVideo>, val hasMore: Boolean)
+
+/** 我对某条视频的操作状态。投币/收藏前用它做幂等，不赌接口幂等 */
+data class VideoRelation(
+    val like: Boolean = false,
+    val coin: Int = 0,
+    val favorite: Boolean = false,
+)
 
 /** 上传到 B站图床后的结果，字段名与评论接口的 `pictures` 一一对应 */
 data class UploadedImage(

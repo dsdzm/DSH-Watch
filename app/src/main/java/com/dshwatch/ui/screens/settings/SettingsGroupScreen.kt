@@ -69,6 +69,7 @@ import com.dshwatch.ui.components.GlassDialogButton
 import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.AppStrings
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.theme.Accents
@@ -178,7 +179,7 @@ fun SettingsGroupScreen(
                 SettingsGroups.PLUGINS -> PluginsGroup(settings, update, s)
                 SettingsGroups.MCP -> McpGroup(settings, update, container, s)
                 SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
-                else -> ConnectionGroup(settings, update, nav, s)
+                else -> ConnectionGroup(settings, update, container, nav, s)
             }
         }
     }
@@ -1048,14 +1049,39 @@ private fun PluginsGroup(settings: AppSettings, update: Update, s: AppStrings) {
 private fun ConnectionGroup(
     settings: AppSettings,
     update: Update,
+    container: AppContainer,
     nav: WatchNavigator,
     s: AppStrings,
 ) {
+    // 检查更新挪到这里之后，这一行要跟着自动检查的结果变
+    val updateState by container.updateCenter.state.collectAsStateWithLifecycle()
     SettingCard {
         SwitchRow(
             title = s.autoCheckUpdate,
             checked = settings.autoCheckUpdate,
             onCheckedChange = { v -> update { it.copy(autoCheckUpdate = v) } },
+        )
+        /*
+         * 「检查更新」紧跟在开关下面。
+         *
+         * 这两个是同一件事的两面：一个决定「要不要偷偷查」，一个决定「现在查一下」。
+         * 以前检查更新在关于页、开关在这里，用户想手动查一次得先想清楚它在哪一页 ——
+         * 而他通常是在设置里刚关掉自动检查、又想立刻确认一次有没有新版。
+         */
+        SettingRow(
+            title = s.updateCheck,
+            subtitle = when (val u = updateState) {
+                is UpdateState.Available -> s.updateNewVersion
+                UpdateState.UpToDate -> s.updateUpToDate
+                UpdateState.Checking -> s.updateChecking
+                else -> null
+            },
+            trailing = when (val u = updateState) {
+                is UpdateState.Available -> u.manifest.versionName
+                else -> "›"
+            },
+            showDivider = true,
+            onClick = { nav.push(Screen.Update) },
         )
         SettingRow(
             title = s.pairTitle,
@@ -1107,6 +1133,8 @@ private fun BiliGroup(
     s: AppStrings,
 ) {
     var editingKeywords by remember { mutableStateOf(false) }
+    var editingFavFolder by remember { mutableStateOf(false) }
+    var folderDraft by remember { mutableStateOf("") }
     var editingCookie by remember { mutableStateOf(false) }
     var editingTone by remember { mutableStateOf(false) }
     var editingToneText by remember { mutableStateOf(false) }
@@ -1339,6 +1367,31 @@ private fun BiliGroup(
             checked = settings.biliLikeEnabled,
             onCheckedChange = { v -> update { it.copy(biliLikeEnabled = v) } },
         )
+        // 投币与收藏：都会改动账号状态（硬币不可逆 / 收藏夹是用户自己的地盘），
+        // 所以和点赞分开，默认关
+        SwitchRow(
+            title = s.biliCoin,
+            subtitle = s.biliCoinHint,
+            checked = settings.biliCoinEnabled,
+            onCheckedChange = { v -> update { it.copy(biliCoinEnabled = v) } },
+        )
+        SwitchRow(
+            title = s.biliFav,
+            subtitle = s.biliFavHint,
+            checked = settings.biliFavEnabled,
+            onCheckedChange = { v -> update { it.copy(biliFavEnabled = v) } },
+        )
+        if (settings.biliFavEnabled) {
+            SettingRow(
+                title = s.biliFavFolder,
+                subtitle = settings.biliFavFolderId.ifBlank { s.biliFavFolderHint },
+                trailing = "✎",
+                onClick = {
+                    folderDraft = settings.biliFavFolderId
+                    editingFavFolder = true
+                },
+            )
+        }
     }
 
     Spacer(Modifier.height(6.dp))
@@ -1391,6 +1444,22 @@ private fun BiliGroup(
                 editingKeywords = false
             },
             onDismiss = { editingKeywords = false },
+        )
+    }
+
+    if (editingFavFolder) {
+        SimpleEditDialog(
+            title = s.biliFavFolder,
+            value = folderDraft,
+            // 收藏夹 id 是一串数字，从「我的收藏夹」地址栏里能看到；
+            // 留空是最稳的选择，所以提示语直接告诉用户这一步可以跳过
+            placeholder = s.biliFavFolderHint,
+            onChange = { folderDraft = it },
+            onConfirm = {
+                update { it.copy(biliFavFolderId = folderDraft.trim().filter { c -> c.isDigit() }) }
+                editingFavFolder = false
+            },
+            onDismiss = { editingFavFolder = false },
         )
     }
 

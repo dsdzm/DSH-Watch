@@ -82,10 +82,7 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
     override fun getApiKey(providerId: String): String? {
         val stored = get(k(providerId, FIELD_API_KEY))
         if (!stored.isNullOrBlank()) return stored
-        if (com.dshwatch.domain.model.BuiltinProvider.isBuiltin(providerId)) {
-            return com.dshwatch.BuildConfig.BUILTIN_API_KEY.takeIf { it.isNotBlank() }
-        }
-        return null
+        return com.dshwatch.domain.model.BuiltinProviders.keyOf(providerId)
     }
 
     /** 内置 key 是否可用（设置页/诊断页用来提示「内置额度已就绪」） */

@@ -23,6 +23,17 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.17.0",
+            date = "2026-11-08",
+            highlights = listOf(
+                "新增智谱 GLM 内置通道：GLM-4.7-Flash / GLM-4.6V-Flash / CogView-3-Flash 三个免费模型",
+                "内置通道设置页只保留模型参数，不再显示也不允许修改 API Key 与地址",
+                "新增文件问答：txt / md / docx / pdf / 代码，本地提取文本后随消息发送",
+                "新增画布：AI 生成的 LaTeX 公式、思维导图、几何图直接在对话里渲染并可全屏",
+                "刷 B站新增收藏夹查看、投币与收藏（默认关闭，需手动打开）",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.16.0",
             date = "2026-11-08",
             highlights = listOf(

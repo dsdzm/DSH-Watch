@@ -266,6 +266,15 @@ data class AppSettings(
      */
     val builtinDismissed: Boolean = false,
 
+    /**
+     * 逐家记录被删掉的内置供应商 id。
+     *
+     * 1.17 起内置通道不止一家（Agnes / 智谱）。只有一个布尔的时候，
+     * 用户删掉 Agnes 会连智谱一起不再注入 —— 而他从没对智谱做过任何操作。
+     * [builtinDismissed] 保留用于兼容旧存档：它仍表示「Agnes 被删过」。
+     */
+    val builtinDismissedIds: Set<String> = emptySet(),
+
     /** 屏幕形状：`auto` 跟随系统 / `round` 圆屏 / `square` 方屏 */
     val screenShape: String = ScreenShapes.AUTO,
 
@@ -500,10 +509,29 @@ data class AppSettings(
     /**
      * 允许它自己点赞。
      *
-     * 只有点赞 —— 投币那套已经整条链路删掉了：硬币是账号里不可逆的存量资源，
-     * 让模型替用户花，风险远大于收益。点赞重复点也不消耗任何东西。
+     * 点赞重复点也不消耗任何东西，所以默认开。
      */
     val biliLikeEnabled: Boolean = true,
+
+    /**
+     * 允许它投币。
+     *
+     * **默认关**，而且和点赞分开一个开关。硬币是账号里不可逆的存量资源：
+     * 点错了没有撤销入口，一天最多也就拿回几个。让模型替用户花这个成本不对等，
+     * 所以能力给到（用户明确要求），但必须用户自己打开，且单条上限 1 枚。
+     */
+    val biliCoinEnabled: Boolean = false,
+
+    /**
+     * 允许它收藏视频。
+     *
+     * 收藏不消耗资源，但会污染用户的收藏夹 —— 那是用户自己整理过的空间，
+     * 所以同样默认关。打开后只会往「默认收藏夹」或用户指定的收藏夹里放。
+     */
+    val biliFavEnabled: Boolean = false,
+
+    /** 收藏到哪个收藏夹 id；空串表示默认收藏夹（attr=0 的那个） */
+    val biliFavFolderId: String = "",
 
     /** 每天定时自动刷一轮 */
     val biliAutoRun: Boolean = false,

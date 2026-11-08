@@ -1106,6 +1106,32 @@ private fun MessageItem(
         }
 
         /*
+         * 用户上传的文件：列表形式放在正文上方。
+         *
+         * 不做成可点开的查看器 —— 手表上打开一份 60k 字的文档没有任何意义，
+         * 用户要确认的是「我到底传了哪几个文件、模型有没有读到内容」，
+         * 名字 + 字符数就把这两件事说完了。
+         */
+        if (message.attachments.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                message.attachments.forEach { att ->
+                    Text(
+                        text = "📄 ${att.name} · ${att.summary()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (att.ok) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (bodyText.isNotBlank() || message.media.isNotEmpty()) Spacer(Modifier.height(6.dp))
+        }
+
+        /*
          * 媒体放在正文之前。
          *
          * 出图 / 出视频的回复，正文通常只有一句「画好了」甚至完全为空 ——

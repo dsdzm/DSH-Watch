@@ -150,6 +150,13 @@ data class ChatMessage(
      * 默认空列表，老会话的 JSON 反序列化不受影响。
      */
     val media: List<MediaRef> = emptyList(),
+
+    /**
+     * 用户随这条消息上传的文件（txt/docx/pdf/图片…）。
+     *
+     * 只在用户消息上有值。正文不进 JSON，见 [Attachment] 的说明。
+     */
+    val attachments: List<Attachment> = emptyList(),
 ) {
     val isStreaming: Boolean get() = status == MessageStatus.STREAMING
     val hasReasoning: Boolean get() = reasoning.isNotBlank()

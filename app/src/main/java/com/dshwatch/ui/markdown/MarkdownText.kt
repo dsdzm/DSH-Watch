@@ -99,7 +99,32 @@ fun MarkdownText(
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
 
-                is MdBlock.Code -> CodeBlock(key = index, block = block, onCopyCode = onCopyCode)
+                is MdBlock.Code -> {
+                    /*
+                     * 画布类代码块先拦一道。
+                     *
+                     * 模型被要求「画个图 / 推个公式 / 列个导图」时，最自然的输出就是
+                     * 围栏代码块 —— 直接把它当代码渲染，用户看到的是一堆 LaTeX 源码，
+                     * 得自己在脑子里排版。所以在这里分流到对应的画布视图。
+                     *
+                     * 只在闭合的块上分流：流式输出到一半时 JSON/公式都不完整，
+                     * 提前渲染只会看到半张图在闪。
+                     */
+                    val canvas = if (block.closed) {
+                        com.dshwatch.ui.canvas.CanvasKind.of(block.language, block.code)
+                    } else {
+                        null
+                    }
+                    if (canvas != null) {
+                        com.dshwatch.ui.canvas.CanvasCard(
+                            kind = canvas,
+                            source = block.code,
+                            compact = true,
+                        )
+                    } else {
+                        CodeBlock(key = index, block = block, onCopyCode = onCopyCode)
+                    }
+                }
                 is MdBlock.Table -> TableBlock(block, colors)
             }
         }

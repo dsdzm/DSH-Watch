@@ -66,10 +66,35 @@ val builtinApiKey: String = run {
     }
 }
 
+/**
+ * 内置供应商（智谱 GLM）的 API Key。
+ *
+ * 读取顺序与 Agnes 完全一致（环境变量 → Gradle 属性 → local.properties），
+ * 单独做成函数是因为 1.17 加第二家内置通道时，把同一段逻辑抄两遍迟早会有一处漏改。
+ *
+ * ⚠️ 这把 key 只被授权给三个免费模型（glm-4.7-flash / glm-4.6v-flash / cogview-3-flash），
+ * 名单硬编码在 [com.dshwatch.domain.model.BuiltinProviders.ZHIPU] 里。
+ */
+fun readBuiltinKey(env: String, gradleProp: String, localProp: String): String {
+    val fromEnv = System.getenv(env)?.trim().orEmpty()
+    if (fromEnv.isNotEmpty()) return fromEnv
+    val fromGradle = providers.gradleProperty(gradleProp).orNull?.trim().orEmpty()
+    if (fromGradle.isNotEmpty()) return fromGradle
+    val local = rootProject.file("local.properties")
+    if (!local.exists()) return ""
+    val p = Properties().apply { local.inputStream().use { load(it) } }
+    return p.getProperty(localProp)?.trim().orEmpty()
+}
+
+val zhipuApiKey: String = readBuiltinKey("ZHIPU_API_KEY", "zhipuApiKey", "zhipu.apiKey")
+
 /** 转义成合法的 Java 字符串字面量，避免 key 里带引号/反斜杠把 buildConfigField 写坏 */
-val builtinApiKeyLiteral: String = builtinApiKey
+fun javaStringLiteral(raw: String): String = raw
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
+
+val builtinApiKeyLiteral: String = javaStringLiteral(builtinApiKey)
+val zhipuApiKeyLiteral: String = javaStringLiteral(zhipuApiKey)
 
 
 android {
@@ -81,8 +106,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 50
-        versionName = "1.16.0"
+        versionCode = 51
+        versionName = "1.17.0"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -90,6 +115,7 @@ android {
 
         // 内置供应商的 key，来源见文件顶部 builtinApiKey 的注释
         buildConfigField("String", "BUILTIN_API_KEY", "\"$builtinApiKeyLiteral\"")
+        buildConfigField("String", "ZHIPU_API_KEY", "\"$zhipuApiKeyLiteral\"")
 
         // androidx 自带少量 .so；需要单 ABI 时用 -Pabi 裁掉其余架构。
         if (targetAbi != null) {

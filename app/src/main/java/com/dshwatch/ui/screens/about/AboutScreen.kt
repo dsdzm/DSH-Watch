@@ -237,26 +237,10 @@ fun AboutScreen(
             SettingCard {
                 KeyValueRow(s.version, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 /*
-                 * 检查更新放在版本号下面：用户看到版本号，下一个念头就是「有没有新版」。
-                 * 没有新版本时 trailing 只给一个箭头 —— 自动检查是静默的，
-                 * 用户没问过的事不必主动告诉他「已是最新」。
+                 * 「检查更新」已移到 设置 → 连接与关于：那里和「自动检查更新」开关在一起，
+                 * 用户想管更新这件事时只需要去一个地方。这里只留版本号本身 ——
+                 * 关于页是「看这个应用是什么」的地方，不是一个操作台。
                  */
-                SettingRow(
-                    title = s.updateCheck,
-                    // 状态放副标题、版本号放右侧：手表一行只有 205dp，
-                    // 「有新版本 1.15.19」挤在一行会把标题压成省略号
-                    subtitle = when (val u = updateState) {
-                        is UpdateState.Available -> s.updateNewVersion
-                        UpdateState.UpToDate -> s.updateUpToDate
-                        UpdateState.Checking -> s.updateChecking
-                        else -> null
-                    },
-                    trailing = when (val u = updateState) {
-                        is UpdateState.Available -> u.manifest.versionName
-                        else -> "›"
-                    },
-                    onClick = { nav.push(Screen.Update) },
-                )
                 info.forEach { (k, v) -> KeyValueRow(k, v) }
                 Spacer(Modifier.height(2.dp))
             }

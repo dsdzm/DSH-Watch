@@ -132,11 +132,18 @@ private fun ProviderRow(
             Spacer(Modifier.height(2.dp))
             Text(
                 text = buildString {
-                    append(if (provider.type == ProviderType.DSH_SERVER) s.typeDsh else s.typeOpenAi)
-                    append(" · ")
-                    append(provider.defaultModel.ifBlank { "未选模型" })
-                    append(" · Key ")
-                    append(if (hasKey) "✓" else "✗")
+                    if (provider.isBuiltin) {
+                        // 内置通道对用户不暴露地址与 key，这里也不显示「Key ✓」——
+                        // 它永远是 ✓，写出来只会让人以为可以点进去改
+                        append("内置通道 · ")
+                        append(provider.defaultModel.ifBlank { "未选模型" })
+                    } else {
+                        append(if (provider.type == ProviderType.DSH_SERVER) s.typeDsh else s.typeOpenAi)
+                        append(" · ")
+                        append(provider.defaultModel.ifBlank { "未选模型" })
+                        append(" · Key ")
+                        append(if (hasKey) "✓" else "✗")
+                    }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

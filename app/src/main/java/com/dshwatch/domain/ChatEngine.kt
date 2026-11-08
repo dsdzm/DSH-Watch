@@ -417,9 +417,10 @@ class ChatEngine(
      *   输入页无论如何都会关掉，于是用户在生成期间打的字被静默吞掉：
      *   界面看起来像发出去了，会话里却没有这条消息。
      */
-    fun send(text: String): Boolean {
+    fun send(text: String, attachments: List<com.dshwatch.domain.model.Attachment> = emptyList()): Boolean {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return false
+        // 只传文件不写字是合法用法（「这份合同有什么风险」），所以附件也算内容
+        if (trimmed.isEmpty() && attachments.isEmpty()) return false
         if (job?.isActive == true) {
             _banner.value = Banner("正在生成中，先停止或等待完成")
             return false
@@ -435,8 +436,14 @@ class ChatEngine(
                  * 拿回一句「我是 image 模型，请用 /v1/images/generations」。
                  */
                 val kind = mediaKindOfActiveModel()
-                if (kind != null) runMediaSend(trimmed, kind, reuseUserMessage = false)
-                else runSend(trimmed, regenerateOf = "")
+                if (kind != null) {
+                    if (attachments.isNotEmpty()) {
+                        _banner.value = Banner("当前是出图/出视频模型，附件不会参与生成")
+                    }
+                    runMediaSend(trimmed, kind, reuseUserMessage = false)
+                } else {
+                    runSend(trimmed, regenerateOf = "", attachments = attachments)
+                }
             }
         }
         return true
@@ -763,6 +770,7 @@ class ChatEngine(
         userText: String = "",
         regenerateOf: String,
         existingHistory: List<ChatMessage>? = null,
+        attachments: List<com.dshwatch.domain.model.Attachment> = emptyList(),
     ) {
         val settings = settingsRepo.current()
         val provider = settings.activeProvider
@@ -808,6 +816,7 @@ class ChatEngine(
                 content = userText,
                 model = model,
                 providerId = provider.id,
+                attachments = attachments,
             )
             workingList = history + newUserMessage
         } else {
@@ -905,10 +914,37 @@ class ChatEngine(
          */
         val fullSeq = if (droppedPrefix.isEmpty()) workingList else droppedPrefix + workingList
         val fromIndex = if (isRoleplay) contextStart.coerceIn(0, fullSeq.size) else 0
-        var turns: List<ChatTurn> = fullSeq.drop(fromIndex).flatMap { it.toTurns() }
+        /*
+         * 附件正文按 id 预读一次。
+         *
+         * 放在这里而不是 toTurns 里现场读，是因为 turns 的构建每轮都要走一遍，
+         * 同一个附件会被重复读；也不能用 withContext(Dispatchers.IO) 包起来 ——
+         * 测试用 runTest 的虚拟时间，切到真实调度器会卡在别的线程上等不到结果。
+         * 单文件最多 6 万字，一次同步读在几毫秒内，且只发生在带附件的消息上。
+         */
+        val attachTexts: Map<String, String> = fullSeq.flatMap { it.attachments }
+            .filter { it.ok && it.kind != com.dshwatch.domain.model.AttachmentKinds.IMAGE }
+            .associate { it.id to com.dshwatch.data.attachment.AttachmentStore.readText(it) }
+        var turns: List<ChatTurn> = fullSeq.drop(fromIndex).flatMap { it.toTurns(attachTexts) }
         // 供应商不支持图片输入时，图仍留在会话里可回看，但不进请求
         if (!provider.visionInput) {
             turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
+        }
+        /*
+         * 内置通道再按模型收一道。
+         *
+         * 供应商级的 visionInput 只能表达「这家有没有视觉能力」，而智谱一家里
+         * glm-4.7-flash（纯文本）和 glm-4.6v-flash（视觉）混着放 —— 用户选了前者
+         * 又附了图，请求会直接 400。这里按模型名单再筛一次，并且明确告诉用户
+         * 图没发出去，而不是让他对着「怎么答非所问」猜。
+         */
+        val builtinSpec = com.dshwatch.domain.model.BuiltinProviders.of(provider.id)
+        if (builtinSpec != null && model !in builtinSpec.visionModels) {
+            val hadImages = turns.any { it.images.isNotEmpty() }
+            turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
+            if (hadImages) {
+                _banner.value = Banner("当前模型（$model）读不了图，图片没有发出去；切到视觉模型再试")
+            }
         }
         // 用户在这次任务里拒绝过的工具：后续同一工具不再弹窗，直接静默拒绝
         val deniedTools = mutableSetOf<String>()
@@ -1700,7 +1736,7 @@ class ChatEngine(
      * "An assistant message with 'tool_calls' must be followed by tool messages
      *  responding to each 'tool_call.id'"。
      */
-    private fun ChatMessage.toTurns(): List<ChatTurn> {
+    private fun ChatMessage.toTurns(attachTexts: Map<String, String> = emptyMap()): List<ChatTurn> {
         if (role == Role.SYSTEM) return emptyList()
 
         if (toolCalls.isNotEmpty()) {
@@ -1728,7 +1764,30 @@ class ChatEngine(
             }
         }
 
-        if (content.isBlank() && media.none { it.kind == MediaKind.IMAGE && it.isReady }) {
+        /*
+         * 附件正文拼在用户消息末尾。
+         *
+         * 不另发一条 role=user 的「文件内容」消息：那样一轮对话里会出现两条用户消息，
+         * 有些服务端会拒（要求严格 user/assistant 交替），而拼在正文里对所有
+         * OpenAI 兼容端点都成立。分隔符用明确的文件名，模型才知道哪段属于哪个文件。
+         */
+        val filesBlock = if (role == Role.USER) {
+            attachments.filter { it.ok && it.kind != com.dshwatch.domain.model.AttachmentKinds.IMAGE }
+                .mapNotNull { att ->
+                    val body = attachTexts[att.id]?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    "【文件：${att.name}】\n$body\n【文件结束：${att.name}】"
+                }
+                .joinToString("\n\n")
+        } else {
+            ""
+        }
+        val mergedContent = when {
+            filesBlock.isBlank() -> content
+            content.isBlank() -> filesBlock
+            else -> "$content\n\n$filesBlock"
+        }
+
+        if (mergedContent.isBlank() && media.none { it.kind == MediaKind.IMAGE && it.isReady }) {
             return emptyList()
         }
         /*
@@ -1736,14 +1795,18 @@ class ChatEngine(
          *
          * 助手消息上挂的是「模型生成的图」，把它当输入再发回去既没意义
          * （模型看不见自己刚生成的产物），又会让下一轮请求体白白翻倍。
+         * 用户上传的图片附件也归到 images —— 走的是同一条多模态通道。
          */
         val images = if (role == Role.USER) {
             media.filter { it.kind == MediaKind.IMAGE && it.isReady }
-                .mapNotNull { it.localFile()?.absolutePath }
+                .mapNotNull { it.localFile()?.absolutePath } +
+                attachments.filter {
+                    it.ok && it.kind == com.dshwatch.domain.model.AttachmentKinds.IMAGE
+                }.mapNotNull { it.path.takeIf { p -> p.isNotBlank() && java.io.File(p).exists() } }
         } else {
             emptyList()
         }
-        return listOf(ChatTurn(role = role.wire, content = content, images = images))
+        return listOf(ChatTurn(role = role.wire, content = mergedContent, images = images))
     }
 
     private fun setStreaming(value: Boolean) {
