@@ -171,6 +171,28 @@ class SettingsRepository(
          * 而他其实从没碰过智谱。旧存档里的 [AppSettings.builtinDismissed]
          * 只代表「Agnes 被删过」，所以只对 Agnes 生效。
          */
+        /*
+         * 归一化已存在的内置项。
+         *
+         * v1.17.0 的 `Provider.isBuiltin` 只认 Agnes，智谱那一项在设置页被当成
+         * 普通供应商：用户可以点「拉取模型」把官方全量（含付费档）灌进列表，
+         * 也能改地址。这些值一旦存档就会一直留着 —— 界面隐藏解决不了历史数据。
+         *
+         * 所以每次加载都把「界面上本来就不可编辑」的三项拉回注册表：
+         * 地址、模型名单、失效的默认模型。温度 / maxTokens / 上下文窗口
+         * 本来就应该让用户调，保持原样。
+         */
+        val normalized = out.providers.map { p ->
+            val spec = BuiltinProviders.of(p.id) ?: return@map p
+            val model = p.defaultModel.takeIf { it in spec.models } ?: spec.defaultModel
+            if (p.baseUrl == spec.baseUrl && p.models == spec.models && p.defaultModel == model) {
+                p
+            } else {
+                p.copy(baseUrl = spec.baseUrl, models = spec.models, defaultModel = model)
+            }
+        }
+        if (normalized != out.providers) out = out.copy(providers = normalized)
+
         val missingBuiltins = BuiltinProviders.all.filter { spec ->
             val dismissed = spec.id in out.builtinDismissedIds ||
                 (spec.id == BuiltinProviders.AGNES_ID && out.builtinDismissed)

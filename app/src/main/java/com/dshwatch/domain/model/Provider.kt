@@ -67,8 +67,15 @@ data class Provider(
 ) {
     val isDshServer: Boolean get() = type == ProviderType.DSH_SERVER
 
-    /** 是不是内置供应商（列表固定、不联网刷新） */
-    val isBuiltin: Boolean get() = id == BuiltinProvider.ID
+    /**
+     * 是不是内置供应商（列表固定、不联网刷新）。
+     *
+     * 这里必须问注册表，而不是拿单个常量比 —— 1.16 只有 Agnes 一家时写成
+     * `id == BuiltinProvider.ID` 是对的，加进智谱之后就变成了「智谱不算内置」：
+     * 设置页会给它放地址栏、Key 输入框和「拉取模型」按钮，
+     * 用户能直接看到并使用内置 Key，也能把官方全量付费模型拉进列表。
+     */
+    val isBuiltin: Boolean get() = BuiltinProviders.isBuiltin(id)
 
     val hasApiKey: Boolean get() = false // 实际判断在 SecureKeyStore，避免把密钥带进内存快照
 

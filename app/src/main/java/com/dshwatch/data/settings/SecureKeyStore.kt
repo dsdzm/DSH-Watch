@@ -86,7 +86,8 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
     }
 
     /** 内置 key 是否可用（设置页/诊断页用来提示「内置额度已就绪」） */
-    fun hasBuiltinKey(): Boolean = com.dshwatch.BuildConfig.BUILTIN_API_KEY.isNotBlank()
+    fun hasBuiltinKey(): Boolean =
+        com.dshwatch.domain.model.BuiltinProviders.all.any { it.key().isNotBlank() }
 
     /** 用户是否覆盖过内置 key */
     fun isBuiltinOverridden(providerId: String): Boolean =

@@ -95,7 +95,14 @@ fun ProviderEditScreen(
         )
     }
     var apiKey by remember(providerId) {
-        mutableStateOf(existing?.let { container.keyStore.getApiKey(it.id) }.orEmpty())
+        // 内置项的 key 不读进可编辑状态：一旦读出来，它就同时存在于
+        // 输入框缓存和截图里了，而这一栏对用户本来就不该存在
+        mutableStateOf(
+            existing
+                ?.takeIf { !it.isBuiltin }
+                ?.let { container.keyStore.getApiKey(it.id) }
+                .orEmpty(),
+        )
     }
     var serverToken by remember(providerId) {
         mutableStateOf(existing?.let { container.keyStore.getServerToken(it.id) }.orEmpty())
@@ -121,7 +128,9 @@ fun ProviderEditScreen(
             }
             if (toSave.type == ProviderType.DSH_SERVER) {
                 container.keyStore.putServerToken(toSave.id, serverToken.trim().ifBlank { null })
-            } else {
+            } else if (!toSave.isBuiltin) {
+                // 内置项的 key 只在编译期注入、只在请求时按 id 取，不写进本机存储：
+                // 写进去等于把内置 Key 复制一份到加密库里，诊断导出或备份都能带出来
                 container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
             }
             nav.pop()
@@ -137,7 +146,13 @@ fun ProviderEditScreen(
                 val backend = container.backends.of(draft.type)
                 backend.testConnection(
                     provider = draft.copy(baseUrl = draft.baseUrl.trim()),
-                    apiKey = apiKey.trim(),
+                    // 内置项的输入框是空的（也本来就不显示），这里要按 id 取内置 Key，
+                    // 否则自检第一步就会卡在「API Key 为空」，看起来像通道坏了
+                    apiKey = if (draft.isBuiltin) {
+                        BuiltinProviders.keyOf(draft.id).orEmpty()
+                    } else {
+                        apiKey.trim()
+                    },
                     serverToken = serverToken.trim(),
                 )
             }
@@ -562,7 +577,7 @@ fun ProviderEditScreen(
                         }
                         if (toSave.type == ProviderType.DSH_SERVER) {
                             container.keyStore.putServerToken(toSave.id, serverToken.trim().ifBlank { null })
-                        } else {
+                        } else if (!toSave.isBuiltin) {
                             container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
                         }
                         nav.pop()

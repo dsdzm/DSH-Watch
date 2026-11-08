@@ -22,6 +22,12 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        // 1.17.1 是纯修复（智谱内置项未走内置分支），按约定不写条目
+        ChangelogEntry(
+            version = "1.17.1",
+            date = "2026-11-08",
+            highlights = emptyList(),
+        ),
         ChangelogEntry(
             version = "1.17.0",
             date = "2026-11-08",
