@@ -128,6 +128,7 @@ import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.WatchDimens
 import com.dshwatch.util.Fmt
+import com.dshwatch.util.findActivity
 import kotlinx.coroutines.launch
 import java.io.File
 import com.dshwatch.ui.theme.LocalGlass
@@ -200,9 +201,16 @@ fun ChatScreen(
     DisposableEffect(Unit) {
         container.uiActions.previewFile = { path -> nav.push(Screen.WorkspacePreview(path)) }
         container.uiActions.openScreen = { key -> openScreen(nav, key) }
+        // 设备操控：AI 去操作别的 App 时，把对话页收进后台。
+        // 不然用户看不到「屏幕上在发生什么」，模型读到的也永远是自己。
+        container.uiActions.minimize = {
+            val activity = context.findActivity()
+            activity?.moveTaskToBack(true)
+        }
         onDispose {
             container.uiActions.previewFile = null
             container.uiActions.openScreen = null
+            container.uiActions.minimize = null
         }
     }
 

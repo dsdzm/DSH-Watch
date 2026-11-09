@@ -20,6 +20,16 @@ class UiActionChannel {
     @Volatile
     var openScreen: ((String) -> Unit)? = null
 
+    /**
+     * 把 App 收到后台。
+     *
+     * 设备操控要用：AI 去操作别的 App 时，DSH 的对话页不能一直盖在上面，
+     * 否则用户看不到「屏幕上在发生什么」，模型读到的也永远是自己。
+     * 拿不到 Activity 时（后台任务、单测）为空，工具侧会跳过这一步。
+     */
+    @Volatile
+    var minimize: (() -> Unit)? = null
+
     companion object {
         const val SCREEN_SETTINGS = "settings"
         const val SCREEN_PROVIDERS = "providers"

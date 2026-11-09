@@ -129,6 +129,9 @@ interface AppStrings {
     /** 字号滑块下面那行实时预览文字 */
     val fontPreview: String
     val language: String
+
+    /** 当前是不是中文界面。少数新页面用它就地取词，省得为一段说明加十几个字段。 */
+    val isChinese: Boolean
     val langSystem: String
     val langZh: String
     val langEn: String
@@ -684,6 +687,7 @@ object Zh : AppStrings {
     override val fontLarge = "大"
     override val fontPreview = "这段字会跟着上面的滑块变大变小"
     override val language = "界面语言"
+    override val isChinese = true
     override val langSystem = "跟随系统"
     override val langZh = "中文"
     override val langEn = "English"
@@ -1212,6 +1216,10 @@ object Zh : AppStrings {
         "bili_fav_list" -> "收藏夹内容"
         "bili_coin" -> "投币"
         "bili_fav" -> "收藏视频"
+        "device_screen" -> "看屏幕"
+        "device_act" -> "操作屏幕"
+        "device_open" -> "打开应用"
+        "device_handoff" -> "交给用户"
         else -> tool
     }
 }
@@ -1314,6 +1322,7 @@ object En : AppStrings {
     override val fontLarge = "L"
     override val fontPreview = "This line resizes with the slider above"
     override val language = "Language"
+    override val isChinese = false
     override val langSystem = "System"
     override val langZh = "中文"
     override val langEn = "English"
@@ -1845,6 +1854,10 @@ object En : AppStrings {
         "bili_fav_list" -> "Folder videos"
         "bili_coin" -> "Toss a coin"
         "bili_fav" -> "Fav video"
+        "device_screen" -> "Read screen"
+        "device_act" -> "Act on screen"
+        "device_open" -> "Open app"
+        "device_handoff" -> "Hand off"
         else -> tool
     }
 }

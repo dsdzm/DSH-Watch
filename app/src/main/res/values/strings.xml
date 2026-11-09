@@ -13,4 +13,7 @@
     <string name="notification_channel_alarm">闹钟</string>
     <string name="notification_channel_alarm_desc">由 AI 助手设置的手表闹钟</string>
     <string name="notification_alarm_body">时间到了</string>
+
+    <!-- 设备操控：系统「无障碍」列表里显示的那段说明。用户要从这里判断该不该开 -->
+    <string name="device_a11y_description">让 AI 助手读取当前屏幕上的按钮与文字，并按你的指示点击、输入。只在你打开「设备操控」并开始任务时工作；每次操作都会在屏幕上显示一个小条，随时可以点停止。</string>
 </resources>

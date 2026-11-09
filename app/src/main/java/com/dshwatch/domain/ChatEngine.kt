@@ -1012,6 +1012,14 @@ class ChatEngine(
                  * 而酒馆/写作场景里任何能力说明都会把人设带跑。
                  */
                 if (!isRoleplay) append(CanvasGuide.PROMPT)
+                /*
+                 * 设备操控的规则只在开关打开时注入。它讲的是「操作期间用户看不见对话」
+                 * 这类任务级约束 —— 不看这段，模型会在中途用 ask_user 提问，
+                 * 而那个问题会永远悬在那里（用户正盯着被操作的那个 App）。
+                 */
+                if (!isRoleplay && settings.deviceControlEnabled) {
+                    append("\n\n").append(com.dshwatch.domain.agent.DeviceGuide.PROMPT)
+                }
             }
             // agentOn=false 时 toolSpecs 本来就是空的，这里再加一道保险：
             // overlay（风神）是编程场景的插件，角色扮演场景不该被它插一手。
@@ -1241,6 +1249,14 @@ class ChatEngine(
 
         setStreaming(false)
         _live.value = LiveDelta()
+        /*
+         * 设备操控的悬浮条跟着这一轮一起收起。
+         *
+         * 模型不再调工具 = 这轮操控结束了；此时如果条还挂在屏幕上，
+         * 传达的信息是「AI 仍然在操作你的设备」，而事实并非如此。
+         * 用户点停止的那条路径已经收过一次，end() 是幂等的。
+         */
+        runCatching { com.dshwatch.domain.device.DeviceControlHub.end() }
     }
 
     /** 单步流式请求的产物 */

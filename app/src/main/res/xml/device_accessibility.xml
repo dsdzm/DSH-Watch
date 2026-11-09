@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设备操控的无障碍服务配置。
+
+  能力声明只留必需的两项：
+    canRetrieveWindowContent —— 读 UI 树（没有它连按钮文字都拿不到）
+    canPerformGestures      —— 注入点击/滑动（节点层面点不动的自绘控件靠它）
+
+  事件类型只订阅窗口变化：内容变化事件在表盘上每秒几十个，
+  订阅它们纯属耗电，而读屏本来就是按需触发的。
+
+  isAccessibilityTool=false 是刻意的：本服务不是给视障用户用的辅助工具，
+  如实声明比伪装成辅助工具更容易通过商店与系统的审查。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/device_a11y_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="120" />

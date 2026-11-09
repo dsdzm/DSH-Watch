@@ -1,7 +1,9 @@
 package com.dshwatch.core
 
 import android.content.Context
+import android.content.Intent
 import com.dshwatch.DshWatchApp
+import com.dshwatch.MainActivity
 import com.dshwatch.data.settings.SecureKeyStore
 import com.dshwatch.data.settings.SettingsRepository
 import com.dshwatch.data.store.ConversationStore
@@ -244,6 +246,30 @@ class AppContainer(private val app: Context) {
     )
 
     init {
+        /*
+         * 设备操控的「停止」要一路传到对话引擎。
+         *
+         * 悬浮条上的停止按钮在无障碍服务里，它只认识状态中枢，拿不到这次对话的 Job。
+         * 所以在这里把两端接起来：中枢说「停」，引擎真正 cancel，
+         * 再把用户拉回对话页 —— 否则屏幕停在一个第三方 App 上，
+         * 用户不知道 AI 到底停没停。
+         */
+        com.dshwatch.domain.device.DeviceControlHub.onStopRequested = { reason ->
+            engine.stop()
+            com.dshwatch.domain.device.DeviceControlHub.end()
+            Logx.i("DeviceControl", "已停止：$reason")
+            runCatching {
+                app.startActivity(
+                    Intent(app, MainActivity::class.java).apply {
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                        )
+                    },
+                )
+            }
+        }
+
         appScope.launch {
             settings.collect { s ->
                 _settingsReady.value = true

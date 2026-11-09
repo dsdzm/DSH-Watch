@@ -22,6 +22,15 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.18.0",
+            date = "2026-11-09",
+            highlights = listOf(
+                "新增设备操控：AI 可以读取屏幕、点击、输入、打开应用",
+                "操作时 DSH 退到后台，屏幕底部显示当前动作与停止按钮",
+                "密码、验证码与支付确认不代填，遇到会让用户接手",
+            ),
+        ),
         // 1.17.4 是纯修复（几何内联坐标解析、公式 \Big 与长箭头），按约定不写条目
         ChangelogEntry(
             version = "1.17.4",

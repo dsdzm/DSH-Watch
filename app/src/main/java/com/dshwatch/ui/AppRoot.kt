@@ -218,6 +218,11 @@ fun AppRoot(
                         settings = settings,
                         nav = nav,
                     )
+                    Screen.DeviceControl -> com.dshwatch.ui.screens.settings.DeviceControlScreen(
+                        container = container,
+                        settings = settings,
+                        nav = nav,
+                    )
                     is Screen.SettingsGroup -> SettingsGroupScreen(
                         groupId = page.id,
                         container = container,

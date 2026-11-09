@@ -33,6 +33,15 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
+        <!--
+          设备操控要列出「有哪些能打开的 App」。Android 11+ 不声明这一段，
+          queryIntentActivities 只会返回自己和系统应用，表现为
+          「明明装了微信，模型说找不到」。
+        -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
     </queries>
 
     <application
@@ -104,6 +113,29 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          设备操控的无障碍服务。
+
+          exported=true 是系统绑定要求的：只有系统（持 BIND_ACCESSIBILITY_SERVICE
+          签名权限）能连上，普通应用绑不了。用户不开这个服务时它完全不运行。
+
+          刻意不声明 uses-permission BIND_ACCESSIBILITY_SERVICE ——
+          那是系统签名权限，应用声明了也拿不到，只在 service 上用
+          android:permission 限住谁能绑定。
+        -->
+        <service
+            android:name=".service.DeviceA11yService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/device_accessibility" />
+        </service>
 
         <!-- Wear OS 2.x/3.x 独立运行（不依赖手机端 App） -->
         <meta-data

@@ -287,6 +287,17 @@ private fun AbilityGroup(
             trailing = "›",
             onClick = { nav.push(Screen.ExecSettings) },
         )
+        // 设备操控：和上面两项同一层——都是「AI 能把事情做到哪一步」的开关。
+        // 放在这里而不是「连接」组，是因为它不涉及网络，只涉及权限。
+        SettingRow(
+            title = if (s.isChinese) "设备操控" else "Device control",
+            subtitle = when {
+                settings.deviceControlEnabled -> if (s.isChinese) "已开启，可读屏并操作" else "On"
+                else -> if (s.isChinese) "关闭（需要系统无障碍权限）" else "Off"
+            },
+            trailing = "›",
+            onClick = { nav.push(Screen.DeviceControl) },
+        )
     }
 
     if (showAgentDialog) {

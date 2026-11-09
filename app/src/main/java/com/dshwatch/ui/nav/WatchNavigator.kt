@@ -31,6 +31,9 @@ sealed interface Screen {
     data class Input(val initial: String = "") : Screen
     data object ExecSettings : Screen
 
+    /** 设备操控：无障碍授权、开关、范围说明 */
+    data object DeviceControl : Screen
+
     /** B站扫码登录 */
     data object BiliLogin : Screen
 
@@ -165,6 +168,7 @@ class WatchNavigator internal constructor(
             Screen.Workspace -> "ws"
             is Screen.WorkspacePreview -> "wsp${SEP}${screen.path}"
             Screen.ExecSettings -> "exec"
+            Screen.DeviceControl -> "devctl"
             Screen.BiliLogin -> "bililogin"
             Screen.GroupChat -> "group"
             Screen.Donate -> "donate"
@@ -200,6 +204,7 @@ class WatchNavigator internal constructor(
                 "diag" -> Screen.Diagnostics
                 "ws" -> Screen.Workspace
                 "exec" -> Screen.ExecSettings
+                "devctl" -> Screen.DeviceControl
                 "bililogin" -> Screen.BiliLogin
                 "group" -> Screen.GroupChat
                 "donate" -> Screen.Donate

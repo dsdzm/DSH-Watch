@@ -249,6 +249,17 @@ data class AppSettings(
     /** 用户点过「总是允许」的工具名 */
     val autoApprovedTools: Set<String> = emptySet(),
 
+    /**
+     * 设备操控：让模型通过无障碍服务读屏并操作手表上的其他 App。
+     *
+     * 默认关，而且是**必须由用户在设备上亲手打开**的那一类开关 ——
+     * 它意味着「模型能看到我屏幕上的内容」。默认开的话，
+     * 用户是在完全不知情的情况下把这块权限交出去的。
+     *
+     * 开关为 false 时四个 device_* 工具连 schema 都不进请求（见 [AgentTool.enabled]）。
+     */
+    val deviceControlEnabled: Boolean = false,
+
     // ---------------- 初次引导 / 外观 ----------------
     /**
      * 是否完成首次启动引导。
