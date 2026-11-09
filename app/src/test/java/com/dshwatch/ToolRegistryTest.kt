@@ -47,9 +47,19 @@ class ToolRegistryTest {
         assertThat(spec["type"]?.jsonPrimitive?.content).isEqualTo("function")
         val function = spec["function"]!!.jsonObject
         assertThat(function["name"]?.jsonPrimitive?.content).isEqualTo("calculate")
-        assertThat(function["description"]?.jsonPrimitive?.content).contains("副作用")
+        // 只读工具不再标注「副作用：只读」—— 那只是白占 token
+        assertThat(function["description"]?.jsonPrimitive?.content)
+            .doesNotContain("副作用")
         assertThat(function["parameters"]!!.jsonObject["type"]?.jsonPrimitive?.content)
             .isEqualTo("object")
+    }
+
+    @Test
+    fun `write tools still declare their side effect`() {
+        val spec = ToolRegistry.specOf(com.dshwatch.domain.agent.tools.WorkspaceTools.WriteFileTool)
+        val desc = spec["function"]!!.jsonObject["description"]!!.jsonPrimitive.content
+        assertThat(desc).contains("副作用")
+        assertThat(desc).contains("写操作")
     }
 
     @Test

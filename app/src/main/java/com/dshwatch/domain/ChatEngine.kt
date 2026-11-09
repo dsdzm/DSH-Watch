@@ -5,6 +5,7 @@ import com.dshwatch.core.Logx
 import com.dshwatch.data.store.ConversationStore
 import com.dshwatch.data.store.StoredConversation
 import com.dshwatch.data.usage.UsageRepository
+import com.dshwatch.domain.agent.AgentGuide
 import com.dshwatch.domain.agent.AgentTool
 import com.dshwatch.domain.agent.ApprovalPolicy
 import com.dshwatch.domain.agent.CanvasGuide
@@ -990,12 +991,10 @@ class ChatEngine(
                 buildString {
                     append("\n\n【可用工具】\n").append(roundNames.joinToString("、"))
                     if (allowed != null) {
-                        append("\n注意：**本轮只开放了这些**（首轮聚焦，不是 App 的全部能力）。")
-                        append("从下一轮开始其余工具也会开放 —— 所以「这里没有某个工具」")
-                        append("不等于「App 做不到这件事」，不要据此告诉用户能力缺失。")
+                        // 这一句不能删：首轮收窄时，模型会据「名单里没有」推断「App 做不到」
+                        append("\n（本轮只开放这些，下一轮放开其余 —— 「这里没有」≠「App 做不到」。）")
                     } else {
-                        append("\n以上是全部可调用的工具。判断某个能力有没有工具时以此为准，")
-                        append("不要凭印象说\"没有某个工具\"。")
+                        append("\n（以上为本轮全部工具；判断某能力有没有工具时以此为准，不要凭印象。）")
                     }
                 }
             }
@@ -1221,8 +1220,11 @@ class ChatEngine(
                 denialFedBack = true
             }
 
-            // 停滞检测：连续几步没有任何新进展，就别再让它空转
-            val verdict = progressTracker?.record(executed)
+            // 停滞检测：连续几步没有任何新进展，就别再让它空转。
+            // 设备操控期间不启用 —— 读屏两次内容相同是常态，见 ProgressTracker 的说明。
+            val inDeviceSession =
+                com.dshwatch.domain.device.DeviceControlHub.state.value.running
+            val verdict = progressTracker?.record(executed, stallDetection = !inDeviceSession)
             if (verdict is ProgressTracker.Verdict.Stalled) {
                 _banner.value = Banner(verdict.reason + "任务可能卡住了 —— 可以补充信息后继续。")
                 break
@@ -1645,71 +1647,8 @@ class ChatEngine(
         // 不加的话模型经常把工具当装饰不用，或者凭记忆编造实时信息。
         //
         val agentHint = if (settings.agentMode != AgentMode.OFF) {
-            """
-
-            【工具使用】
-            你可以调用工具获取实时信息或产生副作用。需要外部信息时**直接调用工具**，不要凭记忆编造。
-            可以连续调用多步：每步只做一件事，拿到结果后再决定下一步。
-            最终回答不要复述工具原始输出，只给结论。
-
-            【改文件优先用 edit_file】
-            改已有文件用 edit_file 做精确替换，**不要** read 全文再 write 回去 ——
-            那要多花一倍 token，而且整份重写很容易因为单次输出上限被截断而整次失败。
-            只有新建文件或整份重写时才用 write_file；在末尾追加用 append_file。
-
-            【多步任务先列清单】
-            预计超过 3 步的任务，先调 todo_write 把计划写下来，之后每完成一步更新一次。
-            这既是给你自己看的（长对话里上下文会被工具输出挤占，容易忘记原本要做什么），
-            也让用户能实时看到进度。
-
-            【干活要留文档】
-            只要这次是「做事」而不是一两句问答（写代码、改配置、成篇查资料、排查问题），
-            收尾时用 write_file 在工作目录写一份 md 说明，建议 `notes/<主题>.md`，写清五件事：
-            目标、结论、改了哪些文件、怎么验证、还没做什么。
-            预计超过 3 步的任务，从开始就维护 `notes/task.md`（目标 / 当前进度 / 下一步），
-            每完成一步更新它 —— 上下文会被裁剪，这份文档是你跨步骤唯一可靠的记忆。
-            纯聊天、单次查询、一句话能答完的事**不要**硬写文档，那是浪费用户的时间。
-
-            【写完代码必须校验】
-            写完代码后调一次 build_project。它会按语言做静态检查（括号与字符串闭合、
-            Python 缩进与冒号、HTML/XML 标签配对、JSON/YAML 语法等）并给出「文件:行号」。
-            这是你**在本机验证代码最快的手段**，不要写完就直接交付。
-            ⚠️ 它只做静态校验，**不产出可执行文件** —— 手表上没有编译器，别说"我在本地编译"。
-            有报错就改完再调一次，直到通过。
-
-            【校验通过 ≠ 真的能跑，要跑就用 run_script】
-            静态检查抓不出「变量名打错、索引越界、逻辑写反、路径不对」这类问题，
-            只有执行才暴露。要验证结果对不对，用 run_script 真的跑一遍：
-            - language=shell：设备上真实的 sh，可以 `ls`、`grep`、`sed`、跑已写好的 sh 脚本；
-            - language=js：JavaScript（ES6，**不支持 async/await**，无 DOM/fetch）。
-            ⚠️ **本地只有 shell 和 js，没有 python / node / java / gcc**。
-            两种语言是彼此独立的执行路径，`language=shell` + `python main.py` 一定失败。
-            要跑 Python / Java / C++，一律交给 cloud_build 在云端执行。
-            跑之前先想清楚脚本会输出什么，一次跑对；不要靠反复试错烧用户的时间。
-            你每次调用的完整输出（包括很长的）都会回灌给你，前面做过什么都在上下文里 ——
-            不要重跑已经执行过的命令；要定位长输出里的特定内容，用 grep 或 `read_file offset=...`。
-
-            【本机真做不了的，交给云端 cloud_build】
-            手表上没有 JDK/Kotlin 编译器/Android SDK，编 apk、跑 gradle、用 gcc 这类需求
-            本地永远做不到。这时用 cloud_build 走云端 GitHub Actions：
-            用 write_file 把源码写进工作目录，再用 inputs.command 传命令 ——
-            **工作目录里的文件会被自动打包上传**，所以命令行直接引用文件名就行
-            （例如 `python main.py`、`gcc main.c -o main && ./main`）。
-            产物请写到 dsh-out/，它会下载回 `artifacts/` 目录；构建本项目 APK 用 dsh-build.yml。
-            注意三点：① 代码会离开设备发到用户自己的仓库，所以每次都会请用户确认；
-            ② 云端跑一次要几分钟，**不要重复触发**，要看进度用 cloud_job；
-            ③ 工作目录文件太多太大时会超出云端能接收的长度上限，这时用 files 参数只挑必要的文件。
-
-            【以 mcp_ 开头的工具来自外部服务】
-            它们是用户自己接上的 MCP server 提供的，调用等于把参数**发到那台服务器**。
-            所以：只在这些工具确实能完成任务时用，不要为"试试看"而调用；
-            调用前在参数里只放必要的字段，别把整段文件内容或凭据塞进去；
-            失败了先读错误信息（通常写明了地址/权限问题），不要原样重试。
-
-            【需要用户操作时，直接送他过去】
-            要用户手动做某件事（配置 API Key、开本地执行、看产物、设日程）时，用 open_screen / open_file /
-            create_event 把界面打开，而不是只在回答里描述路径 —— 手表屏幕上找菜单很费劲。
-            """ + workspaceHint(workDir)
+            // 只写「怎么用」，参数细节留在各工具的 description 里 —— 两边不重复讲
+            "\n\n" + AgentGuide.PROMPT + workspaceHint(workDir)
         } else {
             ""
         }

@@ -37,15 +37,9 @@ object BuildTools {
     object BuildProjectTool : AgentTool {
         override val name = "build_project"
         override val description =
-            "校验并构建当前工作目录。会按文件类型逐个做静态检查：" +
-                "JSON/YAML 解析、XML/HTML 标签配对、" +
-                "JS/TS/Java/Kotlin/C/Swift/Go 的括号与字符串闭合、" +
-                "Python 的缩进一致性与冒号、" +
-                "CSS/SCSS 括号、Shell 的 if/fi 与 do/done 配对等。" +
-                "**有错误会直接失败并给出「文件:行号」**，修好后重新调用即可 —— " +
-                "这是你在手表上唯一能验证代码正确性的手段，写完代码请务必调一次。" +
-                "若项目里有 HTML 入口，还会把它引用的本地 CSS/JS/图片内联成单文件，产出可预览的 dist/*.html；" +
-                "其它语言只出校验报告（手表上没有这些语言的编译器，无法产出可执行文件）。"
+                        "校验并构建当前工作目录：JSON/YAML 解析、XML/HTML 标签配对、JS/TS/Java/Kotlin/C/Swift/Go 的括号与字符串闭合、Python 缩进与冒号、CSS 括号、Shell 的 if/fi 与 do/done 配对。" +
+            "有错直接失败并给出「文件:行号」，改完重调。**这是手表上唯一能验证代码正确性的手段，写完务必调一次**。" +
+            "有 HTML 入口时会把引用的本地 CSS/JS/图片内联成单文件，产出可预览的 dist/*.html；其它语言只出校验报告 —— 手表上没有编译器，不产出可执行文件。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf(

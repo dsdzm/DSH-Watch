@@ -189,7 +189,7 @@ class DeviceA11yService : AccessibilityService() {
             elements = collected,
             detail = detail,
             note = when {
-                DeviceGuard.isBlocked(pkg) -> "受保护页面：只能看，不能操作"
+                DeviceGuard.isBlocked(pkg) -> "权限 / 安装页面：只能看，不能操作"
                 collected.isEmpty() -> "这一屏读不到控件"
                 else -> null
             },

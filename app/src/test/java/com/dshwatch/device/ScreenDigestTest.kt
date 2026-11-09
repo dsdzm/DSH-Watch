@@ -206,9 +206,9 @@ class DeviceControlHubTest {
 class DeviceGuardTest {
 
     @Test
-    fun `settings pages are blocked`() {
-        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.settings")).isTrue()
-        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.miui.settings")).isTrue()
+    fun `settings pages are allowed - user asked for AI to change settings`() {
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.settings")).isFalse()
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.miui.settings")).isFalse()
     }
 
     @Test
@@ -234,8 +234,8 @@ class DeviceGuardTest {
 
     @Test
     fun `refusal tells the model what to do next`() {
-        val msg = com.dshwatch.domain.device.DeviceGuard.refusal("com.android.settings")
+        val msg = com.dshwatch.domain.device.DeviceGuard.refusal("com.android.permissioncontroller")
         assertThat(msg).contains("device_handoff")
-        assertThat(msg).contains("系统设置")
+        assertThat(msg).contains("权限")
     }
 }

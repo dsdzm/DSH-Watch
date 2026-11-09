@@ -72,21 +72,9 @@ object CloudTools {
     object CloudBuildTool : AgentTool {
         override val name = "cloud_build"
         override val description =
-            "在**云端 GitHub Actions** 上运行一个 workflow，做本地做不到的事（编 APK、Gradle/Maven、" +
-                "gcc/g++、Kotlin/Java/Go/Rust 编译等）。工作目录里的文件会自动打包上传，" +
-                "命令里直接引用文件名即可（如 `python main.py`）。\n" +
-                "**两个模板分工不同，选错会白跑一次**：\n" +
-                "· `dsh-run.yml`（跑任意命令）—— 参数 `inputs.command`；环境是**基础 Ubuntu，" +
-                "没有 JDK / Android SDK**；产物写到 `dsh-out/`（为空时会自动从 app/build/outputs、" +
-                "build、dist、target/release 等目录收集常见产物）。\n" +
-                "· `dsh-build.yml`（构建本项目 APK）—— 自带 JDK 17 + Android SDK；参数是 " +
-                "`inputs.variant=debug|release`（可选 `extra_tasks`，如 `:app:testDebugUnitTest` " +
-                "顺手跑一遍单测），**它不接受 command**，传了会被拒绝。\n" +
-                "所以：**要编 Android 就用 dsh-build.yml，不要用 dsh-run.yml 跑 gradle**。" +
-                "**默认触发后立刻返回**（不阻塞等待），拿到的 run 链接可以直接给用户；" +
-                "查进度用 `cloud_job(action=status)`，看日志用 `action=logs`，下产物用 `action=artifacts`。" +
-                "只有确实需要同步结果时才传 `wait=true`（此时最多等到 timeout_sec，默认 300 秒）。" +
-                "注意：代码会离开设备发到用户自己的仓库，每次都会请用户确认。"
+            "在**云端 GitHub Actions** 跑 workflow，做本地做不到的编译（APK、gcc、JVM、Go、Rust）。工作目录自动上传，命令里直接引用文件名。" +
+            "模板二选一：`dsh-run.yml` 跑任意命令（inputs.command，基础 Ubuntu，**无 JDK/Android SDK**，产物写 `dsh-out/`）；`dsh-build.yml` 编本项目 APK（带 JDK17+SDK，参数 variant=debug|release，可传 extra_tasks，**不接受 command**）。要编 Android 只能用后者。" +
+            "默认触发后立刻返回，用 `cloud_job(status/logs/artifacts)` 跟进；必须同步才传 wait=true（≤timeout_sec，默认 300s）。代码会上传到用户仓库，每次都会请求确认。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(

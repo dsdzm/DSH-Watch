@@ -114,4 +114,30 @@ class ProgressTrackerTest {
         val denied = listOf(call("run_script", "{}", ToolStatus.DENIED))
         assertThat(tracker.record(denied)).isInstanceOf(noProgress)
     }
+
+    @Test
+    fun `device session never stalls on repeated screens`() {
+        /*
+         * 设备操控的步态：读屏 → 点击 → 读屏 → 点击……
+         * 两次读屏的参数一样、返回的屏幕也可能一样，按指纹就是「无进展」。
+         * 关掉停滞检测后，跑十轮也不该停 —— 否则用户看到的是
+         * 「AI 点了两下就说卡住了」。
+         */
+        val tracker = ProgressTracker(stallThreshold = 3)
+        val screen = listOf(call("device_screen", "{}"))
+        repeat(10) {
+            val verdict = tracker.record(screen, stallDetection = false)
+            assertThat(verdict).isNotInstanceOf(stalled)
+        }
+    }
+
+    @Test
+    fun `device session tolerates repeated failures`() {
+        // 点不到元素、屏幕刚切走都会返回失败；这类失败是反馈，不是卡死
+        val tracker = ProgressTracker(stallThreshold = 3)
+        val failed = listOf(call("device_act", """{"action":"tap","id":3}""", ToolStatus.FAILED))
+        repeat(5) {
+            assertThat(tracker.record(failed, stallDetection = false)).isNotInstanceOf(stalled)
+        }
+    }
 }

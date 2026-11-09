@@ -66,20 +66,10 @@ object ScriptTools {
         override val name = "run_script"
 
         override val description =
-            "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。两种语言：" +
-                "- language=shell：设备上真实的 sh，管道、重定向、grep/sed/awk 都能用；" +
-                "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）。" +
-                "脚本会自动包进函数体执行，可以直接用 `return` 交结果（返回值会被打印出来），" +
-                "也可以 console.log / print 输出，两种都行。" +
-                "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
-                "两种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
-                "需要 Python / Java / C++ 时交给 cloud_build 在云端执行。" +
-                "什么时候用：写完代码想验证**真的能跑通、结果对不对**时用。" +
-                "只想快速查语法错误用 build_project（更快、零风险）。" +
-                "需要「编译出东西」（apk、gcc、gradle）用 cloud_build —— 那些本机做不到。" +
-                "执行结果包含退出码、stdout、stderr；写文件请写到当前工作目录（相对路径即可）。" +
-                "注意：每次执行都会请用户确认（这是不可关闭的一道确认）。" +
-                "脚本能读写工作目录、能发起网络请求；但没有 root、访问不到其它应用的数据。"
+                        "在当前工作目录真的执行脚本，返回退出码、stdout、stderr。" +
+            "language=shell：真实 sh（管道、重定向、grep/sed/awk）；js：ES6，**不支持 async/await**，无 DOM/fetch。脚本自动包进函数体，可用 `return` 交结果（会打印），也可 console.log/print。" +
+            "**没有 python / node / java / gcc**，两种语言不能互相调用；要跑这些用 cloud_build。验证「真的能跑、结果对不对」用它；只查语法用 build_project（更快、零风险）。" +
+            "每次执行都会请用户确认；可读写工作目录与联网，但没有 root、访问不到其它应用的数据。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf(

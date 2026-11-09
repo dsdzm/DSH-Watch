@@ -104,12 +104,8 @@ object DeviceIntegrationTools {
     object OpenScreenTool : AgentTool {
         override val name = "open_screen"
         override val description =
-            "打开 App 内的某个页面，把用户直接送到该去的地方。" +
-                "当你需要用户手动做某件事时（配置 API Key、查看用量、看工作空间产物、跑连接诊断、" +
-                "开启本地执行或云端编译），调用它，而不是只在回答里描述路径。" +
-                "可用页面：settings（设置）、providers（供应商配置）、usage（用量统计）、" +
-                "workspace（工作空间文件）、sessions（历史会话）、diagnostics（连接诊断）、" +
-                "about（关于）、exec（执行与编译：本地脚本执行 / 云端编译的开关与配置）。"
+                        "打开 App 内页面，把用户直接送到该去的地方（需要他手动做事时用，不要只在回答里写路径）。" +
+            "可选：settings（设置）、providers（供应商）、usage（用量）、workspace（工作空间）、sessions（会话）、diagnostics（诊断）、about（关于）、exec（执行与编译）。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
             properties = mapOf(

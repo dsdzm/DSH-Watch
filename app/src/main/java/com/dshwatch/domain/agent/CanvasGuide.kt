@@ -21,26 +21,23 @@ package com.dshwatch.domain.agent
  *
  * ## 体积
  *
- * 每轮请求都会带上这段（约 200 token）。所以只给最小可用语法，
- * 细节交给围栏里的示例：几何给一段能直接改的 JSON，公式只说支持的子集，
- * 导图一句话说清缩进规则。
+ * 每轮请求都会带上这段。压缩后的原则是「示例 > 描述」：几何直接给一段能改的
+ * JSON（字段名自解释），公式只列符号表，导图一句话说清缩进规则。
  */
 object CanvasGuide {
 
     val PROMPT: String = """
 
-【绘图不是工具，是输出格式】
-上面没有 draw / 画图 之类的工具，但你可以直接输出下面三种围栏代码块，App 会把它渲染成图并支持全屏。不要因为工具表里没有就回答"没有画图能力"。
+【画图不是工具，是输出格式】
+工具表里没有画图工具，但你可以直接输出下面三种围栏代码块，App 会渲染成图（可全屏）。用户说「画几何图 / 示意图 / 脑图 / 写公式」时直接输出，不要说没有这个能力。
 
-1) 几何图：用 ```geom 包一段 JSON
+1) 几何图：```geom 包一段 JSON（数学坐标，y 轴向上；缩放与标签位置由 App 处理，不用算像素）
 {"points":[{"name":"A","x":0,"y":0},{"name":"B","x":4,"y":0},{"name":"C","x":0,"y":3}],"segments":[["A","B"],["A","C"],["B","C"]],"circles":[{"center":"A","r":2}],"angles":[{"at":"A","from":"B","to":"C","label":"53°"}],"texts":[{"x":1,"y":1,"text":"AB=4"}]}
-可用字段：points / segments / lines / circles / polygons / angles / texts / axes。坐标是数学坐标（y 轴向上），缩放与标签位置由 App 处理，不需要你算像素。
-引用要么用 points 里的点名，要么在该元素里直接写坐标对：segments 可写 [["A","B"]] 或 [[-1.5,0.5],[-0.5,3.25]]；一段给三个以上坐标就是折线，适合画函数图象。用 axes:true 时原点会自动进入视野。
+字段：points / segments / lines / circles / polygons / angles / texts / axes。
+引用可用点名或坐标对（[["A","B"]] 或 [[-1.5,0.5],[-0.5,3.25]]）；一段给三个以上坐标就是折线，适合函数图象；axes:true 时原点自动进入视野。
 
-2) 公式：用 ```math 包 LaTeX。支持分式 \frac、根号 \sqrt、上下标、\sum / \int、\left( \right)、\Big( \Big)、希腊字母、长箭头 \Longleftrightarrow 与常用运算符；不要写导言区、\begin{document} 或自定义宏。
+2) 公式：```math 包 LaTeX 子集。支持 \frac \sqrt 上下标 \sum \int \left( \right) \Big( 希腊字母 长箭头 \Longleftrightarrow 与常用运算符；不要写导言区、\begin{document} 或自定义宏。
 
-3) 思维导图：用 ```mindmap 包缩进列表，第一行是根节点，每级缩进 2 个空格。
-
-用户说"画个几何图 / 画板 / 示意图 / 脑图 / 写个公式"时，直接用对应围栏输出，不要声称没有这个能力。
+3) 思维导图：```mindmap 包缩进列表，第一行是根节点，每级缩进 2 个空格。
 """.trimEnd()
 }

@@ -790,12 +790,8 @@ object BiliTools {
     object ReplyTool : AgentTool {
         override val name = "bili_reply"
         override val description =
-            "发评论，或回复某条评论。**直接发送，不需要用户确认** —— 但只有设置里模式为" +
-                "「发评论」时才能用，否则会被拒绝。" +
-                "配图（摸鱼卡 / 相册图）与 @ 用户由设置自动附加，你不用管。" +
-                "要回复某个人：传 root（这栋楼的根评论 rpid）+ parent（对方那条的 rpid），" +
-                "两个 id 由 bili_inbox / bili_comments 给出。" +
-                "语气必须遵守 bili_status 返回的「评论风格」。"
+                        "发评论或回复。**直接发送，不需要用户确认**，但只有设置里的模式是「发评论」时才可用，否则会被拒绝。配图与 @ 由设置自动附加。" +
+            "回复某人：传 root（楼根 rpid）+ parent（对方那条的 rpid），id 来自 bili_inbox / bili_comments。语气遵守 bili_status 返回的「评论风格」。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(

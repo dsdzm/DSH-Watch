@@ -47,7 +47,16 @@ class ProgressTracker(private val stallThreshold: Int = 3) {
         data class Stalled(val reason: String) : Verdict
     }
 
-    fun record(records: List<ToolCallRecord>): Verdict {
+    /**
+     * 记录一步。
+     *
+     * @param stallDetection 是否启用「停滞就停」。设备操控期间必须关掉：
+     *   读屏 → 点击 → 读屏 是**正常步态**，而两次读屏的内容往往一模一样
+     *   （列表没动、等待加载），按指纹判就是「连续无进展」，三步之后任务被
+     *   强行掐断 —— 用户看到的是「AI 点了两下就说卡住了」。操控场景里
+     *   有没有进展，模型自己从返回的屏幕就能判断，不需要这一层替它决定。
+     */
+    fun record(records: List<ToolCallRecord>, stallDetection: Boolean = true): Verdict {
         if (records.isEmpty()) return Verdict.Progress(0)
 
         val succeeded = records.filter { it.status == ToolStatus.SUCCESS }
@@ -64,12 +73,12 @@ class ProgressTracker(private val stallThreshold: Int = 3) {
         seen += fresh
 
         allFailedStreak = if (allFailed) allFailedStreak + 1 else 0
-        if (allFailedStreak >= 2) {
+        if (stallDetection && allFailedStreak >= 2) {
             return Verdict.Stalled("连续 $allFailedStreak 步的工具调用全部失败，已停下。")
         }
 
         noProgressStreak = if (fresh.isEmpty()) noProgressStreak + 1 else 0
-        if (noProgressStreak >= stallThreshold) {
+        if (stallDetection && noProgressStreak >= stallThreshold) {
             return Verdict.Stalled("连续 $noProgressStreak 步没有产生新结果，已停下。")
         }
 

@@ -97,7 +97,7 @@ fun DeviceControlScreen(
             SettingCard {
                 Text(
                     text = if (zh) {
-                        "打开后，AI 可以读取当前屏幕上的按钮和文字，并按你的指示点击、输入、滚动。" +
+                        "打开后，AI 可以读取当前屏幕上的按钮和文字，并按你的指示点击、输入、翻页。" +
                             "比如「帮我在微信里给张三发一句我晚点到」。\n\n" +
                             "操作期间 DSH 会退到后台，屏幕底部出现一条提示，写着正在做什么，" +
                             "右边就是停止按钮。点一下立刻停。"
@@ -219,8 +219,8 @@ fun DeviceControlScreen(
                         else "Screen is read once per tool call; no recording, nothing stored",
                         if (zh) "屏幕内容会随请求发给当前模型 —— 这是它能看懂界面的前提"
                         else "Screen text is sent to the current model — that is how it understands",
-                        if (zh) "系统设置、权限、安装页面：只读不点，避免 AI 给自己加权限"
-                        else "System settings, permissions and installers: read-only",
+                        if (zh) "权限管理、应用安装、系统界面：只读不点，避免 AI 给自己加权限"
+                        else "Permission pages, installers and system UI: read-only",
                     ).forEach {
                         Text(
                             text = "· $it",

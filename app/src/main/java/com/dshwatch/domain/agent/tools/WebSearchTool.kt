@@ -46,11 +46,8 @@ import java.util.concurrent.TimeUnit
 object WebSearchTool : AgentTool {
     override val name = "web_search"
     override val description =
-        "联网搜索关键词，返回标题 + 链接 + 摘要的列表。用于获取你不知道或可能已过时的信息。" +
-            "query 支持常见搜索语法：site:github.com 限定站点、-site:example.com 排除、" +
-            "\"精确短语\"、after:2025-01-01 / before:2026 限定时间。多个条件用空格组合。" +
-            "需要自定义请求头（UA、Referer、API Key）时传 headers 键值对。" +
-            "需要精确抓取某个已知网页的内容时，直接用 http_fetch 更可靠。"
+                    "联网搜索，返回标题 + 链接 + 摘要。用于你不知道或可能过时的信息。" +
+            "支持 site:、-site:、\"精确短语\"、after:/before: 等语法，多个条件空格组合；需要自定义请求头时传 headers。已知网址要精确取内容用 http_fetch。"
     override val safety = ToolSafety.NETWORK
     override val parameters = Schema.obj(
         properties = mapOf(

@@ -94,10 +94,8 @@ object WorkspaceTools {
     object ReadFileTool : AgentTool {
         override val name = "read_file"
         override val description =
-            "读取当前工作目录里某个文件的文本内容（单次最多 24000 字，超出会截断）。" +
-                "大文件可以配合 offset 分段读：offset 是起始字符位置，例如先读 0，再读 8000。" +
-                "「工具输出已落盘」的文件通常在 notes/tool-output/ 下，用 offset 或 grep 取中间内容。" +
-                "改文件之前先用它看清原文，再把要改的片段原样复制到 edit_file 的 old_string 里。"
+                        "读取工作目录里的文件（单次最多 24000 字，超出截断）。大文件用 offset 分段读；工具的落盘输出通常在 notes/tool-output/ 下。" +
+            "改文件前先用它看清原文，再把要改的片段原样复制到 edit_file 的 old_string。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -137,10 +135,8 @@ object WorkspaceTools {
     object WriteFileTool : AgentTool {
         override val name = "write_file"
         override val description =
-            "在当前工作目录里创建或覆盖一个文件。目录会自动创建。单文件上限 256KB。" +
-                "path 用**相对路径**，例如 index.html、src/app.py、styles/main.css。" +
-                "**改已有文件请优先用 edit_file**；只有整份重写时才用本工具。" +
-                "内容较长时先写骨架再用 append_file 分段追加 —— 单次输出有上限，一次写太长会被截断。"
+                        "创建或覆盖工作目录里的文件，目录自动创建，单文件上限 256KB。path 用**相对路径**（index.html、src/app.py）。" +
+            "**改已有文件优先用 edit_file**；只有整份重写才用它。内容长先写骨架再 append_file 分段追加。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -185,11 +181,8 @@ object WorkspaceTools {
     object EditFileTool : AgentTool {
         override val name = "edit_file"
         override val description =
-            "对已有文件做**精确字符串替换**。改文件优先用它，不要 read 全文再 write 回去 —— " +
-                "手表上那样要多花一倍 token，还很容易因为输出被截断而整次失败。" +
-                "old_string 必须与文件中现有内容**逐字符完全一致**（含缩进与换行），" +
-                "通常从 read_file 的结果里直接复制。" +
-                "如果 old_string 在文件里出现多次会失败：要么多带几行上下文让它唯一，要么把 replace_all 设为 true。"
+                        "对已有文件做**精确字符串替换**。改文件优先用它 —— read 全文再 write 要多花一倍 token，还容易被截断。" +
+            "old_string 必须与文件内容**逐字符一致**（含缩进与换行），通常从 read_file 结果里复制。出现多次会失败：多带几行上下文让它唯一，或 replace_all=true。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf(

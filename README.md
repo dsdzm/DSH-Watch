@@ -77,6 +77,8 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
   操控期间强制占用前台服务（不受「后台保持连接」开关影响），
   并可在设置页申请「不受电池优化限制」白名单 —— 手表的内存回收很激进，
   这是不 root 的加固手段里最有效的一条。
+  **系统设置页可以操作**（开勿扰、调亮度、连蓝牙）；权限管理、应用安装、
+  系统界面仍然只读 —— 那几页点错不可逆。
   开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
 
 - **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 8 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在手表上没有可用的进程沙箱，未支持。
@@ -118,7 +120,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
 
 ```bash
-adb install -r DSH-Watch-v1.18.1.apk
+adb install -r DSH-Watch-v1.18.2.apk
 ```
 
 没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。

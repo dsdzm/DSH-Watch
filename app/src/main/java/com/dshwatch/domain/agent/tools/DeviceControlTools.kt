@@ -120,13 +120,13 @@ object DeviceControlTools {
     object ActTool : AgentTool {
         override val name = "device_act"
         override val description =
-            "对 device_screen 给出的编号执行一个动作，并返回动作之后的新屏幕。\n" +
-                "action=tap 点击（long=true 长按）；type 在输入框输入（要 text，submit=true 顺带提交）；" +
-                "scroll 翻页：在列表上像手指一样滑动一屏（direction=down 往后翻、up 往前翻，" +
-                "id 指向那个列表更准）；key 按系统键（key=back/home/recents/notifications）。\n" +
-                "一次只做一件事。屏幕会变，所以每一步之后都要看返回的新屏幕再决定下一步。\n" +
-                "翻页用 scroll，不要靠连点或反复按 back —— 手表列表是滑动的，滚动条并不总是存在。\n" +
-                "密码、验证码、支付确认框不代填也不代点——遇到就让用户来（device_handoff）。"
+            "对 device_screen 的编号执行一个动作，返回动作后的新屏幕。" +
+                "action=tap 点击（long=true 长按）/ type 输入（要 text，submit=true 提交）/" +
+                "scroll 翻页（direction=down 往后、up 往前；id 指向列表更准）/ " +
+                "key 系统键（back/home/recents/notifications）。" +
+                "一次只做一件事，每步之后看返回的新屏幕再决定。" +
+                "翻页用 scroll，不要连点或反复按 back。" +
+                "密码、验证码、支付确认不代填不代点 —— 让用户来（device_handoff）。"
         override val safety = ToolSafety.WRITE
         override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = { it.deviceControlEnabled }
         override val parameters = Schema.obj(

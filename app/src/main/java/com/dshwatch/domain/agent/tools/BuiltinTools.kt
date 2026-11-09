@@ -240,12 +240,8 @@ object BuiltinTools {
     object HttpFetchTool : AgentTool {
         override val name = "http_fetch"
         override val description =
-            "抓取一个 URL 的内容。返回网页时会**自动转成纯文本**（去掉标签/脚本/样式），" +
-                "所以很适合读文章、查文档、调返回 JSON 的公开 API。" +
-                "支持 GET 与 POST（POST 可带 body）。只支持 http/https。" +
-                "需要登录态、Referer、特定 User-Agent 或 API Key 时，用 headers 传自定义请求头" +
-                "（键值对，例如 {\"Authorization\":\"Bearer xxx\",\"Referer\":\"https://example.com\"}）。" +
-                "要搜索（不知道具体网址）请用 web_search。"
+                        "抓取 URL 内容。网页自动转成纯文本（去标签/脚本/样式），适合读文章、查文档、调公开 JSON API。" +
+            "支持 GET / POST（可带 body），只支持 http/https。需要登录态、Referer、UA 或 Key 时用 headers 传自定义头。不知道网址要搜索，用 web_search。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(

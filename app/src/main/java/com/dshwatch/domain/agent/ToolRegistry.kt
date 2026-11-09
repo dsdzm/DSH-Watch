@@ -52,7 +52,16 @@ class ToolRegistry(
             put("type", "function")
             putJsonObject("function") {
                 put("name", tool.name)
-                put("description", "${tool.description}（副作用：${tool.safety.label}）")
+                /*
+                 * 只给有副作用的工具标一句。只读工具占了一半，每轮都写「（副作用：只读）」
+                 * 是纯浪费 —— 模型不需要被告知「读文件没有副作用」。
+                 */
+                val note = if (tool.safety == ToolSafety.READ_ONLY) {
+                    tool.description
+                } else {
+                    "${tool.description}（副作用：${tool.safety.label}）"
+                }
+                put("description", note)
                 put("parameters", tool.parameters)
             }
         }
