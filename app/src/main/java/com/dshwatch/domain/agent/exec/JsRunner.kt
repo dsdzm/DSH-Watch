@@ -65,7 +65,30 @@ class JsRunner {
                 installConsole(cx, scope, stdout, stderr)
                 // 用 var 而不是 const：模型脚本里也可能自己定义 args，重声明不该直接报错
                 cx.evaluateString(scope, "var args = $argsLiteral;", "dsh-args", 1, null)
-                cx.evaluateString(scope, script, "script.js", 1, null)
+                /*
+                 * 包一层函数体再执行。
+                 *
+                 * 顶层 `return` 在 Rhino 里是语法错误（"invalid return statement"），
+                 * 而模型写脚本时非常自然会用 return 交结果 —— 真机上它看到的是
+                 * 「返回值无效」，然后改成 console.log 重跑一次。包成 IIFE 既支持
+                 * return，也能把返回值直接打出来，省掉一次往返。
+                 *
+                 * 代价是行号整体 +1，所以 describe 里减回去。
+                 */
+                val returned = cx.evaluateString(
+                    scope,
+                    "(function(){\n" + script + "\n})();",
+                    "script.js",
+                    1,
+                    null,
+                )
+                // 打印 return 的结果；执行到底的脚本返回 undefined，不该多一行空输出
+                if (returned != null && returned !== Undefined.instance && returned !== Scriptable.NOT_FOUND) {
+                    val text = format(cx, scope, returned)
+                    if (text.isNotBlank() && text != "undefined" && text != "null") {
+                        stdout.append(text + "\n")
+                    }
+                }
             } catch (e: ScriptTimeoutError) {
                 stderr.append("执行超时：脚本在 ${limits.timeoutMs} 毫秒内没有结束，已被中止。\n")
                 deadlineHit.set(true)
@@ -123,7 +146,10 @@ class JsRunner {
     private fun describe(e: RhinoException): String = buildString {
         append("JavaScript 错误：")
         append(e.details().orEmpty().ifBlank { e.message.orEmpty() })
-        if (e.lineNumber() > 0) append("（第 ${e.lineNumber()} 行）")
+        // 脚本被包进 `(function(){ ... })()`，多出来的那一行要在报错里减掉，
+        // 否则用户照着行号去找会永远差一行
+        val line = e.lineNumber() - 1
+        if (line > 0) append("（第 ${line} 行）")
         append('\n')
     }
 

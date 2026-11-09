@@ -7,6 +7,7 @@ import com.dshwatch.data.store.StoredConversation
 import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.agent.AgentTool
 import com.dshwatch.domain.agent.ApprovalPolicy
+import com.dshwatch.domain.agent.CanvasGuide
 import com.dshwatch.domain.agent.ProgressTracker
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.plugin.PromptContext
@@ -1004,6 +1005,13 @@ class ChatEngine(
                     overlay?.promptSuffix?.takeIf { it.isNotBlank() }?.let { append("\n\n").append(it) }
                     append(roster)
                 }
+                /*
+                 * 画布是 UI 的输出格式，和「agent 开没开」无关：关掉工具也照样能画。
+                 * 放在 roster 之后、角色扮演之外 —— 上面那份工具名单正是模型
+                 * 得出「没有画图工具 = 做不到」的依据，说明必须紧跟其后；
+                 * 而酒馆/写作场景里任何能力说明都会把人设带跑。
+                 */
+                if (!isRoleplay) append(CanvasGuide.PROMPT)
             }
             // agentOn=false 时 toolSpecs 本来就是空的，这里再加一道保险：
             // overlay（风神）是编程场景的插件，角色扮演场景不该被它插一手。

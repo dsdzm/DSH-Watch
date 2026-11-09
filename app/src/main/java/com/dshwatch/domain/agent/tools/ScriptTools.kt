@@ -69,6 +69,8 @@ object ScriptTools {
             "在当前工作目录里**真的执行**一段脚本，拿到真实的输出与报错。两种语言：" +
                 "- language=shell：设备上真实的 sh，管道、重定向、grep/sed/awk 都能用；" +
                 "- language=js：JavaScript（ES6 语法，**不支持 async/await**，无 DOM 与 fetch）。" +
+                "脚本会自动包进函数体执行，可以直接用 `return` 交结果（返回值会被打印出来），" +
+                "也可以 console.log / print 输出，两种都行。" +
                 "**重要：shell 里没有 python / node / java / gcc 这些命令** —— 手表上没有系统级运行时，" +
                 "两种语言是彼此独立的执行路径，不能互相调用（`sh` 里跑 `python x.py` 一定失败）。" +
                 "需要 Python / Java / C++ 时交给 cloud_build 在云端执行。" +

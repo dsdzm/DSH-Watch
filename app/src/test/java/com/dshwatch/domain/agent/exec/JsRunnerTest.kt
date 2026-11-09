@@ -38,6 +38,27 @@ class JsRunnerTest {
         assertThat(out.stdout).contains("a")
     }
 
+    /**
+     * 顶层 return 必须能用。
+     *
+     * 模型写脚本时默认会 `return 结果`，而 Rhino 直接执行脚本时这是语法错误
+     * （invalid return statement）。真机上模型因此以为脚本执行失败，改成
+     * console.log 又跑一遍 —— 一次往返就这么白花了。
+     */
+    @Test
+    fun `top level return is accepted and its value is printed`() = runTest {
+        val out = runner.run("var a = 40;\nreturn a + 2;", limits())
+        assertThat(out.ok).isTrue()
+        assertThat(out.stdout.trim()).isEqualTo("42")
+    }
+
+    @Test
+    fun `script that just runs to the end prints nothing extra`() = runTest {
+        val out = runner.run("var a = 1;", limits())
+        assertThat(out.ok).isTrue()
+        assertThat(out.stdout).isEmpty()
+    }
+
     @Test
     fun `syntax error is reported as a failure with a line hint`() = runTest {
         val out = runner.run("function ( {", limits())
