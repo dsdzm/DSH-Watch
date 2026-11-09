@@ -196,3 +196,46 @@ class DeviceControlHubTest {
         assertThat(snap.stale()).isTrue()
     }
 }
+
+/**
+ * 受保护页面：AI 不能给自己开权限、装应用、关别人的授权。
+ *
+ * 这几条断言守的是提示词之外的那道硬边界 —— 模型可以在提示里被说服，
+ * 但说服不了这里的 `contains`。
+ */
+class DeviceGuardTest {
+
+    @Test
+    fun `settings pages are blocked`() {
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.settings")).isTrue()
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.miui.settings")).isTrue()
+    }
+
+    @Test
+    fun `installers and permission controllers are blocked`() {
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.packageinstaller")).isTrue()
+        assertThat(
+            com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.permissioncontroller"),
+        ).isTrue()
+    }
+
+    @Test
+    fun `system ui is blocked because quick settings bypass everything`() {
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.android.systemui")).isTrue()
+    }
+
+    @Test
+    fun `normal apps are allowed`() {
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.tencent.mm")).isFalse()
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked(null)).isFalse()
+        // 名字里带 settings 的普通应用不该被误伤
+        assertThat(com.dshwatch.domain.device.DeviceGuard.isBlocked("com.example.settingsdemo")).isFalse()
+    }
+
+    @Test
+    fun `refusal tells the model what to do next`() {
+        val msg = com.dshwatch.domain.device.DeviceGuard.refusal("com.android.settings")
+        assertThat(msg).contains("device_handoff")
+        assertThat(msg).contains("系统设置")
+    }
+}

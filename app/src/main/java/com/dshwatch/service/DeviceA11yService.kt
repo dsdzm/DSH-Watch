@@ -17,6 +17,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.dshwatch.domain.device.Bounds
 import com.dshwatch.domain.device.DeviceControlHub
+import com.dshwatch.domain.device.DeviceGuard
 import com.dshwatch.domain.device.ScreenDigest
 import com.dshwatch.domain.device.UiElement
 import kotlinx.coroutines.Dispatchers
@@ -187,7 +188,11 @@ class DeviceA11yService : AccessibilityService() {
             keyboardShown = keyboard,
             elements = collected,
             detail = detail,
-            note = if (collected.isEmpty()) "这一屏读不到控件" else null,
+            note = when {
+                DeviceGuard.isBlocked(pkg) -> "受保护页面：只能看，不能操作"
+                collected.isEmpty() -> "这一屏读不到控件"
+                else -> null
+            },
         )
         Capture(pkg, label, collected, nodes, text)
     }
@@ -272,6 +277,9 @@ class DeviceA11yService : AccessibilityService() {
             )
 
         val fresh = capture(detail = false)
+        if (DeviceGuard.isBlocked(fresh.packageName)) {
+            return@withContext ActResult(false, DeviceGuard.refusal(fresh.packageName))
+        }
         val target = fresh.elements.firstOrNull { it.fingerprint() == wanted.fingerprint() }
             ?: return@withContext ActResult(
                 false,
@@ -339,6 +347,9 @@ class DeviceA11yService : AccessibilityService() {
             )
         }
         val fresh = capture(detail = false)
+        if (DeviceGuard.isBlocked(fresh.packageName)) {
+            return@withContext ActResult(false, DeviceGuard.refusal(fresh.packageName))
+        }
         val target = fresh.elements.firstOrNull { it.fingerprint() == wanted.fingerprint() }
             ?: return@withContext ActResult(false, "屏幕变了，编号 $id 已经不是那个输入框。重新读屏。")
         val node = fresh.nodes[target.id]
