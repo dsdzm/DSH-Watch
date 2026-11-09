@@ -15,6 +15,13 @@
     <!-- 应用内更新：把下载好的 APK 交给系统安装器。
          这是普通权限，但还受「安装未知应用」的 appop 门控，见 UpdateInstall -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!--
+      设备操控期间 App 在后台，AI 每做一步都要等网络往返。系统（尤其国产 ROM）
+      在低内存时会把后台进程清掉，表现为「操作到一半，悬浮条和任务一起消失」。
+      这个权限只用于弹「是否允许 DSH 不受电池优化限制」的系统对话框，
+      不参与任何数据收集；用户拒绝也不影响其它功能。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- 手表特性声明为可选：同一份 APK 既能装在手表，也能装在手机上调试 -->
     <uses-feature

@@ -10,6 +10,8 @@
     <string name="notification_done_title">Done</string>
     <string name="notification_done_body">Tap to see the result</string>
     <string name="notification_working">Working</string>
+    <string name="notification_device_title">AI is using your watch</string>
+    <string name="notification_device_body">Tap Stop to interrupt</string>
     <string name="notification_channel_alarm">Alarms</string>
     <string name="notification_channel_alarm_desc">Alarms created by the AI assistant</string>
     <string name="notification_alarm_body">Time is up</string>

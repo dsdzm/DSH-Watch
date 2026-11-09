@@ -374,37 +374,87 @@ class DeviceA11yService : AccessibilityService() {
         ActResult(true, "已输入「${text.take(30)}」。")
     }
 
+    /**
+     * 翻页滚动：**用滑动，不用滚动动作**。
+     *
+     * 早期实现是「先 ACTION_SCROLL_FORWARD，失败再手势滑一下」。这条路在真机上
+     * 有两个问题，而且都很难看出原因：
+     *
+     *  - 手表的列表基本都是 Compose 的 `TransformingLazyColumn` / 自绘 Canvas，
+     *    无障碍节点没有 `isScrollable`，`ACTION_SCROLL_FORWARD` 发出去返回 true
+     *    但屏幕纹丝不动 —— 工具却说「已滚动」，模型据此以为翻过去了；
+     *  - 退回手势时只划了 0.28 屏，被列表惯性吃掉大半，看起来像「动了一点点」。
+     *
+     * 现在只做一件事：像人一样**从下往上划半屏**（或反向）。幅度取 0.56 屏，
+     * 是在「一划翻一屏」和「别一下跳过两屏」之间的折中 —— 翻太多模型就看不到
+     * 中间那几条了，只能再来回划。
+     *
+     * 落点优先取模型指的那个列表元素：在那个区域内划，既不会撞到屏幕边缘的
+     * 系统返回手势，也不会划到页面顶部的标题栏上。
+     */
     suspend fun scroll(id: Int?, direction: String): ActResult = withContext(Dispatchers.Main) {
-        val forward = direction == "down" || direction == "right"
-        val prev = DeviceControlHub.lastScreen
-        val node = if (id != null && prev != null) {
-            val wanted = prev.byId(id)
-            if (wanted == null) null else {
-                val fresh = capture(detail = false)
-                val t = fresh.elements.firstOrNull { it.fingerprint() == wanted.fingerprint() }
-                t?.let { fresh.nodes[it.id] }
-            }
-        } else null
-
-        if (node != null && node.isScrollable) {
-            val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-            if (node.performAction(action)) return@withContext ActResult(true, "已向${if (forward) "下" else "上"}滚动。")
-        }
-
-        // 节点滚不动（自绘列表常见）：用手势
         val dm = resources.displayMetrics
         val w = dm.widthPixels
         val h = dm.heightPixels
-        val cx = w / 2
-        val cy = h / 2
-        val dy = (h * 0.28f).toInt()
-        val ok = gestureSwipe(
-            cx, cy + if (forward) dy else -dy,
-            cx, cy + if (forward) -dy else dy,
-        )
-        if (ok) ActResult(true, "已向${if (forward) "下" else "上"}滚动。")
-        else ActResult(false, "滚动没有生效，可能已经到头了。")
+        val horizontal = direction == "left" || direction == "right"
+        val forward = direction == "down" || direction == "right"
+
+        // 锚点：模型刚看过的那个列表。太小（半露在边缘）就当作没有，按整屏算。
+        val anchor = id?.let { DeviceControlHub.lastScreen?.byId(it)?.bounds }
+            ?.takeIf { it.width > 40 && it.height > 40 }
+        val cx = anchor?.centerX?.coerceIn(0, w) ?: (w / 2)
+        val cy = anchor?.centerY?.coerceIn(0, h) ?: (h / 2)
+
+        val span = if (horizontal) {
+            ((anchor?.width ?: w) * 0.8f).toInt().coerceIn(80, (w * 0.72f).toInt())
+        } else {
+            ((anchor?.height ?: h) * 0.9f).toInt().coerceIn(80, (h * 0.56f).toInt())
+        }
+        val half = span / 2
+
+        // 手指方向与内容方向相反：往下翻 = 手指从下往上划
+        val sx: Int
+        val sy: Int
+        val ex: Int
+        val ey: Int
+        if (horizontal) {
+            sy = cy
+            ey = cy
+            if (forward) {
+                sx = (cx + half).coerceIn(8, w - 8)
+                ex = (cx - half).coerceIn(8, w - 8)
+            } else {
+                sx = (cx - half).coerceIn(8, w - 8)
+                ex = (cx + half).coerceIn(8, w - 8)
+            }
+        } else {
+            sx = cx.coerceIn(8, w - 8)
+            ex = sx
+            if (forward) {
+                sy = (cy + half).coerceIn(8, h - 8)
+                ey = (cy - half).coerceIn(8, h - 8)
+            } else {
+                sy = (cy - half).coerceIn(8, h - 8)
+                ey = (cy + half).coerceIn(8, h - 8)
+            }
+        }
+
+        if (kotlin.math.abs(ex - sx) < 24 && kotlin.math.abs(ey - sy) < 24) {
+            return@withContext ActResult(false, "这一屏没有可滑动的空间了（已经到头）。")
+        }
+
+        val ok = gestureSwipe(sx, sy, ex, ey)
+        if (ok) {
+            val word = when (direction) {
+                "up" -> "向前翻了一屏"
+                "left" -> "向右翻了一屏"
+                "right" -> "向左翻了一屏"
+                else -> "向后翻了一屏"
+            }
+            ActResult(true, "已滑动，$word。")
+        } else {
+            ActResult(false, "滑动没有送达（系统拦截或界面正在切换）。先读屏看看现在的状态。")
+        }
     }
 
     suspend fun global(key: String): ActResult = withContext(Dispatchers.Main) {
@@ -428,12 +478,18 @@ class DeviceA11yService : AccessibilityService() {
         return dispatch(GestureDescription.Builder().addStroke(stroke).build())
     }
 
+    /**
+     * 一条直线滑动。
+     *
+     * 时长 280ms：太短会被系统当成 fling（一下滑出去很远），太长则像慢拖 ——
+     * 两者都会让「刚好翻一屏」失准。
+     */
     private suspend fun gestureSwipe(x1: Int, y1: Int, x2: Int, y2: Int): Boolean {
         val path = Path().apply {
             moveTo(x1.toFloat(), y1.toFloat())
             lineTo(x2.toFloat(), y2.toFloat())
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, 320)
+        val stroke = GestureDescription.StrokeDescription(path, 0, 280)
         return dispatch(GestureDescription.Builder().addStroke(stroke).build())
     }
 

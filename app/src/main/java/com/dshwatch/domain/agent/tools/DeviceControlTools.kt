@@ -88,6 +88,13 @@ object DeviceControlTools {
              * 他可能就是想问「我现在这屏是什么」。
              */
             if (capture.packageName == ctx.requireContext().packageName) {
+                /*
+                 * 顺序很重要：先把操控会话开起来（后台保活服务随之上线），
+                 * 再把自己收进后台。反过来的话，就是「App 已在后台 → 才去启动
+                 * 前台服务」，Android 12+ 会直接拒绝 —— 而这正是操作期间
+                 * 进程最容易被杀的那段窗口。
+                 */
+                DeviceControlHub.begin("读取界面 · 当前应用")
                 ctx.uiActions?.minimize?.invoke()
                 delay(420)
                 capture = svc.capture(detail)
@@ -115,8 +122,10 @@ object DeviceControlTools {
         override val description =
             "对 device_screen 给出的编号执行一个动作，并返回动作之后的新屏幕。\n" +
                 "action=tap 点击（long=true 长按）；type 在输入框输入（要 text，submit=true 顺带提交）；" +
-                "scroll 滚动（要 direction=up/down）；key 按系统键（key=back/home/recents/notifications）。\n" +
+                "scroll 翻页：在列表上像手指一样滑动一屏（direction=down 往后翻、up 往前翻，" +
+                "id 指向那个列表更准）；key 按系统键（key=back/home/recents/notifications）。\n" +
                 "一次只做一件事。屏幕会变，所以每一步之后都要看返回的新屏幕再决定下一步。\n" +
+                "翻页用 scroll，不要靠连点或反复按 back —— 手表列表是滑动的，滚动条并不总是存在。\n" +
                 "密码、验证码、支付确认框不代填也不代点——遇到就让用户来（device_handoff）。"
         override val safety = ToolSafety.WRITE
         override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = { it.deviceControlEnabled }
@@ -166,7 +175,7 @@ object DeviceControlTools {
 
                 "scroll" -> {
                     val dir = args.strOf("direction") ?: "down"
-                    DeviceControlHub.note("滚动 · ${if (dir == "down") "向下" else "向上"}")
+                    DeviceControlHub.note("翻页 · ${if (dir == "down") "向后" else "向前"}")
                     svc.scroll(args.intOf("id"), dir)
                 }
 
@@ -181,8 +190,12 @@ object DeviceControlTools {
 
             if (!outcome.ok) return ToolResult.fail(outcome.message)
 
-            // 界面切换需要时间；等一小会儿再读，比让模型「立刻重读然后读到旧界面」强
-            delay(260)
+            /*
+             * 界面切换需要时间；等一小会儿再读，比让模型「立刻重读然后读到旧界面」强。
+             * 滑动比点击慢：一次 280ms 的手势结束后，列表还在惯性滚动，
+             * 这时候读屏会读到「滑到一半」的位置 —— 所以多等一会儿。
+             */
+            delay(if (action == "scroll") 380 else 260)
             if (DeviceControlHub.isStopped()) {
                 return ToolResult.fail("已执行，但用户刚点了停止。不要再继续操作。")
             }
@@ -243,7 +256,9 @@ object DeviceControlTools {
             }
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-            // 先退到后台：用户得看见「屏幕上发生了什么」，而不是盯着 DSH 的对话页
+            // 先退到后台：用户得看见「屏幕上发生了什么」，而不是盯着 DSH 的对话页。
+            // 但保活要先就位 —— 见 ScreenTool 里同一处的说明。
+            DeviceControlHub.begin("打开 · ${app ?: url}")
             ctx.uiActions?.minimize?.invoke()
             delay(420)
 

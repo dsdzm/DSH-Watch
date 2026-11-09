@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.device.BatteryKeepAlive
 import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.service.DeviceA11yService
@@ -65,10 +66,14 @@ fun DeviceControlScreen(
     // 代价可以忽略，但用户从系统设置切回来时能看到状态立刻变。
     var enabled by remember { mutableStateOf(DeviceA11yService.isEnabled(context)) }
     var connected by remember { mutableStateOf(DeviceA11yService.isConnected()) }
+    var exempt by remember { mutableStateOf(BatteryKeepAlive.isExempt(context)) }
     LaunchedEffect(Unit) {
+        var tick = 0
         while (true) {
             enabled = DeviceA11yService.isEnabled(context)
             connected = DeviceA11yService.isConnected()
+            // 电池白名单的变化没那么快，每 3 秒查一次就够（它要走系统服务）
+            if (tick++ % 3 == 0) exempt = BatteryKeepAlive.isExempt(context)
             delay(1000)
         }
     }
@@ -152,6 +157,37 @@ fun DeviceControlScreen(
                         GhostButton(
                             text = if (zh) "去系统设置" else "Open settings",
                             onClick = { DeviceA11yService.openSettings(context) },
+                        )
+                    }
+                }
+            }
+
+            SectionHeader(if (zh) "后台保活" else "Keep alive")
+            SettingCard {
+                SettingRow(
+                    title = if (zh) "不受电池优化限制" else "Ignore battery optimization",
+                    subtitle = if (exempt) {
+                        if (zh) "已加入白名单" else "Allowed"
+                    } else {
+                        if (zh) "未加入，操作可能被系统中断" else "Not allowed — may be killed"
+                    },
+                    trailing = if (exempt) "✓" else "›",
+                    onClick = if (exempt) null else {
+                        { BatteryKeepAlive.request(context) }
+                    },
+                )
+                if (!exempt) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                        HintText(
+                            if (zh) {
+                                "操作期间 DSH 在后台，手表的低内存回收可能把进程清掉，" +
+                                    "表现为「操作到一半，悬浮条和任务一起消失」。" +
+                                    "把它加入白名单能大幅降低概率，但不能保证绝对不被杀。"
+                            } else {
+                                "DSH runs in the background while operating. Low-memory killers may " +
+                                    "remove the process and the task with it. Whitelisting makes that " +
+                                    "much less likely, but cannot guarantee it."
+                            },
                         )
                     }
                 }

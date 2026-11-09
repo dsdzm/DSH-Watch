@@ -111,14 +111,32 @@ class StreamingService : Service() {
              */
             ACTION_STOP_GENERATION -> {
                 val app = applicationContext
-                runCatching { Thread { AppContainer.of(app).engine.stop() }.start() }
-                    .onFailure { Logx.w(TAG, "停止生成失败：${it.message}") }
+                runCatching {
+                    Thread {
+                        // 设备操控期间用户是按「停止操作」，不是「停止生成」——
+                        // 两件事都要做：先拉闸让工具层不再动作，再停掉这一轮生成
+                        com.dshwatch.domain.device.DeviceControlHub.requestStop("用户在通知栏点了停止")
+                        AppContainer.of(app).engine.stop()
+                    }.start()
+                }.onFailure { Logx.w(TAG, "停止生成失败：${it.message}") }
                 stopSelfSafely()
             }
 
             ACTION_STOP_SELF -> stopSelfSafely()
         }
-        return START_NOT_STICKY
+        /*
+         * START_STICKY：被系统回收后由系统重新拉起。
+         *
+         * 进程刚重建时没有任何任务在跑（holds 是内存里的），这时候继续常驻
+         * 只是一条没有意义的通知，所以立刻收掉。真正的重新拉起发生在
+         * 「服务被杀但任务还在」的场景 —— 那种情况在手表上几乎只剩一种：
+         * 内存吃紧时系统按优先级回收，前台服务通常是最后几个。
+         */
+        if (holds.isEmpty()) {
+            stopSelfSafely()
+            return START_NOT_STICKY
+        }
+        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -245,10 +263,30 @@ class StreamingService : Service() {
             Intent(this, StreamingService::class.java).setAction(ACTION_STOP_GENERATION),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+
+        /*
+         * 设备操控期间，通知要写「在操作什么」，而不是「正在生成」。
+         *
+         * 这时候 App 在后台、用户盯着别的应用，通知栏是唯一还能确认
+         * 「AI 到底在干什么」的地方。写一句泛泛的「正在生成」等于什么都没说。
+         */
+        val device = com.dshwatch.domain.device.DeviceControlHub.state.value
+        val title = if (device.running) {
+            getString(R.string.notification_device_title)
+        } else {
+            getString(R.string.notification_title)
+        }
+        val body = when {
+            device.running && device.intent.isNotBlank() -> device.intent
+            device.running -> getString(R.string.notification_device_body)
+            progressText.isNotBlank() -> progressText
+            else -> getString(R.string.notification_working)
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(progressText.ifBlank { getString(R.string.notification_working) })
+            .setContentTitle(title)
+            .setContentText(body)
             .setContentIntent(open)
             .addAction(0, getString(R.string.notification_stop), stop)
             .setOngoing(true)
@@ -299,6 +337,20 @@ class StreamingService : Service() {
         const val ACTION_STOP_GENERATION = "com.dshwatch.action.STOP_GENERATION"
         const val ACTION_STOP_SELF = "com.dshwatch.action.STOP_SELF"
 
+        /** 占用原因：一次生成 / 一次设备操控。两者可以同时存在 */
+        private const val REASON_STREAM = "stream"
+        private const val REASON_DEVICE = "device"
+
+        /**
+         * 谁在占用前台服务。
+         *
+         * 以前只有一个布尔 `running`，对应「有没有在生成」。设备操控打破了
+         * 这个假设：生成结束的那一刻，AI 可能正停在别的 App 上等下一屏。
+         * 于是改成引用计数语义 —— 全部释放才真的停服务。
+         */
+        private val holds: MutableSet<String> =
+            java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
         @Volatile
         var running: Boolean = false
             private set
@@ -322,7 +374,24 @@ class StreamingService : Service() {
         @Volatile
         private var requestedAt: Long = 0L
 
-        fun start(context: Context) {
+        fun start(context: Context) = hold(context, REASON_STREAM)
+
+        fun stop(context: Context) = release(context, REASON_STREAM)
+
+        /**
+         * 设备操控期间占用前台服务。
+         *
+         * 和 [start] 用的是同一个服务、同一条通知，只是记账原因不同：
+         * 生成结束会 `stop`，但那时候 AI 可能还在操作设备 —— 如果直接停服务，
+         * DSH 就退回成普通后台进程，手表的低内存回收几分钟内就会把它带走，
+         * 表现是「操作到一半，悬浮条没了，任务也没了」。
+         */
+        fun holdDevice(context: Context) = hold(context, REASON_DEVICE)
+
+        fun releaseDevice(context: Context) = release(context, REASON_DEVICE)
+
+        private fun hold(context: Context, reason: String) {
+            holds.add(reason)
             if (running) return
             running = true
             requestedAt = SystemClock.elapsedRealtime()
@@ -332,13 +401,21 @@ class StreamingService : Service() {
                     Intent(context, StreamingService::class.java).setAction(ACTION_START),
                 )
             }.onFailure {
-                // 启动失败要回滚，否则 running 卡在 true，之后每次 start() 都变成空操作
+                /*
+                 * 启动失败要回滚，否则 running 卡在 true，之后每次 start() 都变成空操作。
+                 * 同时把占用的原因也撤掉：没起来就是没保住，留着只会让后来
+                 * 一次 release 误以为「还有别人在用」而不停服务。
+                 */
+                holds.remove(reason)
                 running = false
                 Logx.w(TAG, "启动失败：${it.message}")
             }
         }
 
-        fun stop(context: Context) {
+        private fun release(context: Context, reason: String) {
+            holds.remove(reason)
+            // 还有别的占用者（例如设备操控仍在进行）就不停
+            if (holds.isNotEmpty()) return
             running = false
             progressText = ""
             /*

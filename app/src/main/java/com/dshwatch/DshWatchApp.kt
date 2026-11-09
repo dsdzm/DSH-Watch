@@ -5,6 +5,7 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.core.CrashLog
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.bili.BiliSchedule
+import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.service.StreamingService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -65,6 +66,31 @@ class DshWatchApp : Application() {
             if (container.settings.value.foregroundService) {
                 StreamingService.update(this, text)
             }
+        }
+
+        /*
+         * 设备操控期间的保活。
+         *
+         * 这里**不看** `foregroundService` 开关。那个开关管的是「生成时要不要保活」，
+         * 而操控是另一件事：此刻 DSH 已经 moveTaskToBack 到后台，用户盯着的是
+         * 别的 App，屏幕上只剩一条悬浮条。这时候进程被回收，表现就是
+         * 「操作到一半，条没了，任务也没了」，而且没有任何提示 —— 比慢更糟。
+         *
+         * 所以只要操控会话在跑，就占用一次前台服务。生成结束时的那次 stop
+         * 只会释放它自己那一份，不会把操控的保活一起撤掉。
+         */
+        container.appScope.launch {
+            DeviceControlHub.state
+                .map { it.running to it.intent }
+                .distinctUntilChanged()
+                .collect { (running, intent) ->
+                    if (running) {
+                        StreamingService.holdDevice(this@DshWatchApp)
+                        if (intent.isNotBlank()) StreamingService.update(this@DshWatchApp, intent)
+                    } else {
+                        StreamingService.releaseDevice(this@DshWatchApp)
+                    }
+                }
         }
         CrashLog.mark("引擎回调已挂上")
 
