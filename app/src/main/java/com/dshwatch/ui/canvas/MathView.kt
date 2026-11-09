@@ -100,7 +100,21 @@ fun MathView(
 
 sealed interface MathNode {
     data class Seq(val items: List<MathNode>) : MathNode
-    data class Sym(val text: String, val italic: Boolean = true, val bold: Boolean = false) : MathNode
+
+    /**
+     * 单个符号。
+     *
+     * [scale] 是给定界符用的：`\Big(`、`\left[` 这类命令要求括号比正文高，
+     * 现在按字号倍率实现 —— 内容高度变化时括号不会自动跟随，但比「原样吐出
+     * \Big 命令」好得多，也不用把解析器改成能跨节点配对的括号栈。
+     */
+    data class Sym(
+        val text: String,
+        val italic: Boolean = true,
+        val bold: Boolean = false,
+        val scale: Float = 1f,
+    ) : MathNode
+
     data class Frac(val num: MathNode, val den: MathNode) : MathNode
     data class Script(val base: MathNode, val sup: MathNode? = null, val sub: MathNode? = null) : MathNode
     data class Sqrt(val body: MathNode, val index: MathNode? = null) : MathNode
@@ -141,7 +155,7 @@ private fun buildMathBox(
         )
     }
 
-    is MathNode.Sym -> textBox(node.text, size, m, color, node.italic, node.bold)
+    is MathNode.Sym -> textBox(node.text, size * node.scale, m, color, node.italic, node.bold)
 
     is MathNode.Text -> textBox(node.raw, size, m, color, italic = false, bold = false, upright = true)
 
@@ -204,25 +218,34 @@ private fun buildMathBox(
         val body = buildMathBox(node.body, size, m, color)
         val idx = node.index?.let { buildMathBox(it, size * 0.55f, m, color) }
         val pad = size * 0.16f
-        val over = max(1f, size * 0.05f)
-        val hookW = size * 0.42f
-        val ascent = body.height + size * 0.18f
+        val over = max(1f, size * 0.055f)
+        val hookW = size * 0.46f
+        /*
+         * 横线必须贴着内容的顶端。
+         *
+         * 之前 ascent 取的是 body.height（字高），而内容实际是从 body.ascent
+         * 往上顶的 —— 两者差 0.22×字高，再加 0.18×字号，横线与数字之间空出近半行。
+         * 用户看到的就是「√ 上面一条线，170 漂在下面」，像是根号没包住内容。
+         */
+        val gap = size * 0.10f
+        val ascent = body.ascent + gap
+        val descent = max(size * 0.10f, body.descent)
         MathBox(
             width = hookW + body.width + pad * 2,
             ascent = ascent,
-            descent = body.descent,
+            descent = descent,
             draw = { x, base ->
                 val top = base - ascent
-                val bottom = base + body.descent * 0.2f
+                val bottom = base + body.descent
                 val path = Path().apply {
-                    moveTo(x + 1f, top + ascent * 0.42f)
-                    lineTo(x + hookW * 0.34f, top + ascent * 0.30f)
-                    lineTo(x + hookW * 0.62f, bottom)
+                    moveTo(x + 1f, base - ascent * 0.44f)
+                    lineTo(x + hookW * 0.32f, base - ascent * 0.30f)
+                    lineTo(x + hookW * 0.60f, bottom)
                     lineTo(x + hookW, top)
                     lineTo(x + hookW + body.width + pad * 2, top)
                 }
                 drawPath(path, color, style = Stroke(width = over))
-                idx?.draw(this, x + 1f, top + ascent * 0.34f)
+                idx?.draw(this, x + 1f, top + ascent * 0.32f)
                 body.draw(this, x + hookW + pad, base)
             },
         )
@@ -333,12 +356,26 @@ object Latex {
         "approx" to "≈", "equiv" to "≡", "sim" to "∼", "propto" to "∝",
         "infty" to "∞", "partial" to "∂", "nabla" to "∇", "degree" to "°",
         "to" to "→", "rightarrow" to "→", "leftarrow" to "←", "leftrightarrow" to "↔",
-        "Rightarrow" to "⇒", "Leftarrow" to "⇐", "iff" to "⇔",
+        "Rightarrow" to "⇒", "Leftarrow" to "⇐", "Leftrightarrow" to "⇔", "iff" to "⇔",
+        // 长箭头：模型写「等价于」时几乎都用 Longleftrightarrow，之前会原样吐出来
+        "Longleftrightarrow" to "⟺", "Longleftarrow" to "⟸", "Longrightarrow" to "⟹",
+        "longleftrightarrow" to "⟷", "longleftarrow" to "⟵", "longrightarrow" to "⟶",
+        "mapsto" to "↦", "longmapsto" to "⟼", "implies" to "⟹", "impliedby" to "⟸",
+        "uparrow" to "↑", "downarrow" to "↓", "updownarrow" to "↕",
         "in" to "∈", "notin" to "∉", "subset" to "⊂", "supset" to "⊃",
+        "subseteq" to "⊆", "supseteq" to "⊇", "emptyset" to "∅", "varnothing" to "∅",
         "cup" to "∪", "cap" to "∩", "forall" to "∀", "exists" to "∃",
-        "cdots" to "⋯", "ldots" to "…", "dots" to "…", "vdots" to "⋮",
+        "neg" to "¬", "lnot" to "¬", "land" to "∧", "wedge" to "∧", "lor" to "∨", "vee" to "∨",
+        "cdots" to "⋯", "ldots" to "…", "dots" to "…", "vdots" to "⋮", "ddots" to "⋱",
         "angle" to "∠", "triangle" to "△", "perp" to "⊥", "parallel" to "∥",
         "circ" to "∘", "prime" to "′", "hbar" to "ℏ", "ell" to "ℓ",
+        "because" to "∵", "therefore" to "∴",
+        "lvert" to "|", "rvert" to "|", "vert" to "|", "mid" to "|", "|" to "‖",
+        "lVert" to "‖", "rVert" to "‖", "Vert" to "‖",
+        "langle" to "⟨", "rangle" to "⟩", "lfloor" to "⌊", "rfloor" to "⌋",
+        "lceil" to "⌈", "rceil" to "⌉",
+        // \{ \} 是转义花括号，不是分组，直接当字符画
+        "{" to "{", "}" to "}",
         "quad" to " ", "qquad" to "  ", "," to " ", ";" to " ", ":" to " ",
         "!" to "", " " to " ",
     )
@@ -349,6 +386,31 @@ object Latex {
     )
 
     private val BIG = setOf("sum", "int", "prod", "iint", "oint", "bigcup", "bigcap")
+
+    /**
+     * 「请把括号画高一点」的命令 → 字号倍率。
+     *
+     * LaTeX 里 big/Big/bigg/Bigg 是四档固定高度，语义上等价于「比正文高多少」，
+     * 所以这里直接映射成倍率，不区分配对关系。
+     */
+    private val BIG_DELIM = mapOf(
+        "big" to 1.2f, "bigl" to 1.2f, "bigr" to 1.2f, "bigm" to 1.2f,
+        "Big" to 1.5f, "Bigl" to 1.5f, "Bigr" to 1.5f, "Bigm" to 1.5f,
+        "bigg" to 1.8f, "biggl" to 1.8f, "biggr" to 1.8f, "biggm" to 1.8f,
+        "Bigg" to 2.1f, "Biggl" to 2.1f, "Biggr" to 2.1f, "Biggm" to 2.1f,
+    )
+
+    /** 紧跟在这些命令后面、可以直接当字符用的定界符 */
+    private val DELIM_CHARS = setOf('(', ')', '[', ']', '|', '.', '/', '<', '>')
+
+    /** 用命令写的定界符 */
+    private val DELIM_CMDS = mapOf(
+        "{" to "{", "}" to "}", "|" to "‖",
+        "lvert" to "|", "rvert" to "|", "vert" to "|", "mid" to "|",
+        "lVert" to "‖", "rVert" to "‖", "Vert" to "‖",
+        "langle" to "⟨", "rangle" to "⟩",
+        "lfloor" to "⌊", "rfloor" to "⌋", "lceil" to "⌈", "rceil" to "⌉",
+    )
 
     private const val MAX_DEPTH = 24
 
@@ -500,11 +562,28 @@ object Latex {
             if (name == "text" || name == "mathrm" || name == "textbf" || name == "operatorname") {
                 return MathNode.Text(readBraceRaw())
             }
-            if (name == "left" || name == "right") {
-                // \left( ... \right) 简化：读取紧随的分隔符作为普通符号
-                val d = toks.getOrNull(pos)
-                if (d is Tok.Ch) pos++
-                return MathNode.Sym(d?.let { (it as? Tok.Ch)?.c?.toString() } ?: "", italic = false)
+            /*
+             * 定界符：\left( … \right)、\Big( … \Big)、\bigl[ … \bigr]
+             *
+             * 模型写「(∑a)²」时几乎都会用 \Big( 或 \left( —— 它们只是告诉排版引擎
+             * 「括号要比正文高」。这里不建括号栈（那要跨节点配对，遇上 ^ 挂在哪一侧
+             * 很容易错位），而是把命令本身翻译成「放大一档的括号字符」：
+             * 视觉上括号确实变高了，`^2` 也自然挂在右括号上。
+             *
+             * 不这么做的话，`\Big` 会走到最后的兜底分支，原样显示成 "\Big" ——
+             * 用户看到的就是一屏「f(t)=\Big(∑…」。
+             */
+            if (name in BIG_DELIM) {
+                val d = readDelimiter() ?: return MathNode.Text("")
+                return MathNode.Sym(d, italic = false, scale = BIG_DELIM.getValue(name))
+            }
+            if (name == "left" || name == "middle") {
+                val d = readDelimiter() ?: return MathNode.Text("")
+                return if (d == ".") MathNode.Text("") else MathNode.Sym(d, italic = false, scale = 1.35f)
+            }
+            if (name == "right") {
+                val d = readDelimiter() ?: return MathNode.Text("")
+                return if (d == ".") MathNode.Text("") else MathNode.Sym(d, italic = false, scale = 1.35f)
             }
             if (name in BIG) {
                 val glyph = when (name) {
@@ -538,6 +617,23 @@ object Latex {
             }
             // 不认识的命令：原样显示，不要让它凭空消失
             return MathNode.Text("\\$name")
+        }
+
+        /**
+         * 读紧随其后的定界符：`(`、`[`、`|`、`\{`、`\langle` 都算。
+         *
+         * 返回 null 表示后面不是定界符（例如 `\Big` 后面直接跟了 ∑）——
+         * 这种情况返回空文本，不把 "\Big" 吐到屏幕上。
+         */
+        private fun readDelimiter(): String? {
+            val t = toks.getOrNull(pos) ?: return null
+            return when (t) {
+                is Tok.Ch -> if (t.c in DELIM_CHARS) { pos++; t.c.toString() } else null
+                is Tok.Open -> { pos++; "{" }
+                is Tok.Close -> { pos++; "}" }
+                is Tok.Cmd -> DELIM_CMDS[t.name]?.also { pos++ }
+                else -> null
+            }
         }
 
         private fun readBraceRaw(): String {

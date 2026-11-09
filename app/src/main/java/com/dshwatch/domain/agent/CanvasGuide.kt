@@ -34,9 +34,10 @@ object CanvasGuide {
 
 1) 几何图：用 ```geom 包一段 JSON
 {"points":[{"name":"A","x":0,"y":0},{"name":"B","x":4,"y":0},{"name":"C","x":0,"y":3}],"segments":[["A","B"],["A","C"],["B","C"]],"circles":[{"center":"A","r":2}],"angles":[{"at":"A","from":"B","to":"C","label":"53°"}],"texts":[{"x":1,"y":1,"text":"AB=4"}]}
-可用字段：points / segments / lines / circles / polygons / angles / texts / axes。图形只按点名引用，坐标是数学坐标（y 轴向上），缩放与标签位置由 App 处理，不需要你算像素。
+可用字段：points / segments / lines / circles / polygons / angles / texts / axes。坐标是数学坐标（y 轴向上），缩放与标签位置由 App 处理，不需要你算像素。
+引用要么用 points 里的点名，要么在该元素里直接写坐标对：segments 可写 [["A","B"]] 或 [[-1.5,0.5],[-0.5,3.25]]；一段给三个以上坐标就是折线，适合画函数图象。用 axes:true 时原点会自动进入视野。
 
-2) 公式：用 ```math 包 LaTeX。支持分式 \frac、根号 \sqrt、上下标、\sum / \int、希腊字母与常用运算符；不要写导言区、\begin{document} 或自定义宏。
+2) 公式：用 ```math 包 LaTeX。支持分式 \frac、根号 \sqrt、上下标、\sum / \int、\left( \right)、\Big( \Big)、希腊字母、长箭头 \Longleftrightarrow 与常用运算符；不要写导言区、\begin{document} 或自定义宏。
 
 3) 思维导图：用 ```mindmap 包缩进列表，第一行是根节点，每级缩进 2 个空格。
 

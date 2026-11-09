@@ -86,7 +86,14 @@ fun GeometryView(
     compact: Boolean = false,
 ) {
     val scene = remember(source) { Geometry.parse(source) }
-    if (scene == null || scene.points.isEmpty()) {
+    /*
+     * 只判 null，不再判 points 为空。
+     *
+     * 模型完全可以只用内联坐标画图（`"segments":[[[x,y],[x,y]],…]`、只给 texts），
+     * 这时没有 points 数组，图却完全有效。原来的「points 为空就算失败」会把这类
+     * 输出直接打成「解析失败，原文」，用户看到的是一屏 JSON。
+     */
+    if (scene == null) {
         MathFallback("几何图解析失败，原文：\n$source")
         return
     }
@@ -147,11 +154,12 @@ fun GeometryView(
             }
 
             // 2) 线段 / 直线 / 圆
-            scene.segments.forEach { (a, b) ->
+            scene.segments.forEach { seg ->
+                val (start, end) = segmentScreen(seg, ::px, ::py)
                 drawLine(
                     color = Color(0xFF8FB4E8),
-                    start = Offset(px(a.first), py(a.first)),
-                    end = Offset(px(b.first), py(b.first)),
+                    start = start,
+                    end = end,
                     strokeWidth = 2f,
                 )
             }
@@ -234,6 +242,24 @@ fun GeometryView(
             }
         }
     }
+}
+
+/**
+ * 线段两个端点在画布上的坐标。
+ *
+ * 单独抽出来是因为这里出过一个只有截图才能发现的 bug：`py(a.first)` 把点的 x
+ * 当成 y 传了进去。A(0,0) 恰好不受影响，于是 AB 画成 A→(5,5)，BC 与 CA 也都落在
+ * y=x 上，整个三角形缩成一条斜线 —— 而顶点、标签全部正常，看起来像是"线段没解析"。
+ *
+ * 抽成纯函数之后，「水平边的两个端点 y 必须相等」这类断言才能写进单测。
+ */
+internal fun segmentScreen(
+    seg: Pair<Pair<Float, Float>, Pair<Float, Float>>,
+    px: (Float) -> Float,
+    py: (Float) -> Float,
+): Pair<Offset, Offset> {
+    val (a, b) = seg
+    return Offset(px(a.first), py(a.second)) to Offset(px(b.first), py(b.second))
 }
 
 private fun DrawScope.drawLabel(
@@ -337,26 +363,50 @@ object Geometry {
             addPoint(name, xy.first, xy.second, o.str("label") ?: name)
         }
 
-        /** 引用：可以是点名，也可以是 [x,y] */
+        /**
+         * 引用：点名、[x,y] 坐标对、或 {x,y} 对象。
+         *
+         * 三个分支都要用安全转换。之前写的是 `arr[0].jsonPrimitive` ——
+         * 对 `[[-1.5,0.5],[-0.5,3.25]]` 这种坐标对写法，arr[0] 本身是 JsonArray，
+         * 强转 JsonPrimitive 会抛 ClassCastException，整段解析直接中断，
+         * 界面上就是「几何图解析失败，原文」。而这正是模型画函数图时最常见的写法。
+         */
         fun resolve(el: kotlinx.serialization.json.JsonElement?): Pair<Float, Float>? {
             if (el == null) return null
-            (el as? JsonArray)?.let { arr ->
-                if (arr.size >= 2) {
-                    val x = arr[0].jsonPrimitive.doubleOrNull?.toFloat()
-                    val y = arr[1].jsonPrimitive.doubleOrNull?.toFloat()
-                    if (x != null && y != null) return x to y
-                }
-                return null
+            val arr = el as? JsonArray
+            if (arr != null) {
+                if (arr.size < 2) return null
+                val x = (arr[0] as? JsonPrimitive)?.doubleOrNull?.toFloat()
+                val y = (arr[1] as? JsonPrimitive)?.doubleOrNull?.toFloat()
+                return if (x != null && y != null) x to y else null
             }
-            val s = el.jsonPrimitive.contentOrNull ?: return null
+            val obj = el as? JsonObject
+            if (obj != null) return obj.xy()
+            val s = (el as? JsonPrimitive)?.contentOrNull ?: return null
             return points[s]?.let { it.x to it.y }
         }
 
-        fun addSeg(list: MutableList<Pair<Pair<Float, Float>, Pair<Float, Float>>>, el: kotlinx.serialization.json.JsonElement) {
-            val arr = el as? JsonArray ?: return
-            if (arr.size < 2) return
-            val a = resolve(arr[0]) ?: return
-            val b = resolve(arr[1]) ?: return
+        /**
+         * 一段可以是两点的线段，也可以是三点以上的折线。
+         *
+         * 画函数图象时模型习惯一次给一条 polyline（本例 8 个点连成 f(t) 的折线），
+         * 只取前两个点会画成一条短斜线。
+         */
+        fun addSeg(
+            list: MutableList<Pair<Pair<Float, Float>, Pair<Float, Float>>>,
+            el: kotlinx.serialization.json.JsonElement,
+        ) {
+            val arr = el as? JsonArray
+            if (arr != null) {
+                val pts = arr.mapNotNull { resolve(it) }
+                if (pts.size < 2) return
+                pts.zipWithNext().forEach { (a, b) -> list += a to b }
+                return
+            }
+            // {"from":…,"to":…} 这种对象写法也认，模型切换风格时不必整张图作废
+            val o = el as? JsonObject ?: return
+            val a = resolve(o["from"] ?: o["a"] ?: o["start"]) ?: return
+            val b = resolve(o["to"] ?: o["b"] ?: o["end"]) ?: return
             list += a to b
         }
 
@@ -424,16 +474,33 @@ object Geometry {
             }
         }
 
-        if (points.isEmpty() && segments.isEmpty() && circles.isEmpty() && polygons.isEmpty()) return null
+        // 只有「一个图元都没有」才算失败。模型可以只用内联坐标或只给文字，
+        // 那同样是有效的图，不该被打成解析失败。
+        if (points.isEmpty() && segments.isEmpty() && lines.isEmpty() &&
+            circles.isEmpty() && polygons.isEmpty() && texts.isEmpty()
+        ) {
+            return null
+        }
+
+        val showAxes = (root["axes"] as? JsonPrimitive)?.booleanOrNull == true
 
         val xs = ArrayList<Float>()
         val ys = ArrayList<Float>()
         points.values.forEach { xs += it.x; ys += it.y }
         segments.forEach { xs += it.first.first; xs += it.second.first; ys += it.first.second; ys += it.second.second }
+        lines.forEach { xs += it.first.first; xs += it.second.first; ys += it.first.second; ys += it.second.second }
         circles.forEach {
             xs += it.cx - it.r; xs += it.cx + it.r
             ys += it.cy - it.r; ys += it.cy + it.r
         }
+        /*
+         * 自由文本也要进包围盒。
+         *
+         * 模型标边长时习惯把标签放在图形外侧（本例 AB 的 y=-0.4，比所有点都低），
+         * 只按点/线段算视野的话，标签会落到画布外被裁掉 —— 用户看到的是一张
+         * 缺了标注的图。代价是极端坐标会把整张图缩小，但那是模型写错，不是布局问题。
+         */
+        texts.forEach { xs += it.x; ys += it.y }
         if (xs.isEmpty()) {
             xs += -1f; xs += 1f; ys += -1f; ys += 1f
         }
@@ -444,6 +511,18 @@ object Geometry {
         var maxY = ys.max()
         if (abs(maxX - minX) < 0.001f) { minX -= 1f; maxX += 1f }
         if (abs(maxY - minY) < 0.001f) { minY -= 1f; maxY += 1f }
+        /*
+         * 要坐标系就得让原点进视野。
+         *
+         * 模型画函数图时会写 "axes":true，但曲线常常整体在 t 轴上方（本例 y 从 0.4 到 3.25），
+         * 只按数据算包围盒的话 y=0 落在画布外，轴和刻度全被裁掉 —— 开关打开了却什么都看不到。
+         */
+        if (showAxes) {
+            minX = minOf(minX, 0f)
+            maxX = maxOf(maxX, 0f)
+            minY = minOf(minY, 0f)
+            maxY = maxOf(maxY, 0f)
+        }
         val padX = (maxX - minX) * 0.08f
         val padY = (maxY - minY) * 0.08f
 
@@ -455,7 +534,7 @@ object Geometry {
             polygons = polygons,
             angles = angles,
             texts = texts,
-            axes = (root["axes"] as? JsonPrimitive)?.booleanOrNull == true,
+            axes = showAxes,
             minX = minX - padX,
             maxX = maxX + padX,
             minY = minY - padY,

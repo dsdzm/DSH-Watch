@@ -22,6 +22,18 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        // 1.17.4 是纯修复（几何内联坐标解析、公式 \Big 与长箭头），按约定不写条目
+        ChangelogEntry(
+            version = "1.17.4",
+            date = "2026-11-09",
+            highlights = emptyList(),
+        ),
+        // 1.17.3 是纯修复（几何线段端点用错坐标轴），按约定不写条目
+        ChangelogEntry(
+            version = "1.17.3",
+            date = "2026-11-09",
+            highlights = emptyList(),
+        ),
         // 1.17.2 是纯修复（画布说明、搜索源、JS 顶层 return），按约定不写条目
         ChangelogEntry(
             version = "1.17.2",

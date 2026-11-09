@@ -45,6 +45,25 @@ class CanvasGuideTest {
         assertThat(prompt).contains("\\begin{document}")
     }
 
+    /**
+     * 模型画函数图时写的是内联坐标对，不是点名。
+     *
+     * 它不会读渲染代码，只能读这段说明；说明里只给点名写法，它就会自己发明
+     * `segments:[[[-1.5,0.5],…]]` 这种形式 —— 解析器当时正好接不住。
+     * 现在两边都支持，说明里也要写清楚，免得它以为只有一种写法。
+     */
+    @Test
+    fun `documents inline coordinate segments`() {
+        assertThat(prompt).contains("[[-1.5,0.5]")
+        assertThat(prompt).contains("折线")
+    }
+
+    @Test
+    fun `documents the big delimiter commands the model actually writes`() {
+        assertThat(prompt).contains("\\Big(")
+        assertThat(prompt).contains("\\Longleftrightarrow")
+    }
+
     @Test
     fun `stays small enough to send on every round`() {
         // 每轮都要付这份 token，超过 1200 字符就说明细节写多了
