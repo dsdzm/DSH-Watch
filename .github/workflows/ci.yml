@@ -29,11 +29,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
+      # ubuntu-latest 自带 Android SDK 与 cmdline-tools，不必再装一遍。
+      # 之前用 android-actions/setup-android 会去拉 "tools" 包，这个包已经从
+      # SDK 仓库下线，导致 action 直接 exit 1（Failed to find package 'tools'）。
+      - name: Ensure SDK platform
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          if [ -d "$ANDROID_HOME/platforms/android-35" ]; then
+            echo "android-35 已预装"
+          else
+            yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          fi
 
       - name: Cache Gradle
         uses: actions/cache@v4
