@@ -7,6 +7,7 @@
 <p align="center"><b>把 AI 编程助手装进手表。</b><br>不经过电脑，不依赖手机中转 —— 模型走云端 API，工具循环跑在表盘上。</p>
 
 <p align="center">
+  <a href="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml"><img src="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/dsdzm/DSH-Watch/releases"><img src="https://img.shields.io/github/v/release/dsdzm/DSH-Watch?display_name=tag" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/minSdk-28-3ddc84" alt="minSdk 28">
