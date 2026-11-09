@@ -1,20 +1,18 @@
-<div align="center">
+<p align="center">
+  <img src="docs/mascot-cutout.png" width="120" alt="DSH 肥鱼">
+</p>
 
-<img src="docs/mascot-cutout.png" width="120" alt="DSH 肥鱼">
+<h1 align="center">DSH 肥鱼 · DSH Watch</h1>
 
-# DSH 肥鱼 · DSH Watch
+<p align="center"><b>把 AI 编程助手装进手表。</b><br>不经过电脑，不依赖手机中转 —— 模型走云端 API，工具循环跑在表盘上。</p>
 
-**把 AI 编程助手装进手表。**
-
-不经过电脑，不依赖手机中转 —— 模型走云端 API，工具循环跑在表盘上。
-
-[![Release](https://img.shields.io/github/v/release/dsdzm/DSH-Watch?display_name=tag)](https://github.com/dsdzm/DSH-Watch/releases)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-![minSdk](https://img.shields.io/badge/minSdk-28-3ddc84)
-![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7f52ff)
-![APK](https://img.shields.io/badge/APK-8.2%20MB-lightgrey)
-
-</div>
+<p align="center">
+  <a href="https://github.com/dsdzm/DSH-Watch/releases"><img src="https://img.shields.io/github/v/release/dsdzm/DSH-Watch?display_name=tag" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
+  <img src="https://img.shields.io/badge/minSdk-28-3ddc84" alt="minSdk 28">
+  <img src="https://img.shields.io/badge/Kotlin-2.0.21-7f52ff" alt="Kotlin">
+  <img src="https://img.shields.io/badge/APK-8.2%20MB-lightgrey" alt="APK 8.2 MB">
+</p>
 
 ---
 
