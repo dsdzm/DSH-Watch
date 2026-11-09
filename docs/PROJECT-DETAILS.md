@@ -1,7 +1,7 @@
 # DSH 肥鱼 · 技术详解
 
 > 记录「怎么做的」和「为什么这么做」。给接手的人看，也给三个月后的自己看。
-> 对应代码：v1.18.3 / versionCode 59 · 2026-11-09
+> 对应代码：v1.18.4 / versionCode 60 · 2026-11-09
 
 ---
 
@@ -11,7 +11,7 @@
 | --- | --- |
 | 形态 | 单 Activity + Compose，手表端 AI 编程助手 |
 | 包名 | `com.dshwatch`（debug 变体加 `.debug` 后缀，可与正式版共存） |
-| 版本 | 1.18.3 / 59 |
+| 版本 | 1.18.4 / 60 |
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
 | 工具链 | AGP 8.7.3 · Kotlin 2.0.21 · Gradle 8.11.1 |
 | 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1 |

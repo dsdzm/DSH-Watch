@@ -3,6 +3,8 @@ package com.dshwatch.ui.screens.files
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -161,142 +164,169 @@ fun FileBrowserPanel(
         else -> "Choose file"
     }
 
-    WatchScaffold(
-        title = title,
-        subtitle = current?.let { pathHint(it, roots, zh) },
-        onBack = { back() },
-        actions = {
-            CircleIconTap(
-                icon = Icons.Filled.Refresh,
-                contentDescription = if (zh) "刷新" else "Refresh",
-                onClick = { tick++ },
-            )
-        },
+    /*
+     * 面板自己铺一层不透明底。
+     *
+     * 玻璃主题里 `colorScheme.background` 是 **Transparent** —— 各页面的根
+     * `background()` 等于「让位」，真正的不透明底由 DshWatchTheme 在最下面
+     * 连同两团色晕一起画。这在导航页上没问题（底下就是那层底），但面板是
+     * **盖在输入页上**的：让位的结果是输入框、快捷指令、发送按钮全透上来，
+     * 看起来像两个界面叠在一起。所以这里自己铺实底 ——
+     * 玻璃主题用 surface（近黑 / 浅灰），其它主题沿用原背景色。
+     */
+    val scheme = MaterialTheme.colorScheme
+    val solid = if (scheme.background.alpha < 0.05f) scheme.surface else scheme.background
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(solid)
+            /*
+             * 把空白处的点击吃掉。
+             *
+             * 上层 Box 没有 pointer input 时，落在「没有子元素」的区域（列表外的留白、
+             * 圆角外）会一路穿到下面的输入页 —— 面板看着是模态的，行为却不是：
+             * 点一下空白就可能插进一条快捷指令。这里只是消费点击，不拦截滚动。
+             */
+            .pointerInput(Unit) { detectTapGestures { } },
     ) {
-        /*
-         * 内容区在圆屏上是固定高度（不是 weight 撑满），所以这里让列表吃满剩余空间，
-         * 而不是让整页再套一层 verticalScroll —— 两层滚动在圆屏上会互相抢手势。
-         */
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            when (val l = listing) {
-                null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(modifier = Modifier.width(28.dp).height(28.dp))
-                }
-
-                else -> WearList(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (note.isNotBlank()) {
-                        item(key = "__note__") {
-                            Text(
-                                text = note,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            )
-                        }
+        WatchScaffold(
+            title = title,
+            subtitle = current?.let { pathHint(it, roots, zh) },
+            onBack = { back() },
+            actions = {
+                CircleIconTap(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = if (zh) "刷新" else "Refresh",
+                    onClick = { tick++ },
+                )
+            },
+        ) {
+            /*
+             * 内容区在圆屏上是固定高度（不是 weight 撑满），所以这里让列表吃满剩余空间，
+             * 而不是让整页再套一层 verticalScroll —— 两层滚动在圆屏上会互相抢手势。
+             */
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                when (val l = listing) {
+                    null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.width(28.dp).height(28.dp))
                     }
 
-                    if (!granted) {
-                        item(key = "__access__") {
-                            AccessCard(zh = zh) {
-                                if (StorageAccess.needsSystemSettings()) {
-                                    StorageAccess.requestAllFiles(context)
-                                } else {
-                                    permLauncher.launch(StorageAccess.runtimePermission())
-                                }
-                            }
-                        }
-                    }
-
-                    if (current == null) {
-                        rootItems(
-                            roots = roots,
-                            zh = zh,
-                            onEnter = { stack.add(it) },
-                        )
-                    } else {
-                        when (l) {
-                            is Listing.Denied -> item(key = "__denied__") {
-                                DeniedCard(zh = zh, path = l.path)
-                            }
-
-                            is Listing.Missing -> item(key = "__missing__") {
-                                EmptyState(
-                                    title = if (zh) "这个目录不在了" else "Folder is gone",
-                                    hint = if (zh) "可能被别的应用删掉了，返回上一级重试" else null,
+                    else -> WearList(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (note.isNotBlank()) {
+                            item(key = "__note__") {
+                                Text(
+                                    text = note,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                                 )
                             }
+                        }
 
-                            is Listing.Ok -> {
-                                if (l.nodes.isEmpty()) {
-                                    item(key = "__empty__") {
-                                        EmptyState(
-                                            title = if (zh) "空的" else "Empty",
-                                            hint = if (zh) "这个文件夹里没有文件" else null,
-                                        )
+                        if (!granted) {
+                            item(key = "__access__") {
+                                AccessCard(zh = zh) {
+                                    if (StorageAccess.needsSystemSettings()) {
+                                        StorageAccess.requestAllFiles(context)
+                                    } else {
+                                        permLauncher.launch(StorageAccess.runtimePermission())
                                     }
                                 }
-                                items(l.nodes.size, key = { l.nodes[it].file.absolutePath }) { i ->
-                                    val node = l.nodes[i]
-                                    FileRow(node = node, zh = zh) {
-                                        if (node.isDir) {
-                                            stack.add(node.file)
-                                        } else if (!DeviceFiles.canOpen(node.file)) {
-                                            note = if (zh) {
-                                                "系统不让读「${node.name}」，换系统选择器试试"
+                            }
+                        }
+
+                        if (current == null) {
+                            rootItems(
+                                roots = roots,
+                                zh = zh,
+                                onEnter = { stack.add(it) },
+                            )
+                        } else {
+                            when (l) {
+                                is Listing.Denied -> item(key = "__denied__") {
+                                    DeniedCard(zh = zh, path = l.path)
+                                }
+
+                                is Listing.Missing -> item(key = "__missing__") {
+                                    EmptyState(
+                                        title = if (zh) "这个目录不在了" else "Folder is gone",
+                                        hint = if (zh) "可能被别的应用删掉了，返回上一级重试" else null,
+                                    )
+                                }
+
+                                is Listing.Ok -> {
+                                    if (l.nodes.isEmpty()) {
+                                        item(key = "__empty__") {
+                                            EmptyState(
+                                                title = if (zh) "空的" else "Empty",
+                                                hint = if (zh) "这个文件夹里没有文件" else null,
+                                            )
+                                        }
+                                    }
+                                    items(l.nodes.size, key = { l.nodes[it].file.absolutePath }) { i ->
+                                        val node = l.nodes[i]
+                                        FileRow(node = node, zh = zh) {
+                                            if (node.isDir) {
+                                                stack.add(node.file)
+                                            } else if (!DeviceFiles.canOpen(node.file)) {
+                                                note = if (zh) {
+                                                    "系统不让读「${node.name}」，换系统选择器试试"
+                                                } else {
+                                                    "Cannot read ${node.name}. Try the system picker."
+                                                }
                                             } else {
-                                                "Cannot read ${node.name}. Try the system picker."
+                                                note = ""
+                                                onPick(node.file)
                                             }
-                                        } else {
-                                            note = ""
-                                            onPick(node.file)
+                                        }
+                                    }
+                                    if (l.truncated > 0) {
+                                        item(key = "__more__") {
+                                            HintText(
+                                                if (zh) {
+                                                    "目录里还有 ${l.truncated} 项没显示（一次最多 ${DeviceFiles.MAX_ITEMS} 项）"
+                                                } else {
+                                                    "${l.truncated} more items not shown " +
+                                                        "(max ${DeviceFiles.MAX_ITEMS})"
+                                                },
+                                                modifier = Modifier.padding(horizontal = 6.dp),
+                                            )
                                         }
                                     }
                                 }
-                                if (l.truncated > 0) {
-                                    item(key = "__more__") {
-                                        HintText(
-                                            if (zh) {
-                                                "目录里还有 ${l.truncated} 项没显示（一次最多 ${DeviceFiles.MAX_ITEMS} 项）"
-                                            } else {
-                                                "${l.truncated} more items not shown " +
-                                                    "(max ${DeviceFiles.MAX_ITEMS})"
-                                            },
-                                            modifier = Modifier.padding(horizontal = 6.dp),
-                                        )
-                                    }
-                                }
                             }
                         }
-                    }
 
-                    if (onSystemPicker != null) {
-                        item(key = "__system__") {
-                            WatchGhostButton(
-                                text = if (zh) "用系统文件选择器" else "System file picker",
-                                modifier = Modifier.padding(top = 2.dp),
-                                onClick = onSystemPicker,
+                        if (onSystemPicker != null) {
+                            item(key = "__system__") {
+                                WatchGhostButton(
+                                    text = if (zh) "用系统文件选择器" else "System file picker",
+                                    modifier = Modifier.padding(top = 2.dp),
+                                    onClick = onSystemPicker,
+                                )
+                            }
+                        }
+
+                        item(key = "__hint__") {
+                            HintText(
+                                if (current == null) {
+                                    if (zh) {
+                                        "内置浏览器不依赖任何第三方 App。选一个位置进去，点文件即可添加。"
+                                    } else {
+                                        "Built in, no file manager needed. Open a location, then tap a file."
+                                    }
+                                } else {
+                                    if (zh) "点文件添加；返回键上一层" else "Tap a file to add it. Back goes up."
+                                },
+                                modifier = Modifier.padding(horizontal = 6.dp),
                             )
                         }
-                    }
-
-                    item(key = "__hint__") {
-                        HintText(
-                            if (current == null) {
-                                if (zh) {
-                                    "内置浏览器不依赖任何第三方 App。选一个位置进去，点文件即可添加。"
-                                } else {
-                                    "Built in, no file manager needed. Open a location, then tap a file."
-                                }
-                            } else {
-                                if (zh) "点文件添加；返回键上一层" else "Tap a file to add it. Back goes up."
-                            },
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                        )
                     }
                 }
             }
