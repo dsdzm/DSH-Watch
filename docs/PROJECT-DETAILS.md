@@ -28,7 +28,7 @@
 ```
 ui/           Compose 界面（chat / sessions / settings / workspace / usage / provider / pair / diagnostics）
    │  StateFlow + ViewModel
-domain/       ChatEngine（对话与 Agent 循环）、agent/tools（47 个工具）、
+domain/       ChatEngine（对话与 Agent 循环）、agent/tools（51 个工具）、
    │          agent/exec（本机执行）、agent/cloud（GitHub Actions）、agent/mcp、agent/build（代码解析/校验）、plugin
 data/         SettingsRepository（DataStore）、ConversationStore（JSON）、WorkspaceStore、SecureKeyStore、UsageStore
 net/          ChatBackend 抽象 + OpenAiCompatBackend / DshServerBackend / IoBackend、SseReader、TurnSanitizer
@@ -123,7 +123,7 @@ core/         AppContainer（手写 DI）、Logx、Jsonx、Ids
 
 ---
 
-## 4. 工具系统（47 个）
+## 4. 工具系统（51 个）
 
 `AgentTool` 接口：`name` / `description` / `safety` / `parameters`（JSON Schema）/ `execute()`。
 `ToolRegistry` 负责注册、按名字分发、统一异常包装（工具内部抛异常 → `ToolResult.fail`，不炸整个循环）。
@@ -139,6 +139,7 @@ core/         AppContainer（手写 DI）、Logx、Jsonx、Ids
 | 执行（1） | `run_script`（shell / js） |
 | 交互（7） | `ask_user` `todo_write` `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
 | 设备（3） | `open_file` `open_screen` `get_clipboard` |
+| 设备操控（4） | `device_screen` `device_act` `device_open` `device_handoff`（需无障碍，默认关） |
 | B 站（16） | `bili_status` `bili_search` `bili_video` `bili_subtitle` `bili_comments` `bili_inbox` `bili_thread` `bili_report` `bili_reply` `bili_dm` `bili_like` `bili_coin` `bili_fav` `bili_fav_folders` `bili_fav_list` `bili_dyn` |
 
 设计原则：

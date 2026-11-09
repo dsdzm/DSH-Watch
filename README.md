@@ -50,7 +50,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 模型返回 `tool_calls` → 手表本地执行 → 结果回灌 → 再问模型，直到收敛。
 步数不设硬上限，改用停滞检测；长任务用 `todo_write` 维护清单，进度实时可见。
 
-**47 个内置工具**：
+**51 个内置工具**：
 
 | 分组 | 工具 |
 |---|---|
@@ -62,9 +62,15 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 | 本机执行 1 | `run_script` |
 | 交互与提醒 7 | `ask_user` `todo_write` `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
 | 设备联动 3 | `open_file` `open_screen` `get_clipboard` |
+| 设备操控 4 | `device_screen` `device_act` `device_open` `device_handoff` |
 | B 站 16 | `bili_status` `bili_search` `bili_video` `bili_subtitle` `bili_comments` `bili_inbox` `bili_thread` `bili_report` `bili_reply` `bili_dm` `bili_like` `bili_coin` `bili_fav` `bili_fav_folders` `bili_fav_list` `bili_dyn` |
 
 另外支持：
+
+- **设备操控（默认关）**：通过系统无障碍服务读屏并按编号点击、输入、滚动，
+  也能打开其他应用。操作期间 App 退到后台，屏幕底部一条悬浮提示写着当前动作，
+  右边是停止按钮。密码、验证码、支付确认框不代填；读到就交还用户。
+  开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
 
 - **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 8 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在手表上没有可用的进程沙箱，未支持。
 - **工具结果插件**：可插拔的后处理钩子，内置 JSON→TOON 压缩（重复键名只写一次，常压掉 30–60%）等。
@@ -176,7 +182,7 @@ Gradle 发行版本身建议从华为镜像下载，wrapper 的 `networkTimeout`
 app/src/main/java/com/dshwatch/
 ├─ core/        AppContainer（手写 DI）、日志、JSON、ID
 ├─ domain/      ChatEngine（对话与 Agent 循环）、TokenEstimator、PerfProfile
-│  ├─ agent/    ToolRegistry、tools/（47 个工具）、exec/、cloud/、mcp/、build/（静态校验）
+│  ├─ agent/    ToolRegistry、tools/（51 个工具）、exec/、cloud/、mcp/、build/（静态校验）
 │  ├─ plugin/   工具结果插件与 TOON 编码
 │  └─ model/    ChatMessage / Conversation / Provider / Media
 ├─ data/        SettingsRepository（DataStore）、ConversationStore（JSON）、SecureKeyStore
