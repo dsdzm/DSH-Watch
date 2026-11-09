@@ -1,7 +1,7 @@
 # DSH 肥鱼 · 技术详解
 
 > 记录「怎么做的」和「为什么这么做」。给接手的人看，也给三个月后的自己看。
-> 对应代码：`46af80f`（v1.4 / versionCode 12）· 2026-10-17
+> 对应代码：v1.17.4 / versionCode 55 · 2026-11-09
 
 ---
 
@@ -11,15 +11,15 @@
 | --- | --- |
 | 形态 | 单 Activity + Compose，手表端 AI 编程助手 |
 | 包名 | `com.dshwatch`（debug 变体加 `.debug` 后缀，可与正式版共存） |
-| 版本 | 1.4 / 12 |
+| 版本 | 1.17.4 / 55 |
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
 | 工具链 | AGP 8.7.3 · Kotlin 2.0.21 · Gradle 8.11.1 |
-| 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1、（可选）Chaquopy 17.1.0 |
-| 规模 | 113 个 Kotlin 文件 / 24.5k 行；44 个测试文件 / 522 个用例 |
-| 体积 | lite 6.4 MB（无 Python）· full 27 MB（含 CPython 3.11，仅 arm64-v8a） |
+| 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1 |
+| 规模 | 193 个 Kotlin 文件 / 52.4k 行；78 个测试文件 / 803 个用例 |
+| 体积 | 8.2 MB，单一通用包（v7a / v8a / x86 / x86_64） |
 
-**两个包的区别只在 Python**。`-PwithPython=true` 时才 apply Chaquopy，其余代码完全一致；
-签名相同，lite 与 full 可互相覆盖安装。
+**没有第二个体积档位**。v1.12 移除了本地 Python 引擎（Chaquopy 与 `libpython3.11.so`，约 20 MB），
+「lite / full 两个包」的分法随之取消，现在只有一条构建路径。
 
 ---
 
@@ -28,7 +28,7 @@
 ```
 ui/           Compose 界面（chat / sessions / settings / workspace / usage / provider / pair / diagnostics）
    │  StateFlow + ViewModel
-domain/       ChatEngine（对话与 Agent 循环）、agent/tools（31 个工具）、
+domain/       ChatEngine（对话与 Agent 循环）、agent/tools（47 个工具）、
    │          agent/exec（本机执行）、agent/cloud（GitHub Actions）、agent/mcp、agent/build（代码解析/校验）、plugin
 data/         SettingsRepository（DataStore）、ConversationStore（JSON）、WorkspaceStore、SecureKeyStore、UsageStore
 net/          ChatBackend 抽象 + OpenAiCompatBackend / DshServerBackend / IoBackend、SseReader、TurnSanitizer
@@ -123,36 +123,39 @@ core/         AppContainer（手写 DI）、Logx、Jsonx、Ids
 
 ---
 
-## 4. 工具系统（31 个）
+## 4. 工具系统（47 个）
 
 `AgentTool` 接口：`name` / `description` / `safety` / `parameters`（JSON Schema）/ `execute()`。
 `ToolRegistry` 负责注册、按名字分发、统一异常包装（工具内部抛异常 → `ToolResult.fail`，不炸整个循环）。
 
 | 分类 | 工具 |
 | --- | --- |
-| 文件（8） | `list_files` `read_file` `write_file` `append_file` `edit_file` `make_dir` `move_file` `delete_file` |
-| 检索（2） | `glob` `grep` |
-| 执行（1） | `run_script`（shell / js / python 三选一） |
-| 云端（2） | `cloud_build` `cloud_job` |
-| 构建（1） | `build_project`（本地写多文件项目 + 静态校验 + 生成 HTML/单页） |
+| 信息与计算（5） | `get_datetime` `calculate` `unit_convert` `get_device_info` `get_token_usage` |
 | 网络（2） | `http_fetch` `web_search` |
-| 设备（8） | `get_datetime` `get_device_info` `get_token_usage` `set_alarm` `list_alarms` `cancel_alarm` `create_event` `vibrate` |
-| 交互（3） | `ask_user` `todo_write` `open_file` |
-| 其他（4） | `calculate` `unit_convert` `get_clipboard` `open_screen` |
+| 文件（8） | `list_files` `read_file` `write_file` `edit_file` `append_file` `make_dir` `move_file` `delete_file` |
+| 检索（2） | `glob` `grep` |
+| 构建（1） | `build_project`（多文件项目 + 静态校验 + 打包成可预览 HTML） |
+| 云端（2） | `cloud_build` `cloud_job` |
+| 执行（1） | `run_script`（shell / js） |
+| 交互（7） | `ask_user` `todo_write` `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
+| 设备（3） | `open_file` `open_screen` `get_clipboard` |
+| B 站（16） | `bili_status` `bili_search` `bili_video` `bili_subtitle` `bili_comments` `bili_inbox` `bili_thread` `bili_report` `bili_reply` `bili_dm` `bili_like` `bili_coin` `bili_fav` `bili_fav_folders` `bili_fav_list` `bili_dyn` |
 
 设计原则：
 
 - **文件工具全是相对路径**，基准是会话工作目录，`..` 越界直接拒绝。
 - `write_file` 单次建议 ≤200 行（系统提示里写了），长文件分多次 `append_file`。
   手表内存有限，一次写几 MB 容易 OOM。
-- `run_script` 的 `language` 由文件后缀或显式参数决定；输出走「头尾双缓冲」，
+- `run_script` 的 `language` 只有 `shell` 与 `js` 两种，输出走「头尾双缓冲」，
   中间省略并标注省略了多少行 —— 手表屏幕装不下几千行日志。
+- 工具表本身约占 3–4k token，每轮请求都会带上。所以新增工具要控制描述长度，
+  细节放进参数说明而不是顶层 description。
 
 ---
 
 ## 5. 本机执行（domain/agent/exec）
 
-三个引擎，共同约束：超时可配（默认 20s）、输出上限 20k 字符、工作目录锁定在会话目录。
+两个引擎，共同约束：超时可配（默认 20s）、输出上限 20k 字符、工作目录锁定在会话目录。
 
 ### 5.1 ShellRunner
 
@@ -174,25 +177,16 @@ core/         AppContainer（手写 DI）、Logx、Jsonx、Ids
 - 用 `ContextFactory` 的指令观察者按「每 N 条指令」检查一次 deadline，超时抛 `Error`
 - 测试里断言「超时后线程确实已结束」，避免只是返回了错误、线程还在后台跑
 
-### 5.3 Python（可选）
+### 5.3 Python 已移除
 
-Chaquopy 17.1.0（MIT）。`-PwithPython=true` 才 apply，插件在 `app/build.gradle.kts` 顶部条件加载。
-好处：lite 包不用背 20 MB 的 CPython。
+v1.3 曾内置 Chaquopy + CPython 3.11（full 包 26.5 MB），v1.12 整个移除。
 
-调用链：`PythonBridge` → 反射找 `com.chaquo.python.Python`（不存在就明确告知「此版本不含 Python」）
-→ `ReflectionPythonEngine` 调 `app/src/main/python/dsh_runner.py`。
+原因不是体积写不下，而是**维护成本与收益不成比例**：手表上没有 pip、
+没有编译型依赖，能跑的只剩标准库的一小部分；而为了它要维护反射桥接、线程超时注入、
+JNI 类型限制这一整套补丁。真要执行 Python，交给 `cloud_build` 的云端 runner 更合适。
 
-`dsh_runner.py` 的要点：
-
-- 在**独立线程**里执行用户代码，主线程负责超时
-- 超时用 `ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, PyExc_SystemExit)` 异步注入异常
-  —— 这是唯一能打断 `while True: pass` 的手段
-- 返回结构化 JSON：`{ok, stdout, stderr, error, duration_ms}`
-
-坑一：**不要给 Chaquopy 传 `ArrayList`**。它的 JNI 桥接只认 `String[]` / `List<String>` 的特定形态，
-传 `ArrayList` 空参也会炸。现在统一传 **JSON 字符串**，Python 侧 `json.loads`。
-
-坑二：`sys.settrace` 抛异常会被 CPython 在 C 层吞掉，超时从未生效。所以最终选了 `SetAsyncExc`。
+现在 `run_script` 只保留 `shell` 与 `js`：前者是设备自带的 `/system/bin/sh`，
+后者是 Rhino 解释器，都是「已经在设备上、不需要额外安装」的运行时。
 
 ---
 
@@ -482,18 +476,19 @@ interface RoutingPlugin : Plugin {             // 每轮决定工具面
 ```bash
 export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 
-./gradlew :app:testDebugUnitTest --rerun --offline     # 522 用例
-./gradlew :app:assembleRelease --offline               # lite 6.4 MB
-./gradlew :app:assembleRelease -PwithPython=true --offline   # full 27 MB
+./gradlew :app:testDebugUnitTest --rerun --offline   # 803 用例
+./gradlew :app:assembleRelease --offline             # 8.2 MB
+./gradlew :app:assembleRelease -Pabi=arm64-v8a       # 单 ABI，体积更小
 ```
 
 - **R8** 开 `isMinifyEnabled` + `isShrinkResources`，规则在 `app/proguard-rules.pro`
-- **签名** v1 + v2 + v3 全开：v1 兼容部分国产手表自带安装器（只认 JAR 签名），
-  v3 给 Android 9+，代价几百 KB
-- **keystore**：`dsh-watch.jks` + `keystore.properties`（`storeFile` 是绝对路径，
-  换机器要改）。证书 SHA-256 `70437a7f…bf31f94`，1.0 至今未换
-- 测试重点：`CloudTargetsInputsTest`（真实模板当样本）、`CloudWorkflowTemplateTest`、
-  `PythonValidatorTest`、`ChatEngineTest`、`ScriptToolsTest`
+- **签名**：`signingConfigs` 里 v1/v2/v3 三个开关都声明为 true，但实际产物只带 v3。
+  这是 AGP 按 minSdk 做的裁剪 —— minSdk 28 正好是 v3 引入的版本，v1/v2 没有必要。
+  用 `apksigner verify --min-sdk-version 23` 才能看到三者全为 true。
+- **keystore**：`dsh-watch.jks` + `keystore.properties`，两者都在 `.gitignore` 里。
+  证书 SHA-256 `70437a7f…bf31f94`，1.0 至今未换。
+- 测试重点：`ChatEngineTest`、`ScriptToolsTest`、`GeometryParseTest`、`LatexParseTest`、
+  `CloudWorkflowTemplateTest`、`BuiltinProviderTest`
 
 ---
 
@@ -507,7 +502,7 @@ export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 4. **cloud_build 默认不等待**（v1.4 起）。构建 8 分钟时，同步等待会让界面一直转圈；
    现在触发即返回链接，进度靠 `cloud_job`。需要同步结果时显式 `wait=true`。
 5. **产物面板会堆卡片**。交付统一走资料库（`tools/upload_to_library.py`），
-   本地构建产物及时归档到 `/root/dsh-watch-releases/`，不留在工作空间。
+   本地构建产物及时归档，不留在工作空间。
 6. **全量构建约 1–2 分钟**（有缓存）；首次冷构建 5–10 分钟，主要是下 Gradle 与依赖。
 
 ---

@@ -1,0 +1,70 @@
+name: Bug 报告
+description: 装到手表上之后出现的异常行为
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。手表上的问题很难在模拟器里复现，请尽量把环境和步骤写全。
+        安全问题请走 [Security Advisories](../security/advisories/new)，不要发在这里。
+
+  - type: input
+    id: device
+    attributes:
+      label: 设备型号与系统
+      description: 手表型号 + Android 版本（设置 → 关于 里也能看到）
+      placeholder: 例如：OPPO Watch X / Android 11
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App 版本
+      description: 设置 → 关于 里的 versionName（versionCode）
+      placeholder: 例如：1.17.4 (55)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: 使用的后端
+      options:
+        - 直连 API（第三方 / 官方接口）
+        - 内置免费通道（Agnes / 智谱）
+        - DSH 服务器
+        - 与模型无关（界面或本地功能）
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开 App 开始，一步一步写
+      placeholder: |
+        1. 进入设置 → 供应商
+        2. ...
+        3. 出现错误
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 报错原文 / 截图
+      description: |
+        如果是连接或对话问题，先跑「设置 → 诊断」，把标红那一步的原始结果贴上来。
+        截图可以直接拖进这个输入框。
+      placeholder: 把 HTTP 状态码、响应正文或异常类名贴在这里
+    validations:
+      required: false

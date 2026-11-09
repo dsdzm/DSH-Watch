@@ -1,0 +1,43 @@
+name: 功能建议
+description: 希望增加或改进的能力
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 描述使用场景，而不是直接给方案 —— 方案可以有很多种，场景只有一个
+      placeholder: 例如：在外面跑步时想让手表读一下今天的日程，现在要点四五下才能进去
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你设想的做法
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及模块
+      multiple: true
+      options:
+        - 对话与渲染
+        - Agent 与工具
+        - 画布（公式 / 导图 / 几何）
+        - 模型接入
+        - 工作空间与构建
+        - 云端编译
+        - B 站
+        - 界面与交互
+        - 其他
+
+  - type: markdown
+    attributes:
+      value: |
+        > 提示：这个项目优先保证「手表能跑得动」。功能建议如果会显著增加常驻内存或
+        > 启动时间，可能不会被采纳，或者需要换一种更轻的实现。请在描述里说明你对
+        > 资源占用的预期。

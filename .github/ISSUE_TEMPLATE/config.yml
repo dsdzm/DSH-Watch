@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题
+    url: https://github.com/dsdzm/DSH-Watch/security/advisories/new
+    about: 漏洞与密钥泄露请私下报告，不要开公开 Issue
+  - name: 文档
+    url: https://github.com/dsdzm/DSH-Watch/blob/main/README.md
+    about: 安装、首次配置、构建与常见问题先看 README

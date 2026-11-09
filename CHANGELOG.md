@@ -2315,7 +2315,7 @@ minSdk 28，真高斯模糊（`Modifier.blur` / RenderEffect）要 API 31，
   （服务端必然 400）时才退化为按预算装填兜底。用户明确选择：宁可设备卡顿，
   也要让模型看得见每一步
 
-> 本版每处改动的根因、实现机制与验证方式见 **[docs/RELEASE-1.6.md](docs/RELEASE-1.6.md)**。
+> 本版每处改动的根因、实现机制与验证方式见 **[docs/releases/RELEASE-1.6.md](docs/releases/RELEASE-1.6.md)**。
 
 ---
 
@@ -2339,7 +2339,7 @@ minSdk 28，真高斯模糊（`Modifier.blur` / RenderEffect）要 API 31，
 - lite 版隐藏 Python 入口，`run_script` 的能力清单也只列 shell / js；
   系统提示同步说明「本机没有编译器，不要说在本地编译」
 
-> 本版每处改动的根因、实现机制与验证方式见 **[docs/RELEASE-1.5.md](docs/RELEASE-1.5.md)**。
+> 本版每处改动的根因、实现机制与验证方式见 **[docs/releases/RELEASE-1.5.md](docs/releases/RELEASE-1.5.md)**。
 
 ---
 
