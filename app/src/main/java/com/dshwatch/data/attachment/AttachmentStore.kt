@@ -52,9 +52,16 @@ object AttachmentStore {
             val ext = name.substringAfterLast('.', "").lowercase()
             val mime = context.contentResolver.getType(uri).orEmpty()
             val kind = kindOf(ext, mime)
-
-            if (meta.second > MAX_RAW_BYTES) {
-                return@withContext failed(id, name, mime, meta.second, kind, "文件超过 8MB，手表上读不动")
+            /*
+             * 大小必须在**读之前**拿到。
+             *
+             * content:// 能查到 OpenableColumns.SIZE；内置文件浏览器给的是 file://，
+             * 那个 scheme 查不到列，queryMeta 只能给 -1。不补一次 stat，
+             * 「先整个读进内存、再被 8MB 上限拦下」的顺序会让选一个视频直接 OOM。
+             */
+            val size = sizeOf(uri, meta.second)
+            if (size > MAX_RAW_BYTES) {
+                return@withContext failed(id, name, mime, size, kind, "文件超过 8MB，手表上读不动")
             }
 
             val dir = File(root(appFilesDir), id).apply { mkdirs() }
@@ -206,6 +213,15 @@ object AttachmentStore {
             .replace("&quot;", "\"")
             .replace("&apos;", "'")
             .replace(Regex("\n{3,}"), "\n\n")
+    }
+
+    /** 真实字节数。查不到就 stat 一次（file:// 只能这么办），还是查不到返回 -1 */
+    private fun sizeOf(uri: Uri, queried: Long): Long {
+        if (queried >= 0) return queried
+        if (uri.scheme != "file") return queried
+        val path = uri.path.orEmpty()
+        if (path.isBlank()) return -1
+        return runCatching { File(path).length() }.getOrDefault(-1)
     }
 
     private fun queryMeta(context: Context, uri: Uri): Pair<String, Long> {

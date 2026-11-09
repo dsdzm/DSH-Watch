@@ -22,6 +22,15 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.18.3",
+            date = "2026-11-09",
+            highlights = listOf(
+                "新增内置文件浏览器：不依赖系统文件管理器，直接翻目录选文件",
+                "附件按钮默认走内置浏览器，可翻下载 / 文档 / 图片 / 相机 / 存储根目录",
+                "设置 → 文件里可切回系统选择器",
+            ),
+        ),
         // 1.18.2 是修复与瘦身（提示词压缩、放开设置页、取消操控停滞判定），按约定不写条目
         ChangelogEntry(
             version = "1.18.2",

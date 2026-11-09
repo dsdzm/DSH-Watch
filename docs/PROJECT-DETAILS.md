@@ -1,7 +1,7 @@
 # DSH 肥鱼 · 技术详解
 
 > 记录「怎么做的」和「为什么这么做」。给接手的人看，也给三个月后的自己看。
-> 对应代码：v1.18.2 / versionCode 58 · 2026-11-09
+> 对应代码：v1.18.3 / versionCode 59 · 2026-11-09
 
 ---
 
@@ -11,11 +11,11 @@
 | --- | --- |
 | 形态 | 单 Activity + Compose，手表端 AI 编程助手 |
 | 包名 | `com.dshwatch`（debug 变体加 `.debug` 后缀，可与正式版共存） |
-| 版本 | 1.18.2 / 58 |
+| 版本 | 1.18.3 / 59 |
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
 | 工具链 | AGP 8.7.3 · Kotlin 2.0.21 · Gradle 8.11.1 |
 | 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1 |
-| 规模 | 204 个 Kotlin 文件 / 54.7k 行；81 个测试文件 / 835 个用例 |
+| 规模 | 207 个 Kotlin 文件 / 55.6k 行；82 个测试文件 / 842 个用例 |
 | 体积 | 8.2 MB，单一通用包（v7a / v8a / x86 / x86_64） |
 
 **没有第二个体积档位**。v1.12 移除了本地 Python 引擎（Chaquopy 与 `libpython3.11.so`，约 20 MB），
@@ -477,7 +477,7 @@ interface RoutingPlugin : Plugin {             // 每轮决定工具面
 ```bash
 export ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 
-./gradlew :app:testDebugUnitTest --rerun --offline   # 835 用例
+./gradlew :app:testDebugUnitTest --rerun --offline   # 842 用例
 ./gradlew :app:assembleRelease --offline             # 8.2 MB
 ./gradlew :app:assembleRelease -Pabi=arm64-v8a       # 单 ABI，体积更小
 ```

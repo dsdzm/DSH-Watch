@@ -23,6 +23,24 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!--
+      内置文件浏览器：读「下载 / 文档 / 图片 / 相机」这些公共目录。
+
+      两档，因为 Android 在这里改过一次规则：
+        · API 28–29：READ_EXTERNAL_STORAGE 一个运行时权限就够；
+        · API 30+：按路径读公共目录被 FUSE 拦掉，只剩「所有文件访问」这一条路
+          （系统文件选择器也要求设备上存在文件管理器，而那正是本功能要兜的底）。
+
+      两者都在运行时申请，都不申请也能用 —— 那时只看得到应用自己的目录。
+      存储只读不写，不接受任何上传。
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <!-- 手表特性声明为可选：同一份 APK 既能装在手表，也能装在手机上调试 -->
     <uses-feature
         android:name="android.hardware.type.watch"
@@ -54,6 +72,7 @@
     <application
         android:name=".DshWatchApp"
         android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:hardwareAccelerated="true"

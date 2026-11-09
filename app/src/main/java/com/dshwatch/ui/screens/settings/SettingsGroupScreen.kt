@@ -850,6 +850,24 @@ private fun FilesGroup(
             title = s.storageUsed,
             subtitle = s.entryStorageDesc,
             trailing = storageText,
+            showDivider = true,
+        )
+        /*
+         * 内置文件浏览器开关。
+         *
+         * 默认开：`ACTION_OPEN_DOCUMENT` 依赖设备上存在文件管理器，一部分手表 ROM
+         * 把它删了，点「＋文件」会静默失败。关掉就退回系统选择器 ——
+         * 有文件管理器的设备上，系统那套能翻到网盘、第三方存储等更多地方。
+         */
+        SwitchRow(
+            title = if (s.isChinese) "用内置文件浏览器" else "Built-in file browser",
+            subtitle = if (s.isChinese) {
+                "选附件时不依赖系统文件管理器，直接列表浏览；关掉则用系统选择器"
+            } else {
+                "List files in-app instead of relying on a system file manager"
+            },
+            checked = settings.builtinFilePicker,
+            onCheckedChange = { on -> update { it.copy(builtinFilePicker = on) } },
         )
     }
 }

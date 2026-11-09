@@ -3,10 +3,13 @@ package com.dshwatch.ui.screens.input
 import androidx.compose.foundation.background
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -30,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,6 +51,7 @@ import com.dshwatch.ui.components.cornerSafe
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.screens.files.FileBrowserPanel
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.graphics.Color
@@ -78,20 +84,29 @@ fun InputScreen(
     /*
      * 附件。
      *
+     * 两条通路，默认走内置浏览器（见 FileBrowserPanel 的注释：一部分手表 ROM
+     * 根本没有文件管理器，OpenDocument 会静默失败，用户看到的是「点了没反应」）。
+     * 关掉「内置文件浏览器」这个开关就退回系统选择器 —— 有正常文件管理器的设备
+     * 上，系统那套能翻到更远的地方。
+     *
      * 用 OpenDocument 而不是 GetContent：前者拿到的 uri 在页面重建后仍然有效
      * （附件要跟着消息走，用户可能退出输入页再回来），后者只是一次性授权。
      * mime 传「任意类型」：手表上的文件管理器往往不认更细的类别，限死只会让可选文件为空。
      */
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachBusy by remember { mutableStateOf(false) }
     var attachNote by remember { mutableStateOf("") }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    var showBrowser by remember { mutableStateOf(false) }
+
+    /** 把一个 uri（系统选择器给的，或内置浏览器给的 file://）读成附件 */
+    fun absorb(uri: Uri) {
         if (attachments.size >= AttachmentKinds.MAX_FILES) {
             attachNote = "一次最多带 ${AttachmentKinds.MAX_FILES} 个文件"
-            return@rememberLauncherForActivityResult
+            return
         }
         scope.launch {
             attachBusy = true
@@ -103,6 +118,10 @@ fun InputScreen(
             if (!att.ok) attachNote = "${att.name}：${att.error}"
             attachBusy = false
         }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { absorb(it) }
     }
 
     // 只有 DeepSeek 才有峰谷计价，别的供应商显示这行只会是噪音
@@ -139,152 +158,197 @@ fun InputScreen(
         }
     }
 
-    WatchScaffold(
-        title = s.inputHint,
-        onBack = { nav.pop() },
-        bottom = {
+    Box(modifier = Modifier.fillMaxSize()) {
+        WatchScaffold(
+            title = s.inputHint,
+            onBack = { nav.pop() },
+            bottom = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .cornerSafe(),
+
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PrimaryButton(
+                        text = s.send,
+                        modifier = Modifier.weight(1f),
+                        enabled = text.isNotBlank() || attachments.isNotEmpty(),
+                        onClick = { submit() },
+                    )
+                }
+            },
+        ) {
+            // 发出去之前是最后能改主意的时刻，所以提示放在输入框正上方
+            if (showPriceBar) {
+                DeepSeekPriceBar()
+                Spacer(Modifier.height(5.dp))
+            }
+            if (busy) {
+                Text(
+                    text = "上一轮还在生成，等它写完再发（内容已保留）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(5.dp))
+            }
+
+            // 输入框本身做成玻璃卡片：OutlinedTextField 的描边框在玻璃主题下
+            // 是一条突兀的主色细线（圆屏上尤其明显），所以这里去掉描边，
+            // 只用玻璃的边与底色来界定「这是一个可输入的框」。
+            val glass = LocalGlass.current
+            OutlinedTextField(
+                value = text,
+                onValueChange = {
+                    text = it
+                    if (busy) busy = false
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .then(
+                        if (glass) {
+                            Modifier.glassSurface(
+                                shape = RoundedCornerShape(18.dp),
+                                cornerRadius = 18.dp,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .focusRequester(focusRequester),
+                placeholder = {
+                    Text(s.inputHint, style = MaterialTheme.typography.bodySmall)
+                },
+                textStyle = MaterialTheme.typography.bodyMedium,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                // 玻璃主题：容器透明、无描边、无指示线 —— 框的形状由玻璃自己给
+                colors = if (glass) {
+                    OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    OutlinedTextFieldDefaults.colors()
+                },
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            /*
+             * 附件区。
+             *
+             * 放在输入框和快捷指令之间：这两个都是「发送前最后一次调整」的东西，
+             * 挨在一起比塞进顶栏更容易被发现。已选文件连同「提取出多少字」一起显示 ——
+             * 用户需要知道这份 PDF 到底有没有读出内容，否则会得到一次基于空文档的回答。
+             */
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .cornerSafe(),
-
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PrimaryButton(
-                    text = s.send,
-                    modifier = Modifier.weight(1f),
-                    enabled = text.isNotBlank() || attachments.isNotEmpty(),
-                    onClick = { submit() },
-                )
-            }
-        },
-    ) {
-        // 发出去之前是最后能改主意的时刻，所以提示放在输入框正上方
-        if (showPriceBar) {
-            DeepSeekPriceBar()
-            Spacer(Modifier.height(5.dp))
-        }
-        if (busy) {
-            Text(
-                text = "上一轮还在生成，等它写完再发（内容已保留）",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Spacer(Modifier.height(5.dp))
-        }
-
-        // 输入框本身做成玻璃卡片：OutlinedTextField 的描边框在玻璃主题下
-        // 是一条突兀的主色细线（圆屏上尤其明显），所以这里去掉描边，
-        // 只用玻璃的边与底色来界定「这是一个可输入的框」。
-        val glass = LocalGlass.current
-        OutlinedTextField(
-            value = text,
-            onValueChange = {
-                text = it
-                if (busy) busy = false
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .then(
-                    if (glass) {
-                        Modifier.glassSurface(
-                            shape = RoundedCornerShape(18.dp),
-                            cornerRadius = 18.dp,
-                        )
-                    } else {
-                        Modifier
+                Chip(
+                    text = when {
+                        attachBusy -> "读取中…"
+                        attachments.isEmpty() -> "＋ 文件"
+                        else -> "＋ 再加一个"
+                    },
+                    onClick = {
+                        if (attachBusy) return@Chip
+                        if (settings.builtinFilePicker) {
+                            // 键盘会盖掉半块表盘，面板要全屏，先收起来
+                            runCatching { keyboard?.hide() }
+                            focusManager.clearFocus()
+                            showBrowser = true
+                        } else {
+                            val launched = runCatching { picker.launch(arrayOf("*/*")) }.isSuccess
+                            if (!launched) {
+                                attachNote = "系统文件选择器不可用，可在设置 → 文件里改用内置浏览器"
+                            }
+                        }
                     },
                 )
-                .focusRequester(focusRequester),
-            placeholder = {
-                Text(s.inputHint, style = MaterialTheme.typography.bodySmall)
-            },
-            textStyle = MaterialTheme.typography.bodyMedium,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { submit() }),
-            // 玻璃主题：容器透明、无描边、无指示线 —— 框的形状由玻璃自己给
-            colors = if (glass) {
-                OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    cursorColor = MaterialTheme.colorScheme.primary,
+                attachments.forEach { att ->
+                    Chip(
+                        text = "${att.name.take(12)} · ${att.summary()}  ✕",
+                        onClick = { attachments.remove(att) },
+                    )
+                }
+            }
+            if (attachNote.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = attachNote,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            } else {
-                OutlinedTextFieldDefaults.colors()
-            },
-        )
+            }
+            if (attachments.any { it.ok && it.kind != AttachmentKinds.IMAGE }) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "文本会在发送时随消息一起交给模型（最多 6 万字/文件）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
 
-        Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(6.dp))
+
+            // 快捷指令：手表打字慢，常用意图一键插入
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                QUICK_PROMPTS.forEach { (label, prompt) ->
+                    Chip(text = label, onClick = {
+                        text = if (text.isBlank()) prompt else (text.trimEnd() + "\n" + prompt)
+                    })
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
 
         /*
-         * 附件区。
+         * 内置文件浏览器：盖在输入页上，而不是 push 一个新页面。
          *
-         * 放在输入框和快捷指令之间：这两个都是「发送前最后一次调整」的东西，
-         * 挨在一起比塞进顶栏更容易被发现。已选文件连同「提取出多少字」一起显示 ——
-         * 用户需要知道这份 PDF 到底有没有读出内容，否则会得到一次基于空文档的回答。
+         * 页面栈换页会销毁旧页的组合 —— 输入页里的草稿文字和已选附件都是普通
+         * remember，一 push 就没了。用户挑完文件回来发现自己打的半句话不见了，
+         * 这比「没有文件管理器」还难受。面板留在同一棵组合里，什么都不丢。
          */
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Chip(
-                text = when {
-                    attachBusy -> "读取中…"
-                    attachments.isEmpty() -> "＋ 文件"
-                    else -> "＋ 再加一个"
+        if (showBrowser) {
+            FileBrowserPanel(
+                workspace = container.workspaceStore.rootDir(),
+                onClose = { showBrowser = false },
+                onPick = { file ->
+                    showBrowser = false
+                    absorb(Uri.fromFile(file))
                 },
-                onClick = {
-                    if (!attachBusy) picker.launch(arrayOf("*/*"))
+                /*
+                 * 系统选择器的出口。
+                 *
+                 * `launch()` 在没有任何 App 响应 ACTION_OPEN_DOCUMENT 时会抛
+                 * ActivityNotFoundException —— 这正是本功能要兜的那个场景，
+                 * 所以必须接住：否则用户点了「用系统选择器」，App 直接崩。
+                 */
+                onSystemPicker = {
+                    val launched = runCatching { picker.launch(arrayOf("*/*")) }.isSuccess
+                    showBrowser = false
+                    if (!launched) {
+                        attachNote = "这台设备没有可用的系统文件选择器，用内置浏览器选就行"
+                    }
                 },
             )
-            attachments.forEach { att ->
-                Chip(
-                    text = "${att.name.take(12)} · ${att.summary()}  ✕",
-                    onClick = { attachments.remove(att) },
-                )
-            }
         }
-        if (attachNote.isNotBlank()) {
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = attachNote,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (attachments.any { it.ok && it.kind != AttachmentKinds.IMAGE }) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "文本会在发送时随消息一起交给模型（最多 6 万字/文件）",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
-
-        Spacer(Modifier.height(6.dp))
-
-        // 快捷指令：手表打字慢，常用意图一键插入
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            QUICK_PROMPTS.forEach { (label, prompt) ->
-                Chip(text = label, onClick = {
-                    text = if (text.isBlank()) prompt else (text.trimEnd() + "\n" + prompt)
-                })
-            }
-        }
-        Spacer(Modifier.height(4.dp))
     }
 }
 

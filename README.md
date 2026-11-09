@@ -42,6 +42,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 - 会话本地持久化、自动起标题、置顶、重命名
 - 停止生成、重新生成、一键复制
 - 附件上传：`txt` `md` `json` `csv` / 代码 / `docx` / `pdf` / 图片，正文提取后随消息进入上下文
+- 内置文件浏览器：不依赖系统文件管理器，直接翻目录选文件（见下）
 - 图片上传前压到长边 512 / JPEG 80（按路径与修改时间缓存），手表截图通常 20–60KB
 - 对话内直接显示模型产出或引用的图片、视频（支持多模态的模型可读图）
 - 系统提示词预设：Vibe Coding / 极简 / 代码评审 / 排障 / 讲解 / 自定义
@@ -80,6 +81,14 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
   **系统设置页可以操作**（开勿扰、调亮度、连蓝牙）；权限管理、应用安装、
   系统界面仍然只读 —— 那几页点错不可逆。
   开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
+
+- **内置文件浏览器（默认开）**：一部分手表 ROM 没有文件管理器，系统 `ACTION_OPEN_DOCUMENT`
+  拿不到结果 —— 点「＋文件」什么都不发生。内置浏览器不依赖第三方 App，直接翻
+  工作空间 / 下载 / 文档 / 图片 / 相机 / 音乐 / 存储根目录。列表是鱼眼变换的，
+  圆屏上滚到两端时条目缩小内收，长文件名不会被圆周切掉。
+  公共目录的读取门槛按系统版本不同：**API 28–29** 是 `READ_EXTERNAL_STORAGE`，
+  **API 30+** 只能是「所有文件访问」(MANAGE_EXTERNAL_STORAGE) —— 后者要在系统设置里
+  单独打开，不授权也能用，只是只看得到应用自己的目录。设置 → 文件里可切回系统选择器。
 
 - **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 8 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在手表上没有可用的进程沙箱，未支持。
 - **工具结果插件**：可插拔的后处理钩子，内置 JSON→TOON 压缩（重复键名只写一次，常压掉 30–60%）等。
@@ -120,7 +129,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
 
 ```bash
-adb install -r DSH-Watch-v1.18.2.apk
+adb install -r DSH-Watch-v1.18.3.apk
 ```
 
 没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。
@@ -219,6 +228,8 @@ app/src/main/java/com/dshwatch/
 - 直连模式下聊天内容发往你配置的第三方接口；DSH 服务器模式数据只在手表与你的电脑之间
 - HTTP 明文仅适合可信局域网，跨公网请用 HTTPS 或 Tailscale / WireGuard
 - 不依赖任何 Google 服务（无 GMS、无 Firebase、无 Wearable Data Layer）
+- 存储权限只在用内置文件浏览器时申请，**只读不写**；API 30+ 的「所有文件访问」是
+  系统级重权限，不申请也能正常用，只是看不到公共目录
 
 漏洞与安全问题请按 [SECURITY.md](SECURITY.md) 的方式反馈，不要直接开公开 Issue。
 
