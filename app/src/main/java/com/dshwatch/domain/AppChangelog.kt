@@ -22,6 +22,15 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.19.0",
+            date = "2026-11-10",
+            highlights = listOf(
+                "操控设备时只带设备工具，每轮的工具表开销降到约十分之一",
+                "设备操控历史里的旧屏幕自动折叠，只保留最近三屏",
+                "界面没有变化时不再重发整屏",
+            ),
+        ),
         // 1.18.5 是纯修复（设备操控的假成功与审批挂死），按约定不写条目
         // 1.18.4 是纯修复（文件浏览器面板补不透明底），按约定不写条目
         // 1.18.3 起是文件浏览器

@@ -137,10 +137,8 @@ object ScreenDigest {
             val geo = screen?.let {
                 "屏幕 ${it.width}×${it.height}，中心点 (${it.centerX}, ${it.centerY})。"
             }.orEmpty()
-            return header + "\n（这一屏没有可读的文字或可操作的控件。可能还在加载，" +
-                "也可能是游戏 / 自绘界面。$geo" +
-                "可以稍后再读一次；要按位置点就用 device_act action=tap 带 x、y，" +
-                "没把握就让用户接手。）"
+            return header + "\n（读不到控件：可能还在加载，或游戏/自绘界面。$geo" +
+                "可按 x、y 点（device_act action=tap），或稍后再读；没把握就交还用户。）"
         }
 
         val lines = ArrayList<String>(elements.size)
@@ -159,8 +157,7 @@ object ScreenDigest {
             append(header)
             lines.forEach { append('\n').append(it) }
             if (hidden > 0) {
-                append("\n…另有 ").append(hidden).append(" 项未显示")
-                append("（可用 device_act action=scroll 往下翻）")
+                append("\n…还有 ").append(hidden).append(" 项未显示（用 scroll 下翻）")
             }
         }
     }

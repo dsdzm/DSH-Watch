@@ -244,13 +244,22 @@ object DeviceControlTools {
             )
             // message 本身已经是「已点击「发送」」，不要再拼一个「已」
             DeviceControlHub.note(outcome.message, after.appLabel)
-            val unchanged = if (after.text == before) {
-                "\n\n（界面没有变化：要么动作没生效，要么效果不在读屏范围里（比如只弹了个提示）。" +
-                    "不要直接重复同一个动作。）"
-            } else {
-                ""
+            /*
+             * 界面没变时**不重发整屏**。
+             *
+             * 这是高频路径：点了一个不响应的按钮、输入完没有提交、弹了个 Toast
+             * 就消失 —— 每出现一次都是一整屏控件白白进上下文，而模型手上
+             * 已经有上一屏，再发一遍同样的内容只是把它自己搞糊涂。
+             * 只给结论 + 项数，需要细节它会自己重读。
+             */
+            if (after.text == before) {
+                return ToolResult.ok(
+                    "${outcome.message}\n\n（界面没有变化，仍是上一屏的 ${after.elements.size} 项。" +
+                        "要么动作没生效，要么效果不在读屏里（比如只弹了个提示）。" +
+                        "别重复同一个动作：换个做法，或先 device_screen 重读。）",
+                )
             }
-            return ToolResult.ok("${outcome.message}\n\n${after.text}$unchanged")
+            return ToolResult.ok("${outcome.message}\n\n${after.text}")
         }
 
         override fun summarize(args: JsonObject): String {

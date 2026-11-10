@@ -976,11 +976,30 @@ class ChatEngine(
             // edit_file/run_script/delete_file"，然后开始给用户解释"本机编不了 APK"。
             // 它没有错 —— 它看到的确实只有那几个；错在这个事实只存在于 tools 数组里，
             // 而"本轮是收窄的、下一轮会放开"这件事它无从得知。
-            val allowed = overlay?.allowedTools
-            val roundNames = if (allowed != null) {
-                registry.tools.filter { it.name in allowed }.map { it.name }
+            /*
+             * 设备操控进行中收窄工具面。
+             *
+             * 工具表是**每轮**随请求重发的固定成本：51 个工具的描述 + schema
+             * 共 18123 字。三十步的操控就是五十多万字符的纯浪费 —— 而这段时间里
+             * 模型只会用 device_* 这四个。收窄后只剩 1741 字，任务结束
+             * （handoff / 用户点停止 / 说完话）后其余工具自动回来。
+             *
+             * 只在「确实已经在操控」时收窄：第一步之前 running 还是 false，
+             * 模型必须先看到 device_screen 才可能开始。
+             */
+            val deviceMode = settings.deviceControlEnabled &&
+                com.dshwatch.domain.device.DeviceControlHub.state.value.running
+            val scopedTools = if (deviceMode) {
+                com.dshwatch.domain.agent.DeviceToolScope.narrow(registry.tools)
             } else {
-                registry.tools.map { it.name }
+                registry.tools
+            }
+            // 风神的收窄是编程场景的，与设备操控不该叠加 —— 叠加会把设备工具也切掉
+            val allowed = if (deviceMode) null else overlay?.allowedTools
+            val roundNames = if (allowed != null) {
+                scopedTools.filter { it.name in allowed }.map { it.name }
+            } else {
+                scopedTools.map { it.name }
             }
             // 酒馆/写作：一句工具说明都不能出现在提示里。
             // 模型看到"可用工具"就会想调用，哪怕 tools 数组是空的 ——
@@ -993,6 +1012,15 @@ class ChatEngine(
                     if (allowed != null) {
                         // 这一句不能删：首轮收窄时，模型会据「名单里没有」推断「App 做不到」
                         append("\n（本轮只开放这些，下一轮放开其余 —— 「这里没有」≠「App 做不到」。）")
+                    } else if (deviceMode) {
+                        /*
+                         * 必须给出「怎么退出」。
+                         *
+                         * 收窄之后模型看不见 write_file / grep，如果它做完了想写个总结
+                         * 或改个文件，只会看到「工具列表里没有」，然后向用户解释
+                         * 「我没法写文件」。明确说 handoff 能换回来，它才有出路。
+                         */
+                        append("\n（操控中只带设备工具；做完或要用其他工具时先 device_handoff，之后自动恢复。）")
                     } else {
                         append("\n（以上为本轮全部工具；判断某能力有没有工具时以此为准，不要凭印象。）")
                     }
@@ -1024,6 +1052,8 @@ class ChatEngine(
             // overlay（风神）是编程场景的插件，角色扮演场景不该被它插一手。
             val roundSpecs = if (!agentOn) {
                 emptyList()
+            } else if (deviceMode) {
+                scopedTools.map(ToolRegistry::specOf)
             } else {
                 overlay?.allowedTools?.let { allowed ->
                     val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
@@ -1056,9 +1086,15 @@ class ChatEngine(
             // 「不要截断上下文，即使导致设备卡顿也不要」—— 模型看不到
             // 自己前面做过什么，长任务里就会原地打转）。只有估算量超出
             // 模型真实窗口时，trimToBudget 内部才退化为按预算装填兜底。
+            //
+            // 设备操控是唯一例外：那是一次几十步的长轨迹，每步都带回一整屏。
+            // 旧屏既没用（屏幕早就变了）又危险（模型会照着旧编号点），
+            // 所以只保留最近几条全文，更早的压成一行「做过什么」。
+            // 这不是「省钱技巧」—— 不折叠时模型反而更容易被过时编号带偏。
+            val sendTurns = com.dshwatch.domain.agent.DeviceTurnPruner.prune(turns)
             val trimmed = TokenEstimator.trimToBudget(
                 systemTokens = TokenEstimator.estimate(roundPrompt),
-                history = turns,
+                history = sendTurns,
                 contextWindow = provider.contextWindow,
                 maxOutputTokens = provider.maxTokens,
                 maxTurns = Int.MAX_VALUE,
@@ -1144,6 +1180,17 @@ class ChatEngine(
                 )
                 recordUsage(effectiveUsage, provider, model, conv.id, estimated)
                 conv = _conversation.value ?: conv
+                /*
+                 * 模型不再调工具 = 这次任务做完了。
+                 *
+                 * 设备操控的悬浮条和「只带设备工具」都挂在 running 上，而它以前
+                 * 只在 handoff / 用户点停止时才清。结果：任务早做完了，悬浮条还挂在
+                 * 屏幕上；用户接着问「帮我写个文件」，工具面还是那四个设备工具 ——
+                 * 模型只能回答「我现在在操控模式」。这里按「说完话就收工」清掉。
+                 */
+                if (com.dshwatch.domain.device.DeviceControlHub.state.value.running) {
+                    com.dshwatch.domain.device.DeviceControlHub.end()
+                }
                 break
             }
 

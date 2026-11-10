@@ -106,7 +106,7 @@ class ScreenDigestTest {
     @Test
     fun `empty screen explains itself instead of returning blank`() {
         val text = ScreenDigest.format("桌面", "com.x", false, emptyList())
-        assertThat(text).contains("没有可读的文字")
+        assertThat(text).contains("读不到控件")
     }
 
     @Test
@@ -125,7 +125,7 @@ class ScreenDigestTest {
     fun `empty screen without screen bounds still renders`() {
         // screen 是后加的可选参数：老调用方不传也不能崩
         val text = ScreenDigest.format("桌面", "com.x", false, emptyList(), screen = null)
-        assertThat(text).contains("没有可读的文字")
+        assertThat(text).contains("读不到控件")
         assertThat(text).doesNotContain("中心点")
     }
 

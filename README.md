@@ -81,6 +81,10 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
   **系统设置页可以操作**（开勿扰、调亮度、连蓝牙）；权限管理、应用安装、
   系统界面仍然只读 —— 那几页点错不可逆。
   开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
+  **操控期间也只开放这四个工具**：工具表是每轮重发的固定成本，三十步的任务里，
+  四十多个工具的 schema 就是几十万 token 的纯浪费。任务结束（交还 / 停止）后其余工具自动回来。
+  历史里的旧屏幕同样按步折叠，只保留最近三屏 —— 旧编号指向的东西早就变了，
+  留着不但费 token，还会把模型带偏。
 
 - **内置文件浏览器（默认开）**：一部分手表 ROM 没有文件管理器，系统 `ACTION_OPEN_DOCUMENT`
   拿不到结果 —— 点「＋文件」什么都不发生。内置浏览器不依赖第三方 App，直接翻
@@ -129,7 +133,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
 
 ```bash
-adb install -r DSH-Watch-v1.18.5.apk
+adb install -r DSH-Watch-v1.19.0.apk
 ```
 
 没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。
