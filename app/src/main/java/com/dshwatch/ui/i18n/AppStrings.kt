@@ -1168,6 +1168,7 @@ object Zh : AppStrings {
     }
 
     override fun toolTitle(tool: String): String = when (tool) {
+        "tool_search" -> "取用工具"
         "get_datetime" -> "查看时间"
         "calculate" -> "计算"
         "get_device_info" -> "查看设备信息"
@@ -1807,6 +1808,7 @@ object En : AppStrings {
     }
 
     override fun toolTitle(tool: String): String = when (tool) {
+        "tool_search" -> "Load tools"
         "get_datetime" -> "Check time"
         "calculate" -> "Calculate"
         "get_device_info" -> "Device info"

@@ -29,10 +29,18 @@ class PromptBudgetTest {
         val tools = com.dshwatch.domain.agent.tools.BuiltinTools.all()
         val desc = tools.sumOf { it.description.length }
         val schema = tools.sumOf { it.parameters.toString().length }
-        // 48 个工具；描述是全量常驻的主要来源，schema 是参数说明
+        // 真实下发的只剩常驻的一小撮，但描述总量仍按全量卡：
+        // 每一个都可能被 tool_search 取出来，写胖了就是给自己加税。
         assertTrue("工具数变化了，请复核预算：${tools.size}", tools.size in 40..60)
-        assertTrue("工具描述总量 $desc 超预算", desc <= 5200)
-        assertTrue("工具 schema 总量 $schema 超预算", schema <= 13000)
+        val descWithoutMeta = tools.filter { it.name != "tool_search" }.sumOf { it.description.length }
+        // 5200 是「除元工具外」的旧上限；tool_search 自己那 80 字买下了其余 36 个
+        // 工具的 schema 不再常驻，这一笔本身是赚的（见 ToolCatalogTest）。
+        assertTrue("非元工具的描述总量 $descWithoutMeta 超预算", descWithoutMeta <= 5200)
+        assertTrue("工具描述总量 $desc 超预算", desc <= 5300)
+        val schemaWithoutMeta = tools.filter { it.name != "tool_search" }
+            .sumOf { it.parameters.toString().length }
+        assertTrue("非元工具的 schema 总量 $schemaWithoutMeta 超预算", schemaWithoutMeta <= 13000)
+        assertTrue("工具 schema 总量 $schema 超预算", schema <= 13200)
     }
 
     @Test

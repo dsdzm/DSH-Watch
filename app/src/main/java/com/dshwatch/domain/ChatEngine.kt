@@ -853,7 +853,14 @@ class ChatEngine(
             settings.agentMode != AgentMode.OFF &&
             provider.type == ProviderType.OPENAI_COMPAT &&
             registry.tools.isNotEmpty()
-        val toolSpecs = if (agentOn) registry.specs() else emptyList()
+        /*
+         * 渐进式披露的会话状态：本轮加载过哪些工具。
+         *
+         * 51 个工具的描述 + schema 是 18123 字，而它每一轮都要重发。常驻的只有
+         * 读写改搜跑那十几个，其余三十多个平时只以「目录」形式出现在提示里，
+         * 模型要用时先 tool_search，取到的工具从下一轮起带完整参数下发。
+         */
+        val toolScope = com.dshwatch.domain.agent.ToolScope { registry.tools }
         // 不再用 settings.maxAgentSteps 限制轮数：它和任务复杂度无关 ——
         // 读 8 个文件改 5 个文件的重构，20 步根本不够；而模型卡住时，
         // 20 步全是重复调同一个工具，白烧二十轮 token。
@@ -989,17 +996,17 @@ class ChatEngine(
              */
             val deviceMode = settings.deviceControlEnabled &&
                 com.dshwatch.domain.device.DeviceControlHub.state.value.running
-            val scopedTools = if (deviceMode) {
+            val visibleTools = if (deviceMode) {
                 com.dshwatch.domain.agent.DeviceToolScope.narrow(registry.tools)
             } else {
-                registry.tools
+                com.dshwatch.domain.agent.ToolCatalog.visible(registry.tools, toolScope.snapshot())
             }
             // 风神的收窄是编程场景的，与设备操控不该叠加 —— 叠加会把设备工具也切掉
             val allowed = if (deviceMode) null else overlay?.allowedTools
             val roundNames = if (allowed != null) {
-                scopedTools.filter { it.name in allowed }.map { it.name }
+                visibleTools.filter { it.name in allowed }.map { it.name }
             } else {
-                scopedTools.map { it.name }
+                visibleTools.map { it.name }
             }
             // 酒馆/写作：一句工具说明都不能出现在提示里。
             // 模型看到"可用工具"就会想调用，哪怕 tools 数组是空的 ——
@@ -1022,7 +1029,17 @@ class ChatEngine(
                          */
                         append("\n（操控中只带设备工具；做完或要用其他工具时先 device_handoff，之后自动恢复。）")
                     } else {
-                        append("\n（以上为本轮全部工具；判断某能力有没有工具时以此为准，不要凭印象。）")
+                        append("\n（以上已带完整参数，可直接调用。）")
+                        /*
+                         * 目录只列「没下发」的组。已经在下发名单里的再列一遍是重复收费，
+                         * 而模型的判断依据是「这组里有没有我要的能力」，不是工具名。
+                         */
+                        append(
+                            com.dshwatch.domain.agent.ToolCatalog.catalogPrompt(
+                                registry.tools,
+                                roundNames.toSet(),
+                            ),
+                        )
                     }
                 }
             }
@@ -1048,19 +1065,19 @@ class ChatEngine(
                     append("\n\n").append(com.dshwatch.domain.agent.DeviceGuide.PROMPT)
                 }
             }
-            // agentOn=false 时 toolSpecs 本来就是空的，这里再加一道保险：
+            // agentOn=false 时一个 spec 都不发，这里再加一道保险：
             // overlay（风神）是编程场景的插件，角色扮演场景不该被它插一手。
             val roundSpecs = if (!agentOn) {
                 emptyList()
-            } else if (deviceMode) {
-                scopedTools.map(ToolRegistry::specOf)
             } else {
-                overlay?.allowedTools?.let { allowed ->
-                    val narrowed = registry.tools.filter { it.name in allowed }.map(ToolRegistry::specOf)
+                val base = if (allowed != null) {
                     // 收窄后一个都不剩就别收窄了 —— 否则模型没有任何工具可用，
                     // 表现为"这轮它什么都不做，只回一段文字"
-                    narrowed.ifEmpty { toolSpecs }
-                } ?: toolSpecs
+                    visibleTools.filter { it.name in allowed }.ifEmpty { visibleTools }
+                } else {
+                    visibleTools
+                }
+                base.map(ToolRegistry::specOf)
             }
 
             val placeholder = ChatMessage(
@@ -1221,6 +1238,7 @@ class ChatEngine(
                 registry = registry,
                 deniedTools = deniedTools,
                 sessionDir = conv.workDir,
+                scope = toolScope,
             )
             executed.forEach { call ->
                 // 插件在这里接管工具结果 —— 这是**唯一**能省下 tool 结果 token 的位置。
@@ -1438,10 +1456,11 @@ class ChatEngine(
         registry: ToolRegistry,
         deniedTools: MutableSet<String>,
         sessionDir: String,
+        scope: com.dshwatch.domain.agent.ToolScope? = null,
     ): List<ToolCallRecord> {
         // 工具集是应用级单例，而工作目录是每个会话各自的 —— 这里换一副「眼镜」，
         // 之后所有相对路径都会被解析到本会话的目录下。
-        val toolCtx = registry.toolContext.withSession(sessionDir)
+        val toolCtx = registry.toolContext.withSession(sessionDir, scope)
         val out = ArrayList<ToolCallRecord>(calls.size)
         for (call in calls) {
             if (!currentCoroutineContext().isActive) {

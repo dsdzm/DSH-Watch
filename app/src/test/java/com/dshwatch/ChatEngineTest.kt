@@ -415,7 +415,9 @@ class ChatEngineTest {
             this,
             settings,
             backend,
-            tools = listOf(NamedTool("read_file"), NamedTool("delete_file")),
+            // 两个都用常驻工具：delete_file 属于长尾，现在要 tool_search 才会下发，
+            // 拿它验证「收窄 → 放开」会混进另一套机制
+            tools = listOf(NamedTool("read_file"), NamedTool("todo_write")),
         )
 
         engine.send("帮我修复这个崩溃")
@@ -424,7 +426,7 @@ class ChatEngineTest {
         assertThat(backend.requests[0].tools.map { it.toolName() }).containsExactly("read_file")
         // 第二轮必须恢复全量 —— 一直收窄会让模型想用的工具不在清单里
         assertThat(backend.requests[1].tools.map { it.toolName() })
-            .containsExactly("read_file", "delete_file")
+            .containsExactly("read_file", "todo_write")
     }
 
     @Test

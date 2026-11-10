@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.20.0",
+            date = "2026-11-10",
+            highlights = listOf(
+                "工具改为按需取用：每轮下发的工具表从 1.8 万字降到 5 千字",
+                "常驻读写改、搜索、执行等 13 个高频工具，B站 / 构建 / 提醒等分组按需加载",
+                "模型用 tool_search 取工具，取到的工具下一轮起带完整参数",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.19.0",
             date = "2026-11-10",
             highlights = listOf(

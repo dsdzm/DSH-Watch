@@ -65,6 +65,11 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 | 交互与提醒 7 | `ask_user` `todo_write` `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
 | 设备联动 3 | `open_file` `open_screen` `get_clipboard` |
 | 设备操控 4 | `device_screen` `device_act` `device_open` `device_handoff` |
+
+表格里是全部 52 个工具，但**不是每次都全发给模型**：常驻的只有 13 个
+（`tool_search` 与读写改搜跑、提醒自己进度的那几个），其余按「文件 / 构建 / 网络 /
+提醒 / B站 / 设备」分组，只给一行目录。模型判断需要某类时调 `tool_search`，
+取到的工具从下一轮起带完整参数 —— 每轮的工具表因此从 18365 字降到约 5 千字。
 | B 站 16 | `bili_status` `bili_search` `bili_video` `bili_subtitle` `bili_comments` `bili_inbox` `bili_thread` `bili_report` `bili_reply` `bili_dm` `bili_like` `bili_coin` `bili_fav` `bili_fav_folders` `bili_fav_list` `bili_dyn` |
 
 另外支持：
@@ -133,7 +138,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
 
 ```bash
-adb install -r DSH-Watch-v1.19.0.apk
+adb install -r DSH-Watch-v1.20.0.apk
 ```
 
 没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。

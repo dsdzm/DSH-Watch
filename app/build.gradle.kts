@@ -106,8 +106,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 62
-        versionName = "1.19.0"
+        versionCode = 63
+        versionName = "1.20.0"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
