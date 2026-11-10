@@ -18,6 +18,10 @@ class DshWatchApp : Application() {
         private set
 
     override fun onCreate() {
+        // Shizuku 的多进程支持必须在 super.onCreate() 之前启用：
+        // 它要在 ContentProvider 初始化之前把 binder 的转发进程登记好，
+        // 晚一步就会表现为「授权成功但 newProcess 拿不到 binder」。
+        runCatching { rikka.shizuku.ShizukuProvider.enableMultiProcessSupport(true) }
         super.onCreate()
         // 最开头就写下"启动中"标记。
         //

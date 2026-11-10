@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.21.0",
+            date = "2026-11-11",
+            highlights = listOf(
+                "接入 Shizuku：AI 能以 adb 身份执行命令，装应用、读日志、改屏幕与电量",
+                "每条命令先说明用途再执行，危险命令二次确认且永不记住",
+                "常规操作按类别「始终允许」，并记录可查的执行审计",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.20.0",
             date = "2026-11-10",
             highlights = listOf(

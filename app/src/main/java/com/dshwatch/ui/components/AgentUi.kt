@@ -359,50 +359,163 @@ fun ToolApprovalDialog(
     onDecision: (ApprovalDecision) -> Unit,
 ) {
     val s = LocalStrings.current
+    // 危险命令分两屏：第一屏只负责「让你看清」，第二屏才是真正的同意。
+    // key 用 callId：换一条命令必须从头确认，不能沿用上一条的第二屏状态。
+    var stage by remember(pending.callId) { mutableStateOf(0) }
+    val danger = pending.danger
+    val hasCommand = pending.command.isNotBlank()
+
     GlassDialog(
         onDismissRequest = { onDecision(ApprovalDecision.DENY) },
-        title = pending.toolName,
-        maxContentHeight = 200,
-        content = {
-            Text(
-                text = s.toolCall,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-            Text(
-                text = pending.summary.ifBlank { pending.arguments.take(200) },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "副作用：${pending.safety.label}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
+        title = when {
+            danger && stage == 0 -> "⚠ 高风险操作"
+            danger -> "再确认一次"
+            else -> pending.toolName
         },
-        // 三个动作做成一列整宽按钮 —— 手表上并排三个会小到点不准
+        maxContentHeight = 230,
+        content = {
+            if (danger && stage == 1) {
+                Text(
+                    text = "上一次点击没有执行任何操作。确认之后命令会立即运行，无法撤销。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
+            // 模型自己写的用途说明放最上面：用户判断「该不该允许」靠的就是这一行
+            // 和下面那条命令能不能对上。
+            if (pending.purpose.isNotBlank()) {
+                Text(
+                    text = "AI 的用途说明",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                Text(
+                    text = pending.purpose,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
+            if (hasCommand) {
+                Text(
+                    text = "要执行的命令",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                CommandBlock(pending.command)
+                Spacer(Modifier.height(6.dp))
+            } else {
+                Text(
+                    text = pending.summary.ifBlank { pending.arguments.take(200) },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
+            when {
+                danger -> Text(
+                    text = "这类命令会删除或改写系统文件，可能导致应用崩溃、数据丢失，" +
+                        "甚至无法开机。只有你完全明白它在做什么时才继续。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+
+                hasCommand -> Text(
+                    text = "授权范围：${pending.categoryLabel.ifBlank { "其他命令" }}。" +
+                        "选「始终允许」后这一类不再询问，危险命令除外。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+                else -> Text(
+                    text = "副作用：${pending.safety.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        },
+        // 按钮做成一列整宽 —— 手表上并排三个会小到点不准
         buttons = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                // shell 不给「总是允许」：它的风险与 cloud 不同，永久放行等于把
-                // 设备上的任意文件交给模型。改为「本会话允许」，换会话即失效。
-                if (pending.sessionScoped) {
-                    ApprovalButton(s.approveSession, primary = true) {
-                        onDecision(ApprovalDecision.ALLOW_SESSION)
+                when {
+                    // 第一屏：只有「继续看第二屏」和「取消」，没有任何执行入口
+                    danger && stage == 0 -> {
+                        ApprovalButton("我了解风险，继续", danger = true) { stage = 1 }
+                        ApprovalButton(s.deny) { onDecision(ApprovalDecision.DENY) }
                     }
-                } else {
-                    ApprovalButton(s.approveAlways, primary = true) {
-                        onDecision(ApprovalDecision.ALLOW_ALWAYS)
+
+                    // 第二屏：真正执行。没有「始终允许」—— 危险命令每次都要问
+                    danger -> {
+                        ApprovalButton("确认执行", danger = true) {
+                            onDecision(ApprovalDecision.ALLOW_ONCE)
+                        }
+                        ApprovalButton(s.deny) { onDecision(ApprovalDecision.DENY) }
+                    }
+
+                    // run_script：不给永久放行，只给「本会话」
+                    pending.sessionScoped -> {
+                        ApprovalButton(s.approveSession, primary = true) {
+                            onDecision(ApprovalDecision.ALLOW_SESSION)
+                        }
+                        ApprovalButton(s.approveOnce) { onDecision(ApprovalDecision.ALLOW_ONCE) }
+                        ApprovalButton(s.deny, danger = true) { onDecision(ApprovalDecision.DENY) }
+                    }
+
+                    // adb_shell：按类别永久授权，按钮上写清楚是哪一类
+                    hasCommand -> {
+                        ApprovalButton(
+                            "始终允许「${pending.categoryLabel.ifBlank { "这类" }}」",
+                            primary = true,
+                        ) { onDecision(ApprovalDecision.ALLOW_ALWAYS) }
+                        ApprovalButton(s.approveOnce) { onDecision(ApprovalDecision.ALLOW_ONCE) }
+                        ApprovalButton(s.deny, danger = true) { onDecision(ApprovalDecision.DENY) }
+                    }
+
+                    else -> {
+                        ApprovalButton(s.approveAlways, primary = true) {
+                            onDecision(ApprovalDecision.ALLOW_ALWAYS)
+                        }
+                        ApprovalButton(s.approveOnce) { onDecision(ApprovalDecision.ALLOW_ONCE) }
+                        ApprovalButton(s.deny, danger = true) { onDecision(ApprovalDecision.DENY) }
                     }
                 }
-                ApprovalButton(s.approveOnce) { onDecision(ApprovalDecision.ALLOW_ONCE) }
-                ApprovalButton(s.deny, danger = true) { onDecision(ApprovalDecision.DENY) }
             }
         },
     )
+}
+
+/**
+ * 命令原文。
+ *
+ * 等宽 + 独立底色的原因：用户要判断「purpose 里说的」和「命令实际干的」是不是
+ * 同一件事，混在正文里读不出来。限高 72dp 并允许滚动，长命令不会把按钮顶出圆屏。
+ */
+@Composable
+private fun CommandBlock(command: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 72.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+            .padding(horizontal = 6.dp, vertical = 5.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Text(
+            text = command,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
 }
 
 @Composable

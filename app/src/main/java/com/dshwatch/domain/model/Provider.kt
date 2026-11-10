@@ -271,6 +271,23 @@ data class AppSettings(
      */
     val deviceControlEnabled: Boolean = false,
 
+    /**
+     * Shizuku 提权：借 adb（shell 用户）权限跑命令。
+     *
+     * 默认关。它不是 root，但足以装应用、改屏幕、清数据 —— 所以和
+     * [deviceControlEnabled] 一样，必须由用户亲手打开，而且打开之后
+     * 每条命令仍然要过一次审批（见 [com.dshwatch.domain.agent.ApprovalPolicy]）。
+     */
+    val shizukuEnabled: Boolean = false,
+
+    /**
+     * 已经「始终允许」的提权命令类别（install / logs / display / battery / other）。
+     *
+     * 只记类别不记命令：用户同意「装应用总是允许」，下次装别的应用不该再问；
+     * 但他没同意的事（改屏幕）仍然要问。危险命令永远不写进这里。
+     */
+    val shellGrants: Set<String> = emptySet(),
+
     // ---------------- 初次引导 / 外观 ----------------
     /**
      * 是否完成首次启动引导。

@@ -82,7 +82,8 @@ object ToolCatalog {
     private val BUILD_TOOLS = setOf("build_project", "cloud_build", "cloud_job")
     private val NET_TOOLS = setOf("http_fetch", "web_search")
     private val REMIND_TOOLS = setOf("set_alarm", "list_alarms", "cancel_alarm", "create_event", "vibrate")
-    private val OTHER_TOOLS = setOf("unit_convert", "get_device_info", "get_token_usage")
+    private val OTHER_TOOLS =
+        setOf("unit_convert", "get_device_info", "get_token_usage", "adb_shell")
 
     /** 每组「能做什么」。目录里给这一句，比列 16 个 `bili_*` 名字便宜得多。 */
     private val BLURB = mapOf(

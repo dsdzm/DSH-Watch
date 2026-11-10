@@ -3,6 +3,9 @@ package com.dshwatch.domain.agent
 import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.shell.ShellCategory
+import com.dshwatch.domain.shell.ShellRisk
+import com.dshwatch.domain.shell.ShellRules
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -64,6 +67,16 @@ object ApprovalPolicy {
     private const val RUN_SCRIPT = "run_script"
     private const val SHELL_KEY = "run_script:shell"
 
+    /**
+     * 提权命令（Shizuku / adb）。
+     *
+     * 与 `run_script` 的 shell 是两件事：后者用应用自己的身份跑，前者借 adb 权限
+     * 能碰系统。所以授权粒度也不同 —— `run_script` 是「本会话允许」，
+     * 这里是**按类别永久记住**（装应用、读日志、改屏幕、改电量各记各的），
+     * 但危险命令永远不记。
+     */
+    private const val ADB_SHELL = "adb_shell"
+
     /** 取 `run_script` 的语言；缺省按 shell 处理（更保守） */
     fun languageOf(args: JsonObject): String =
         args.strOf("language")?.trim()?.lowercase() ?: "shell"
@@ -75,6 +88,15 @@ object ApprovalPolicy {
     /** 这个工具的确认是否属于「本会话允许」语义（决定弹窗显示哪组按钮） */
     fun isSessionScoped(toolName: String, args: JsonObject): Boolean =
         sessionKey(toolName, args) != null
+
+    /** 这条提权命令要不要问用户 */
+    fun shellNeedsApproval(settings: AppSettings, command: String): Boolean {
+        // 危险命令永远问，且永不被「始终允许」覆盖
+        if (ShellRules.classify(command) == ShellRisk.DANGER) return true
+        return ShellRules.categoryOf(command).key !in settings.shellGrants
+    }
+
+    fun shellCategory(command: String): ShellCategory = ShellRules.categoryOf(command)
 
     fun needsApproval(
         settings: AppSettings,
@@ -88,6 +110,10 @@ object ApprovalPolicy {
         // shell：永远拦，除非本会话已经放行
         if (toolName == RUN_SCRIPT && languageOf(args) == "shell") {
             return SHELL_KEY !in sessionApproved
+        }
+        // 提权命令：按类别记忆，危险命令每次必问
+        if (toolName == ADB_SHELL) {
+            return shellNeedsApproval(settings, args.strOf("command").orEmpty())
         }
         // B站发言：模式与配额在工具里已经拦过，这里不再打断
         if (toolName in AUTO_ALLOW) return false

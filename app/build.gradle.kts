@@ -106,8 +106,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 63
-        versionName = "1.20.0"
+        versionCode = 64
+        versionName = "1.21.0"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -239,6 +239,8 @@ dependencies {
 
     // 扫码登录：只用 core（生成 QR 矩阵），不引 android 那一层
     implementation(libs.zxing.core)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

@@ -8,6 +8,7 @@ import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.agent.AgentGuide
 import com.dshwatch.domain.agent.AgentTool
 import com.dshwatch.domain.agent.ApprovalPolicy
+import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.agent.CanvasGuide
 import com.dshwatch.domain.agent.ProgressTracker
 import com.dshwatch.domain.plugin.PluginRegistry
@@ -81,6 +82,23 @@ data class PendingApproval(
      * 每条都点一次太折磨人。js 与云端仍走「总是允许 / 允许一次」。
      */
     val sessionScoped: Boolean = false,
+
+    /** 模型自己写的用途说明（`adb_shell` 的 purpose）。审批弹窗第一行就是它 */
+    val purpose: String = "",
+
+    /** 要执行的命令原文。与 purpose 对照着看，才知道它有没有说一套做一套 */
+    val command: String = "",
+
+    /**
+     * 危险命令：红色警告 + 两次确认，且不提供「始终允许」。
+     *
+     * 判定在本地做（[com.dshwatch.domain.shell.ShellRisk]），**不采信模型自评** ——
+     * 让模型给自己的命令打分，等于让它自己决定要不要被拦。
+     */
+    val danger: Boolean = false,
+
+    /** 授权类别名（安装应用 / 读取日志 / …），用于「始终允许这类」的按钮文案 */
+    val categoryLabel: String = "",
 )
 
 enum class ApprovalDecision {
@@ -1519,6 +1537,19 @@ class ChatEngine(
                 when (awaitApproval(call, tool, summary, args)) {
                     ApprovalDecision.DENY -> {
                         deniedTools += tool.name
+                        if (tool.name == "adb_shell") {
+                            toolCtx.appContext?.let { ctx ->
+                                val cmd = args.strOf("command").orEmpty()
+                                com.dshwatch.domain.shell.ShellAudit.record(
+                                    context = ctx,
+                                    command = cmd,
+                                    risk = com.dshwatch.domain.shell.ShellRules.classify(cmd),
+                                    category = ApprovalPolicy.shellCategory(cmd),
+                                    decision = "deny",
+                                    exitCode = -1,
+                                )
+                            }
+                        }
                         val rec = call.copy(
                             status = ToolStatus.DENIED,
                             result = "用户拒绝执行该工具",
@@ -1530,7 +1561,14 @@ class ChatEngine(
                     }
 
                     ApprovalDecision.ALLOW_ALWAYS -> settingsRepo.update { st ->
-                        st.copy(autoApprovedTools = st.autoApprovedTools + tool.name)
+                        // 提权命令按**类别**记忆：同意「装应用」不等于同意「改屏幕」。
+                        // 危险命令不会走到这里（UI 不给这个按钮，策略层也不认）。
+                        if (tool.name == "adb_shell") {
+                            val cat = ApprovalPolicy.shellCategory(args.strOf("command").orEmpty())
+                            st.copy(shellGrants = st.shellGrants + cat.key)
+                        } else {
+                            st.copy(autoApprovedTools = st.autoApprovedTools + tool.name)
+                        }
                     }
 
                     ApprovalDecision.ALLOW_SESSION -> {
@@ -1576,6 +1614,8 @@ class ChatEngine(
     ): ApprovalDecision {
         val deferred = CompletableDeferred<ApprovalDecision>()
         approvalDeferred = deferred
+        val isShell = tool.name == "adb_shell"
+        val command = if (isShell) args.strOf("command").orEmpty() else ""
         _approval.value = PendingApproval(
             callId = call.id,
             toolName = tool.name,
@@ -1583,6 +1623,11 @@ class ChatEngine(
             arguments = call.arguments,
             safety = tool.safety,
             sessionScoped = ApprovalPolicy.isSessionScoped(tool.name, args),
+            purpose = args.strOf("purpose").orEmpty(),
+            command = command,
+            danger = isShell && com.dshwatch.domain.shell.ShellRules.classify(command) ==
+                com.dshwatch.domain.shell.ShellRisk.DANGER,
+            categoryLabel = if (isShell) ApprovalPolicy.shellCategory(command).label else "",
         )
         return try {
             deferred.await()

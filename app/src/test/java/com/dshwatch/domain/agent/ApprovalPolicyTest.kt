@@ -182,4 +182,66 @@ class ApprovalPolicyTest {
             DeviceControlHub.end()
         }
     }
+
+    // ---------------- adb_shell（Shizuku 提权） ----------------
+
+    private fun adb(cmd: String) = buildJsonObject {
+        put("command", cmd)
+        put("purpose", "测试用途")
+    }
+
+    @Test
+    fun `adb shell asks on the first use of a category`() {
+        assertThat(
+            ApprovalPolicy.needsApproval(
+                settings(AgentMode.AUTO_ALL), "adb_shell", ToolSafety.WRITE,
+                adb("pm install -r /sdcard/a.apk"), emptySet(),
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `adb shell is released once its category is granted`() {
+        val st = AppSettings(shellGrants = setOf("install"))
+        assertThat(
+            ApprovalPolicy.needsApproval(
+                st, "adb_shell", ToolSafety.WRITE, adb("pm install -r /sdcard/a.apk"), emptySet(),
+            )
+        ).isFalse()
+    }
+
+    @Test
+    fun `granting one category does not release another`() {
+        val st = AppSettings(shellGrants = setOf("install"))
+        assertThat(
+            ApprovalPolicy.needsApproval(
+                st, "adb_shell", ToolSafety.WRITE, adb("wm size 1080x2340"), emptySet(),
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `dangerous commands ignore grants and always ask`() {
+        val st = AppSettings(shellGrants = setOf("install", "logs", "display", "battery", "other"))
+        assertThat(
+            ApprovalPolicy.needsApproval(
+                st, "adb_shell", ToolSafety.WRITE, adb("rm -rf /system/app"), emptySet(),
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `adb shell is not exempted by a running device session`() {
+        DeviceControlHub.begin("测试")
+        try {
+            assertThat(
+                ApprovalPolicy.needsApproval(
+                    settings(AgentMode.AUTO_ALL), "adb_shell", ToolSafety.WRITE,
+                    adb("logcat -d"), emptySet(),
+                )
+            ).isTrue()
+        } finally {
+            DeviceControlHub.end()
+        }
+    }
 }

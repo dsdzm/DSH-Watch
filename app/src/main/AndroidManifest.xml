@@ -163,6 +163,21 @@
                 android:resource="@xml/device_accessibility" />
         </service>
 
+        <!--
+          Shizuku：借 adb（shell 用户）权限执行命令，不需要 root。
+
+          这个 provider 是 Shizuku 的「权限代理」：它由 moe.shizuku.manager 签名持有，
+          本应用只能通过 moe.shizuku.manager.permission.API_V23 访问，所以
+          exported=true 是必须的，但外部应用没有那个签名权限也调不到。
+        -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="moe.shizuku.manager.permission.API_V23" />
+
         <!-- Wear OS 2.x/3.x 独立运行（不依赖手机端 App） -->
         <meta-data
             android:name="com.google.android.wearable.standalone"

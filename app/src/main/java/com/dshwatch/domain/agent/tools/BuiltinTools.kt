@@ -59,7 +59,7 @@ object BuiltinTools {
         HttpFetchTool,
         SetAlarmTool,
     ) + WorkspaceTools.all() + SystemTools.all() + TodoTools.all() + DeviceIntegrationTools.all() +
-        DeviceControlTools.all() + ScriptTools.all() + CloudTools.all() + BiliTools.all()
+        DeviceControlTools.all() + AdbShellTool + ScriptTools.all() + CloudTools.all() + BiliTools.all()
 
     // ------------------------------------------------------------------
     // 1. 时间

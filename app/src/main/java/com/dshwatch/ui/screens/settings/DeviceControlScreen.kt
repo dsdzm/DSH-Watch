@@ -19,12 +19,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.device.BatteryKeepAlive
 import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.shell.ShellCategory
+import com.dshwatch.domain.shell.ShizukuShell
 import com.dshwatch.service.DeviceA11yService
 import com.dshwatch.ui.components.GhostButton
 import com.dshwatch.ui.components.HintText
@@ -67,11 +71,14 @@ fun DeviceControlScreen(
     var enabled by remember { mutableStateOf(DeviceA11yService.isEnabled(context)) }
     var connected by remember { mutableStateOf(DeviceA11yService.isConnected()) }
     var exempt by remember { mutableStateOf(BatteryKeepAlive.isExempt(context)) }
+    // Shizuku 的状态随时会变（用户切出去启动服务/授权再回来），跟着同一个轮询走
+    var shellState by remember { mutableStateOf(ShizukuShell.state(context)) }
     LaunchedEffect(Unit) {
         var tick = 0
         while (true) {
             enabled = DeviceA11yService.isEnabled(context)
             connected = DeviceA11yService.isConnected()
+            shellState = ShizukuShell.state(context)
             // 电池白名单的变化没那么快，每 3 秒查一次就够（它要走系统服务）
             if (tick++ % 3 == 0) exempt = BatteryKeepAlive.isExempt(context)
             delay(1000)
@@ -187,6 +194,151 @@ fun DeviceControlScreen(
                                 "DSH runs in the background while operating. Low-memory killers may " +
                                     "remove the process and the task with it. Whitelisting makes that " +
                                     "much less likely, but cannot guarantee it."
+                            },
+                        )
+                    }
+                }
+            }
+
+            SectionHeader(if (zh) "Shizuku 提权" else "Shizuku (adb)")
+
+            SettingCard {
+                SwitchRow(
+                    title = if (zh) "允许执行 adb 命令" else "Allow adb commands",
+                    subtitle = if (zh) {
+                        "借 Shizuku 的 adb 权限（shell 用户，不是 root）。关掉后这个工具不发给模型"
+                    } else {
+                        "Uses Shizuku's adb identity (shell, not root). Off = tool not sent to model"
+                    },
+                    checked = settings.shizukuEnabled,
+                    onCheckedChange = { on ->
+                        scope.launch {
+                            container.settingsRepo.update { it.copy(shizukuEnabled = on) }
+                        }
+                    },
+                )
+
+                val shellStatus = when (shellState) {
+                    ShizukuShell.State.NOT_INSTALLED ->
+                        if (zh) "未安装 Shizuku" else "Shizuku not installed"
+                    ShizukuShell.State.NOT_RUNNING ->
+                        if (zh) "Shizuku 未运行" else "Shizuku not running"
+                    ShizukuShell.State.NOT_GRANTED ->
+                        if (zh) "已连接，未授权给 DSH" else "Running, not granted"
+                    ShizukuShell.State.READY ->
+                        if (zh) "已授权，可以执行" else "Granted"
+                }
+                SettingRow(
+                    title = if (zh) "授权状态" else "Status",
+                    subtitle = shellStatus,
+                    trailing = if (shellState == ShizukuShell.State.READY) "✓" else "",
+                    showDivider = false,
+                )
+
+                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    when (shellState) {
+                        ShizukuShell.State.NOT_INSTALLED -> {
+                            HintText(
+                                if (zh) {
+                                    "Shizuku 是一个开源应用，通过无线调试把 adb 权限借给普通应用，" +
+                                        "不需要 root、不需要电脑常驻。装好后按它提示启动服务即可。"
+                                } else {
+                                    "Shizuku lends adb permission to normal apps via wireless " +
+                                        "debugging. No root, no PC required after setup."
+                                },
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            GhostButton(
+                                text = if (zh) "查看安装说明" else "How to install",
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("https://shizuku.rikka.app/"),
+                                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }
+                                },
+                            )
+                        }
+
+                        ShizukuShell.State.NOT_RUNNING -> {
+                            HintText(
+                                if (zh) {
+                                    "Shizuku 装着但服务没起来。打开它，按提示启动（Android 11+ 用无线调试，" +
+                                        "重启手机后需要重新启动一次）。"
+                                } else {
+                                    "Installed but the service is not running. Open Shizuku and start " +
+                                        "it (wireless debugging on Android 11+; restart after reboot)."
+                                },
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            GhostButton(
+                                text = if (zh) "打开 Shizuku" else "Open Shizuku",
+                                onClick = {
+                                    runCatching {
+                                        val i = context.packageManager
+                                            .getLaunchIntentForPackage(ShizukuShell.PACKAGE)
+                                        if (i != null) {
+                                            context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                        }
+                                    }
+                                },
+                            )
+                        }
+
+                        ShizukuShell.State.NOT_GRANTED -> {
+                            HintText(
+                                if (zh) {
+                                    "点下面这个按钮，Shizuku 会弹一个授权框；同意之后 DSH 才能执行命令。"
+                                } else {
+                                    "Tap below and approve Shizuku's dialog to let DSH run commands."
+                                },
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            GhostButton(
+                                text = if (zh) "申请授权" else "Request permission",
+                                onClick = { ShizukuShell.requestPermission() },
+                            )
+                        }
+
+                        ShizukuShell.State.READY -> {
+                            HintText(
+                                if (zh) {
+                                    "每条命令执行前都会问你，并把 AI 说的用途和命令原文一起显示。" +
+                                        "删除系统文件这类危险命令会警告并二次确认，且不会记住。" +
+                                        "撤销授权请到 Shizuku 应用里操作。"
+                                } else {
+                                    "Every command asks first, showing the stated purpose and the " +
+                                        "exact command. Destructive ones warn and ask twice, and are " +
+                                        "never remembered. Revoke inside the Shizuku app."
+                                },
+                            )
+                        }
+                    }
+
+                    if (settings.shellGrants.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = if (zh) "已记住的授权" else "Remembered grants",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                        Text(
+                            text = settings.shellGrants.joinToString("、") { key ->
+                                ShellCategory.entries.firstOrNull { it.key == key }?.label ?: key
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        GhostButton(
+                            text = if (zh) "清除全部授权" else "Clear all grants",
+                            onClick = {
+                                scope.launch {
+                                    container.settingsRepo.update { it.copy(shellGrants = emptySet()) }
+                                }
                             },
                         )
                     }
