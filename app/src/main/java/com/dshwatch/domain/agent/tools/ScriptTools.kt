@@ -66,10 +66,10 @@ object ScriptTools {
         override val name = "run_script"
 
         override val description =
-                        "在当前工作目录真的执行脚本，返回退出码、stdout、stderr。" +
-            "language=shell：真实 sh（管道、重定向、grep/sed/awk）；js：ES6，**不支持 async/await**，无 DOM/fetch。脚本自动包进函数体，可用 `return` 交结果（会打印），也可 console.log/print。" +
+            "在当前工作目录真的执行脚本，返回退出码、stdout、stderr。" +
+            "language=shell：真实 sh（管道、重定向、grep/sed/awk）；js：ES6，**不支持 async/await**，无 DOM/fetch。脚本自动包进函数体，可 `return` 交结果（会打印）或用 console.log/print。" +
             "**没有 python / node / java / gcc**，两种语言不能互相调用；要跑这些用 cloud_build。验证「真的能跑、结果对不对」用它；只查语法用 build_project（更快、零风险）。" +
-            "每次执行都会请用户确认；可读写工作目录与联网，但没有 root、访问不到其它应用的数据。"
+            "每次执行都会请用户确认；可读写工作目录、可联网，但没有 root。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf(

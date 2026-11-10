@@ -23,7 +23,7 @@ object TodoTools {
     object TodoWriteTool : AgentTool {
         override val name = "todo_write"
         override val description =
-                        "创建或更新本次任务的待办清单，用户可实时看到进度。**3 步以上的任务先用它列一遍**。" +
+            "创建或更新本次任务的待办清单，用户可实时看到进度。**3 步以上的任务先用它列一遍**。" +
             "每次传**完整清单**（不是增量），前缀：\"[x] \" 已完成 / \"[>] \" 进行中 / \"[ ] \" 未完成，其它写法一律按未开始处理。每完成一步更新一次；全部完成后把各项都标 [x] 并保留清单。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(

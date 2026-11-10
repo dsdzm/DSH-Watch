@@ -120,11 +120,12 @@ object DeviceControlTools {
     object ActTool : AgentTool {
         override val name = "device_act"
         override val description =
-            "对 device_screen 的编号执行一个动作，返回动作后的新屏幕。" +
-                "action=tap 点击（long=true 长按）/ type 输入（要 text，submit=true 提交）/" +
-                "scroll 翻页（direction=down 往后、up 往前；id 指向列表更准）/ " +
+            "对 device_screen 的编号执行动作，返回动作后的新屏幕。" +
+                "action=tap 点击 / long 长按（都用 id；读不到控件时可给 x、y 按坐标点）/" +
+                "type 输入（要 text，submit=true 顺带提交）/" +
+                "scroll 翻页（direction 默认 down，可 up/right/left；id 指向列表更准）/" +
                 "key 系统键（back/home/recents/notifications）。" +
-                "一次只做一件事，每步之后看返回的新屏幕再决定。" +
+                "一次只做一件事，每步看返回的新屏幕再决定。" +
                 "翻页用 scroll，不要连点或反复按 back。" +
                 "密码、验证码、支付确认不代填不代点 —— 让用户来（device_handoff）。"
         override val safety = ToolSafety.WRITE
@@ -135,10 +136,12 @@ object DeviceControlTools {
                     "动作类型",
                     listOf("tap", "long", "type", "scroll", "key"),
                 ),
-                "id" to Schema.int("device_screen 结果里的元素编号（tap / long / type / scroll 用）"),
+                "id" to Schema.int("device_screen 里的编号（tap/long/type/scroll）"),
+                "x" to Schema.int("无 id 时按坐标点：x"),
+                "y" to Schema.int("y"),
                 "text" to Schema.str("type 时要输入的文字"),
                 "submit" to Schema.bool("type 时输入完是否提交 / 发送"),
-                "direction" to Schema.str("scroll 的方向", listOf("up", "down")),
+                "direction" to Schema.str("scroll 的方向", listOf("down", "up", "right", "left")),
                 "key" to Schema.str(
                     "key 动作的按键",
                     listOf("back", "home", "recents", "notifications"),
@@ -152,18 +155,34 @@ object DeviceControlTools {
             val svc = service() ?: return ToolResult.fail(noService)
             val action = args.strOf("action") ?: return ToolResult.fail("缺少 action")
 
+            /*
+             * 判断「界面变没变」要有可信的基准：拿 30 秒前的快照比，任何界面都算「变了」，
+             * 那句「没有变化」的提示就永远不会出现。快照不新鲜时先读一次。
+             */
+            val before = DeviceControlHub.lastScreen
+                ?.takeUnless { it.stale() }
+                ?.text
+                ?: svc.capture(detail = false).text
             val outcome = when (action) {
-                "tap" -> {
+                "tap", "long" -> {
+                    val long = action == "long"
+                    val verb = if (long) "长按" else "点击"
                     val id = args.intOf("id")
-                        ?: return ToolResult.fail("tap 需要 id（先 device_screen 拿编号）")
-                    DeviceControlHub.note("点击 · 第 $id 项")
-                    svc.tap(id, long = false)
-                }
-
-                "long" -> {
-                    val id = args.intOf("id") ?: return ToolResult.fail("long 需要 id")
-                    DeviceControlHub.note("长按 · 第 $id 项")
-                    svc.tap(id, long = true)
+                    if (id != null) {
+                        DeviceControlHub.note("$verb · 第 $id 项")
+                        svc.tap(id, long)
+                    } else {
+                        val x = args.intOf("x")
+                        val y = args.intOf("y")
+                        if (x == null || y == null) {
+                            return ToolResult.fail(
+                                "$action 需要 id；读不到控件时改给 x、y 坐标" +
+                                    "（先 device_screen detail=true 看坐标）。",
+                            )
+                        }
+                        DeviceControlHub.note("$verb · ($x, $y)")
+                        svc.tapAt(x, y, long)
+                    }
                 }
 
                 "type" -> {
@@ -175,7 +194,13 @@ object DeviceControlTools {
 
                 "scroll" -> {
                     val dir = args.strOf("direction") ?: "down"
-                    DeviceControlHub.note("翻页 · ${if (dir == "down") "向后" else "向前"}")
+                    val word = when (dir) {
+                        "up" -> "向前"
+                        "right" -> "向右"
+                        "left" -> "向左"
+                        else -> "向后"
+                    }
+                    DeviceControlHub.note("翻页 · $word")
                     svc.scroll(args.intOf("id"), dir)
                 }
 
@@ -189,17 +214,26 @@ object DeviceControlTools {
             }
 
             if (!outcome.ok) return ToolResult.fail(outcome.message)
-
-            /*
-             * 界面切换需要时间；等一小会儿再读，比让模型「立刻重读然后读到旧界面」强。
-             * 滑动比点击慢：一次 280ms 的手势结束后，列表还在惯性滚动，
-             * 这时候读屏会读到「滑到一半」的位置 —— 所以多等一会儿。
-             */
-            delay(if (action == "scroll") 380 else 260)
             if (DeviceControlHub.isStopped()) {
                 return ToolResult.fail("已执行，但用户刚点了停止。不要再继续操作。")
             }
-            val after = svc.capture(detail = false)
+
+            /*
+             * 等界面「变了」，而不是干等一个固定毫秒数。
+             *
+             * 固定 260ms 是个赌：微信用 500ms 才画出首屏，那时读到的还是旧界面，
+             * 模型据此判断「点了没反应」，于是重复点。滑动更慢 —— 280ms 的手势
+             * 结束后列表还在惯性滚动，要等更久才能读到稳定位置。
+             */
+            val after = svc.settle(
+                before = before,
+                timeoutMs = if (action == "scroll") 1100 else 900,
+                // 滑动要等惯性停下来，否则读到的是滑到一半的位置
+                requireStable = action == "scroll",
+            )
+            if (DeviceControlHub.isStopped()) {
+                return ToolResult.fail("已执行，但用户刚点了停止。不要再继续操作。")
+            }
             DeviceControlHub.publish(
                 DeviceControlHub.Snapshot(
                     packageName = after.packageName,
@@ -208,12 +242,25 @@ object DeviceControlTools {
                     text = after.text,
                 ),
             )
-            DeviceControlHub.note("已${outcome.message}", after.appLabel)
-            return ToolResult.ok("${outcome.message}\n\n${after.text}")
+            // message 本身已经是「已点击「发送」」，不要再拼一个「已」
+            DeviceControlHub.note(outcome.message, after.appLabel)
+            val unchanged = if (after.text == before) {
+                "\n\n（界面没有变化：要么动作没生效，要么效果不在读屏范围里（比如只弹了个提示）。" +
+                    "不要直接重复同一个动作。）"
+            } else {
+                ""
+            }
+            return ToolResult.ok("${outcome.message}\n\n${after.text}$unchanged")
         }
 
-        override fun summarize(args: JsonObject) =
-            args.strOf("action").orEmpty() + args.intOf("id")?.let { " #$it" }.orEmpty()
+        override fun summarize(args: JsonObject): String {
+            val action = args.strOf("action").orEmpty()
+            val id = args.intOf("id")
+            if (id != null) return "$action #$id"
+            val x = args.intOf("x")
+            val y = args.intOf("y")
+            return if (x != null && y != null) "$action ($x, $y)" else action
+        }
     }
 
     // ------------------------------------------------------------------
@@ -235,15 +282,22 @@ object DeviceControlTools {
         )
 
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
-            gate(ctx)?.let { return ToolResult.fail(it) }
             val context = ctx.requireContext()
             val app = args.strOf("app")
             val url = args.strOf("url")
             val query = args.strOf("query")
 
+            /*
+             * 查询分支必须走在这道闸**前面**。
+             *
+             * 它不碰屏幕、不需要无障碍，而且它本身就是「无障碍没开时」最该能用的那条路：
+             * 用户问「我装了哪些应用」，模型先被闸拦下，只能回答「请先开权限」——
+             * 而正确的做法恰恰是先列出应用，再顺带告诉用户哪些能开。
+             */
             if (query != null && app == null && url == null) {
                 return ToolResult.ok(listApps(context, query))
             }
+            gate(ctx)?.let { return ToolResult.fail(it) }
 
             val intent = when {
                 url != null -> Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))

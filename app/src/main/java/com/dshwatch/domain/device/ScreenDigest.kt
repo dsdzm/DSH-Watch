@@ -105,6 +105,8 @@ object ScreenDigest {
      * @param appLabel 前台应用名（读不到包名时退回包名本身）
      * @param elements 已按阅读顺序排好的元素
      * @param detail 是否附坐标。默认不附 —— 坐标只在「按元素点不到、要按坐标点」时才需要
+     * @param screen 屏幕矩形。空屏时要用它告诉模型「屏幕多大、中心在哪」，
+     *               否则模型想按坐标点也无从估起（它看不到屏幕）
      */
     fun format(
         appLabel: String?,
@@ -114,6 +116,7 @@ object ScreenDigest {
         detail: Boolean = false,
         budget: Int = BUDGET,
         note: String? = null,
+        screen: Bounds? = null,
     ): String {
         val title = appLabel?.takeIf { it.isNotBlank() }
             ?: packageName?.takeIf { it.isNotBlank() }
@@ -126,8 +129,18 @@ object ScreenDigest {
         }
 
         if (elements.isEmpty()) {
+            /*
+             * 空屏不是「没事可说」—— 它恰恰是模型最需要帮忙的时候：
+             * 游戏、自绘 Canvas 读不到控件，唯一的出路是按坐标点。
+             * 不给屏幕尺寸和中心点，模型只能瞎猜一个数字。
+             */
+            val geo = screen?.let {
+                "屏幕 ${it.width}×${it.height}，中心点 (${it.centerX}, ${it.centerY})。"
+            }.orEmpty()
             return header + "\n（这一屏没有可读的文字或可操作的控件。可能还在加载，" +
-                "也可能是游戏/自绘界面；可以稍后再读一次，或让用户接手。）"
+                "也可能是游戏 / 自绘界面。$geo" +
+                "可以稍后再读一次；要按位置点就用 device_act action=tap 带 x、y，" +
+                "没把握就让用户接手。）"
         }
 
         val lines = ArrayList<String>(elements.size)

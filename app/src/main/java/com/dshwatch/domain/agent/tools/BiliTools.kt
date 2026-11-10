@@ -255,6 +255,9 @@ object BiliTools {
                 "以及本轮标准流程。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
+
+        // 无参工具的界面摘要：不写的话那一行什么都不显示
+        override fun summarize(args: JsonObject) = "B站状态"
         override val enabled: (AppSettings) -> Boolean = { it.biliEnabled }
 
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
@@ -790,7 +793,7 @@ object BiliTools {
     object ReplyTool : AgentTool {
         override val name = "bili_reply"
         override val description =
-                        "发评论或回复。**直接发送，不需要用户确认**，但只有设置里的模式是「发评论」时才可用，否则会被拒绝。配图与 @ 由设置自动附加。" +
+            "发评论或回复。**直接发送，不需确认**；只有模式是「发评论」时可用，否则拒绝。配图与 @ 由设置自动附加。" +
             "回复某人：传 root（楼根 rpid）+ parent（对方那条的 rpid），id 来自 bili_inbox / bili_comments。语气遵守 bili_status 返回的「评论风格」。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(

@@ -1,5 +1,6 @@
 package com.dshwatch.domain.agent
 
+import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
 import kotlinx.serialization.json.JsonObject
@@ -48,6 +49,18 @@ object ApprovalPolicy {
      */
     val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm", "bili_dyn", "bili_like")
 
+    /**
+     * 设备操控四件套。
+     *
+     * 会话进行中不问 —— 不是放宽，是**问了也没人答**：这时 App 已经被收到后台，
+     * 审批弹窗画在一个用户看不见的 Activity 上，任务会一直等到超时。
+     * 同意权移到了悬浮条那颗停止按钮上：它始终在用户眼前，比弹窗更容易按到。
+     *
+     * 会话**开始之前**（`device_screen` 第一次调用，App 还在前台）仍然照常询问。
+     */
+    private val DEVICE_TOOLS: Set<String> =
+        setOf("device_screen", "device_act", "device_open", "device_handoff")
+
     private const val RUN_SCRIPT = "run_script"
     private const val SHELL_KEY = "run_script:shell"
 
@@ -70,6 +83,8 @@ object ApprovalPolicy {
         args: JsonObject,
         sessionApproved: Set<String>,
     ): Boolean {
+        // 设备会话进行中：弹窗在后台看不见，问了也等不到
+        if (toolName in DEVICE_TOOLS && DeviceControlHub.state.value.running) return false
         // shell：永远拦，除非本会话已经放行
         if (toolName == RUN_SCRIPT && languageOf(args) == "shell") {
             return SHELL_KEY !in sessionApproved

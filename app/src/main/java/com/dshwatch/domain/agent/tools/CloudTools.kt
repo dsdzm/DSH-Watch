@@ -15,15 +15,12 @@ import com.dshwatch.domain.agent.boolOf
 import com.dshwatch.domain.agent.intOf
 import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.agent.stringListOf
+import com.dshwatch.domain.agent.stringMapOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -74,19 +71,21 @@ object CloudTools {
         override val description =
             "在**云端 GitHub Actions** 跑 workflow，做本地做不到的编译（APK、gcc、JVM、Go、Rust）。工作目录自动上传，命令里直接引用文件名。" +
             "模板二选一：`dsh-run.yml` 跑任意命令（inputs.command，基础 Ubuntu，**无 JDK/Android SDK**，产物写 `dsh-out/`）；`dsh-build.yml` 编本项目 APK（带 JDK17+SDK，参数 variant=debug|release，可传 extra_tasks，**不接受 command**）。要编 Android 只能用后者。" +
-            "默认触发后立刻返回，用 `cloud_job(status/logs/artifacts)` 跟进；必须同步才传 wait=true（≤timeout_sec，默认 300s）。代码会上传到用户仓库，每次都会请求确认。"
+            "默认触发后立刻返回，用 `cloud_job(status/logs/artifacts)` 跟进；要等结果才传 wait=true（≤timeout_sec，默认 300s）。代码会上传到你的仓库，每次都会请求确认。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(
                 "workflow" to Schema.str("workflow 文件名，如 dsh-run.yml；留空用设置里的默认值"),
                 "ref" to Schema.str("分支名，留空用设置里的默认值（通常是 main）"),
-                "inputs" to Schema.obj(
-                    mapOf(
-                        "command" to Schema.str(
-                            "交给模板执行的命令（dsh-run.yml 用）。例如 `python main.py`、" +
-                                "`gcc main.c -o main && ./main`、`npm test`"
-                        ),
-                    )
+                /*
+                 * 必须是 strMap 而不是 obj。
+                 *
+                 * obj 会把 outer 的 additionalProperties 写成 false，于是只剩这里列出的键合法 ——
+                 * 而 dsh-build.yml 要的 variant / extra_tasks 在 schema 层就被判非法，
+                 * 模型只能出默认的 debug 包。strMap 放行任意字符串键。
+                 */
+                "inputs" to Schema.strMap(
+                    "workflow 参数：dsh-run.yml 用 command；dsh-build.yml 用 variant=debug|release、extra_tasks。"
                 ),
                 "files" to Schema.arr(
                     "要一起上传的工作目录文件（相对路径，如 main.py、src/app.py）。" +
@@ -302,13 +301,13 @@ object CloudTools {
             }
         }
 
-        private fun readInputs(args: JsonObject): Map<String, String> {
-            val obj = runCatching { args["inputs"]?.jsonObject }.getOrNull() ?: return emptyMap()
-            return obj.mapNotNull { (key, value) ->
-                val prim = value as? JsonPrimitive ?: return@mapNotNull null
-                prim.contentOrNull?.let { key to it }
-            }.toMap()
-        }
+        /*
+         * 用 stringMapOf 而不是裸 jsonObject：
+         * 模型常把对象写成「字符串里裹 JSON」（`"{\"variant\":\"release\"}"`），
+         * 裸 jsonObject 会抛异常、静默退化成空 Map，最后只报「缺少命令」，
+         * 真正的原因被盖住。stringMapOf 两种形态都认。
+         */
+        private fun readInputs(args: JsonObject): Map<String, String> = args.stringMapOf("inputs")
 
         override fun summarize(args: JsonObject): String =
             (args.strOf("workflow") ?: "默认模板") + " · " + (args.strOf("ref") ?: "默认分支")

@@ -110,6 +110,26 @@ class ScreenDigestTest {
     }
 
     @Test
+    fun `empty screen gives screen size and center so the model can tap by coordinate`() {
+        // 游戏 / 自绘界面读不到控件，唯一的出路是按坐标点 —— 不给尺寸，模型只能瞎猜数字
+        val text = ScreenDigest.format(
+            "游戏", "com.game", false, emptyList(),
+            screen = Bounds(0, 0, 412, 502),
+        )
+        assertThat(text).contains("412×502")
+        assertThat(text).contains("中心点 (206, 251)")
+        assertThat(text).contains("x、y")
+    }
+
+    @Test
+    fun `empty screen without screen bounds still renders`() {
+        // screen 是后加的可选参数：老调用方不传也不能崩
+        val text = ScreenDigest.format("桌面", "com.x", false, emptyList(), screen = null)
+        assertThat(text).contains("没有可读的文字")
+        assertThat(text).doesNotContain("中心点")
+    }
+
+    @Test
     fun `label is clipped to keep one element per line`() {
         val long = "很长的文字".repeat(20)
         val text = ScreenDigest.format(

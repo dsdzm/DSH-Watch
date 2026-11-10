@@ -94,7 +94,7 @@ object WorkspaceTools {
     object ReadFileTool : AgentTool {
         override val name = "read_file"
         override val description =
-                        "读取工作目录里的文件（单次最多 24000 字，超出截断）。大文件用 offset 分段读；工具的落盘输出通常在 notes/tool-output/ 下。" +
+            "读取工作目录里的文件（单次最多 24000 字，超出截断）。大文件用 offset 分段读；工具的落盘输出通常在 notes/tool-output/ 下。" +
             "改文件前先用它看清原文，再把要改的片段原样复制到 edit_file 的 old_string。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
@@ -135,7 +135,7 @@ object WorkspaceTools {
     object WriteFileTool : AgentTool {
         override val name = "write_file"
         override val description =
-                        "创建或覆盖工作目录里的文件，目录自动创建，单文件上限 256KB。path 用**相对路径**（index.html、src/app.py）。" +
+            "创建或覆盖工作目录里的文件，目录自动创建，单文件上限 256KB。path 用**相对路径**（index.html、src/app.py）。" +
             "**改已有文件优先用 edit_file**；只有整份重写才用它。内容长先写骨架再 append_file 分段追加。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
@@ -181,7 +181,7 @@ object WorkspaceTools {
     object EditFileTool : AgentTool {
         override val name = "edit_file"
         override val description =
-                        "对已有文件做**精确字符串替换**。改文件优先用它 —— read 全文再 write 要多花一倍 token，还容易被截断。" +
+            "对已有文件做**精确字符串替换**。改文件优先用它 —— read 全文再 write 要多花一倍 token，还容易被截断。" +
             "old_string 必须与文件内容**逐字符一致**（含缩进与换行），通常从 read_file 结果里复制。出现多次会失败：多带几行上下文让它唯一，或 replace_all=true。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
@@ -302,7 +302,8 @@ object WorkspaceTools {
 
     object MakeDirTool : AgentTool {
         override val name = "make_dir"
-        override val description = "在当前工作目录里创建一个目录（含中间层级）。"
+        override val description =
+            "创建目录（含中间层级）。**多数情况不用调它** —— write_file 会自动建父目录。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf("path" to Schema.str("目录相对路径，例如 src/styles")),
@@ -358,7 +359,8 @@ object WorkspaceTools {
 
     object DeleteFileTool : AgentTool {
         override val name = "delete_file"
-        override val description = "删除当前工作目录里的文件或目录（目录会连同内容一起删除）。"
+        override val description =
+            "删除文件或目录（目录连内容一起删）。**不可恢复**，不确定先 list_files。"
         override val safety = ToolSafety.WRITE
         override val parameters = Schema.obj(
             properties = mapOf("path" to Schema.str("要删除的相对路径")),

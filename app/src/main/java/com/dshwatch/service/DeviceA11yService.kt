@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityEvent
@@ -21,6 +22,7 @@ import com.dshwatch.domain.device.DeviceGuard
 import com.dshwatch.domain.device.ScreenDigest
 import com.dshwatch.domain.device.UiElement
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -188,6 +190,7 @@ class DeviceA11yService : AccessibilityService() {
             keyboardShown = keyboard,
             elements = collected,
             detail = detail,
+            screen = screen,
             note = when {
                 DeviceGuard.isBlocked(pkg) -> "权限 / 安装页面：只能看，不能操作"
                 collected.isEmpty() -> "这一屏读不到控件"
@@ -303,6 +306,70 @@ class DeviceA11yService : AccessibilityService() {
         else ActResult(false, "点击没有送达（可能被系统拦截或界面正在切换）。先读屏看看现在的状态。")
     }
 
+    /**
+     * 按屏幕坐标点。
+     *
+     * 只在「读不到控件」时用：游戏、自绘 Canvas、Compose 里没有语义树的自定义绘制，
+     * 这一屏的元素列表可能是空的。坐标由模型从 `detail=true` 的读屏结果里估，
+     * 或直接按屏幕中心试探。
+     *
+     * 安全边界与按编号点一致：受保护页面直接拒绝，屏幕外的坐标直接拒绝。
+     */
+    suspend fun tapAt(x: Int, y: Int, long: Boolean): ActResult = withContext(Dispatchers.Main) {
+        val dm = resources.displayMetrics
+        val pkg = rootInActiveWindow?.packageName?.toString() ?: foregroundPackage
+        if (DeviceGuard.isBlocked(pkg)) {
+            return@withContext ActResult(false, DeviceGuard.refusal(pkg))
+        }
+        if (x < 0 || y < 0 || x >= dm.widthPixels || y >= dm.heightPixels) {
+            return@withContext ActResult(
+                false,
+                "坐标 ($x, $y) 不在屏幕内（屏幕 ${dm.widthPixels}×${dm.heightPixels}）。" +
+                    "先 device_screen detail=true 看真实坐标，或直接用屏幕中心。",
+            )
+        }
+        val ok = gestureTap(x, y, long)
+        if (ok) {
+            ActResult(true, (if (long) "已长按" else "已点击") + "坐标 ($x, $y)")
+        } else {
+            ActResult(false, "点击没有送达（可能被系统拦截或界面正在切换）。先读屏看看现在的状态。")
+        }
+    }
+
+    /**
+     * 等界面「变得和刚才不一样」，最多 [timeoutMs]。
+     *
+     * 动作后固定 `delay(260)` 是个赌：微信用 500ms 才画出首屏，固定等 260ms 读到的
+     * 还是旧界面，模型据此判断「点了没反应」，于是重复点，最后停在一个谁都不想去的页面。
+     *
+     * 这里改成「有变化就立刻返回」：常见界面 200ms 内就变了，比原来还快；
+     * 没变才继续轮询，到上限为止。**没变本身就是信息** —— 调用方会把
+     * 「界面没有变化」写进结果，模型就知道别再重复同一个动作。
+     *
+     * @param before 动作前那一屏的文本，用来判断「变了没有」
+     * @param requireStable 是否要求「连续两次读到同一屏」才算稳定。滑动要开：
+     *        手势结束后列表还在惯性滚动，读到变化就返回的话，拿到的是滑到一半的位置
+     */
+    suspend fun settle(
+        before: String,
+        timeoutMs: Long = 900,
+        requireStable: Boolean = false,
+    ): Capture {
+        val start = SystemClock.uptimeMillis()
+        var wait = 200L
+        var last: String? = null
+        while (true) {
+            delay(wait)
+            val now = capture(detail = false)
+            val changed = now.text != before
+            // 稳定 = 变了，且和上一轮读到的一样（两轮之间界面没再动）
+            if (changed && (!requireStable || now.text == last)) return now
+            if (SystemClock.uptimeMillis() - start >= timeoutMs) return now
+            last = now.text
+            wait = 150L
+        }
+    }
+
     private fun clickAncestor(
         node: AccessibilityNodeInfo,
         bounds: Bounds,
@@ -366,10 +433,29 @@ class DeviceA11yService : AccessibilityService() {
         if (!ok) return@withContext ActResult(false, "写入失败，这个输入框可能不接受直接设值。")
 
         if (submit) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+            /*
+             * `ACTION_IME_ENTER` 是 API 30 才有的。Android 9 / 10 上这句会被整个跳过，
+             * 但早期写法无论 SDK 都回「已输入并提交」—— 模型以为消息发出去了，
+             * 用户看到输入框里躺着一句话没发出去。这里如实报，并给出替代做法。
+             */
+            val sent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching {
+                    node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                }.getOrDefault(false)
+            } else {
+                false
             }
-            return@withContext ActResult(true, "已输入并提交。")
+            return@withContext if (sent) {
+                ActResult(true, "已输入并提交「${text.take(24)}」。")
+            } else {
+                ActResult(
+                    true,
+                    "已输入「${text.take(24)}」，但**没有提交成功**——" +
+                        "这台设备或这个输入框不接受程序化回车。" +
+                        "请点它的发送 / 搜索按钮（device_screen 里通常叫「发送」「搜索」「完成」），" +
+                        "或 device_handoff 让用户按一下。**不要当成已发送。**",
+                )
+            }
         }
         ActResult(true, "已输入「${text.take(30)}」。")
     }
@@ -399,9 +485,16 @@ class DeviceA11yService : AccessibilityService() {
         val horizontal = direction == "left" || direction == "right"
         val forward = direction == "down" || direction == "right"
 
-        // 锚点：模型刚看过的那个列表。太小（半露在边缘）就当作没有，按整屏算。
-        val anchor = id?.let { DeviceControlHub.lastScreen?.byId(it)?.bounds }
-            ?.takeIf { it.width > 40 && it.height > 40 }
+        /*
+         * 锚点：模型刚看过的那个列表。太小（半露在边缘）就当作没有，按整屏算。
+         *
+         * 必须查新鲜度：超过 30 秒的快照里，那个编号早指向别的东西了 ——
+         * 在旧位置上划，等于在屏幕中间乱划，而工具还会报「已滑动」。
+         */
+        val anchor = id?.let {
+            val screen = DeviceControlHub.lastScreen
+            if (screen == null || screen.stale()) null else screen.byId(it)?.bounds
+        }?.takeIf { it.width > 40 && it.height > 40 }
         val cx = anchor?.centerX?.coerceIn(0, w) ?: (w / 2)
         val cy = anchor?.centerY?.coerceIn(0, h) ?: (h / 2)
 

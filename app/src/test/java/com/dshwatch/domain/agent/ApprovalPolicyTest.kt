@@ -1,5 +1,6 @@
 package com.dshwatch.domain.agent
 
+import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
 import com.google.common.truth.Truth.assertThat
@@ -134,5 +135,51 @@ class ApprovalPolicyTest {
         assertThat(ApprovalPolicy.isSessionScoped("run_script", shell())).isTrue()
         assertThat(ApprovalPolicy.isSessionScoped("run_script", js())).isFalse()
         assertThat(ApprovalPolicy.isSessionScoped("cloud_build", shell())).isFalse()
+    }
+    // ---------------- 设备会话 ----------------
+
+    /*
+     * 设备操控期间 App 一定在后台：审批弹窗画在一个用户看不见的 Activity 上，
+     * 任务会一直等到超时。所以会话进行中这四个工具免问 —— 同意权在悬浮条的停止按钮上。
+     */
+
+    @Test
+    fun `device tools are not asked while a device session is running`() {
+        DeviceControlHub.begin("测试")
+        try {
+            listOf("device_screen", "device_act", "device_open", "device_handoff").forEach { name ->
+                assertThat(
+                    ApprovalPolicy.needsApproval(
+                        settings(AgentMode.ASK_EVERY_STEP), name, ToolSafety.WRITE, args(null), emptySet(),
+                    )
+                ).isFalse()
+            }
+        } finally {
+            DeviceControlHub.end()
+        }
+    }
+
+    @Test
+    fun `device tools are asked again once the session ends`() {
+        DeviceControlHub.end()
+        assertThat(
+            ApprovalPolicy.needsApproval(
+                settings(AgentMode.ASK_EVERY_STEP), "device_act", ToolSafety.WRITE, args(null), emptySet(),
+            )
+        ).isTrue()
+    }
+
+    @Test
+    fun `device session does not exempt unrelated write tools`() {
+        DeviceControlHub.begin("测试")
+        try {
+            assertThat(
+                ApprovalPolicy.needsApproval(
+                    settings(AgentMode.ASK_EVERY_STEP), "write_file", ToolSafety.WRITE, args(null), emptySet(),
+                )
+            ).isTrue()
+        } finally {
+            DeviceControlHub.end()
+        }
     }
 }

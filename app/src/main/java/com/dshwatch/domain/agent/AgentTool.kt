@@ -7,6 +7,7 @@ import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.DeviceProfile
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -168,8 +169,19 @@ interface AgentTool {
 
     suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult
 
-    /** 界面上一行参数摘要 */
-    fun summarize(args: JsonObject): String = args.toString().take(90)
+    /**
+     * 界面上一行参数摘要。
+     *
+     * 默认实现刻意不用 `args.toString()`：那会把 `{"path":"index.html"}`
+     * 连同括号和引号原样糊到手表那一行窄宽度上，用户看到的是「一堆符号」。
+     * 这里只留「键=值」；无参工具返回空串，界面上那一行就不显示参数。
+     */
+    fun summarize(args: JsonObject): String = args.entries
+        .joinToString(" · ") { (key, value) ->
+            val raw = (value as? JsonPrimitive)?.contentOrNull ?: value.toString()
+            "$key=${raw.take(24)}"
+        }
+        .take(90)
 }
 
 object Schema {

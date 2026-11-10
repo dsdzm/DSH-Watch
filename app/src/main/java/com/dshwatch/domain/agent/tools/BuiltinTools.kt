@@ -69,6 +69,9 @@ object BuiltinTools {
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
 
+        // 无参工具的界面摘要：不写的话那一行什么都不显示
+        override fun summarize(args: JsonObject) = "本机时间"
+
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             val now = System.currentTimeMillis()
             val cal = Calendar.getInstance()
@@ -132,6 +135,9 @@ object BuiltinTools {
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
 
+        // 无参工具的界面摘要：不写的话那一行什么都不显示
+        override fun summarize(args: JsonObject) = "设备信息"
+
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             val c = ctx.requireContext()
             val profile = ctx.profile()
@@ -192,6 +198,9 @@ object BuiltinTools {
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(emptyMap())
 
+        // 无参工具的界面摘要：不写的话那一行什么都不显示
+        override fun summarize(args: JsonObject) = "用量统计"
+
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             ctx.usage.ensureLoaded()
             val records = ctx.usage.records.value
@@ -240,18 +249,17 @@ object BuiltinTools {
     object HttpFetchTool : AgentTool {
         override val name = "http_fetch"
         override val description =
-                        "抓取 URL 内容。网页自动转成纯文本（去标签/脚本/样式），适合读文章、查文档、调公开 JSON API。" +
-            "支持 GET / POST（可带 body），只支持 http/https。需要登录态、Referer、UA 或 Key 时用 headers 传自定义头。不知道网址要搜索，用 web_search。"
+            "抓取 URL。网页自动转纯文本（去标签/脚本/样式），适合读文章、查文档、调 JSON API。" +
+            "支持 GET / POST，只收 http/https；要登录态、Referer、Key 时用 headers。不知道网址用 web_search。"
         override val safety = ToolSafety.NETWORK
         override val parameters = Schema.obj(
             properties = mapOf(
-                "url" to Schema.str("完整 URL，必须带 http:// 或 https://"),
+                "url" to Schema.str("完整 URL（必须 http:// 或 https://）"),
                 "method" to Schema.str("GET 或 POST，默认 GET", listOf("GET", "POST")),
                 "body" to Schema.str("POST 的请求体，通常是 JSON 字符串"),
                 "content_type" to Schema.str("POST 的 Content-Type，默认 application/json"),
                 "headers" to Schema.strMap(
-                    "自定义请求头（键值对，值必须是字符串）。可覆盖默认的 User-Agent / Accept；" +
-                        "Host、Content-Length、Connection 等由传输层管理的头会被忽略"
+                    "自定义请求头。可覆盖默认 User-Agent / Accept；Host、Content-Length 等由传输层管理的头会被忽略"
                 ),
                 "max_chars" to Schema.int("最多返回多少字符，默认 4000，上限 16000", 200, 16000),
                 "format" to Schema.str(

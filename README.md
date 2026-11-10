@@ -129,7 +129,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
 
 ```bash
-adb install -r DSH-Watch-v1.18.4.apk
+adb install -r DSH-Watch-v1.18.5.apk
 ```
 
 没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。

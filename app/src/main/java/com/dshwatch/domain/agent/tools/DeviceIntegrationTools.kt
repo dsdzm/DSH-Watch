@@ -104,8 +104,8 @@ object DeviceIntegrationTools {
     object OpenScreenTool : AgentTool {
         override val name = "open_screen"
         override val description =
-                        "打开 App 内页面，把用户直接送到该去的地方（需要他手动做事时用，不要只在回答里写路径）。" +
-            "可选：settings（设置）、providers（供应商）、usage（用量）、workspace（工作空间）、sessions（会话）、diagnostics（诊断）、about（关于）、exec（执行与编译）。"
+            "打开 App 内页面，把用户直接送到该去的地方（需要他手动做事时用，不要只在回答里写路径）。" +
+            "可选：settings / providers / usage / workspace / sessions / diagnostics / about / exec。"
         override val safety = ToolSafety.READ_ONLY
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -185,8 +185,8 @@ object DeviceIntegrationTools {
         override val parameters = Schema.obj(
             properties = mapOf(
                 "title" to Schema.str("日程标题，例如「牙医」"),
-                "time" to Schema.str("开始时间，24 小时制 HH:mm，例如 15:00"),
-                "date" to Schema.str("日期：今天 / 明天 / 后天 / YYYY-MM-DD。留空按今天算"),
+                "time" to Schema.str("开始时间 HH:mm（24 小时制），如 15:00"),
+                "date" to Schema.str("今天/明天/后天/YYYY-MM-DD，留空按今天"),
                 "duration_minutes" to Schema.int("时长（分钟），默认 60", 5, 1440),
                 "location" to Schema.str("地点，可留空"),
                 "notes" to Schema.str("备注，可留空"),
