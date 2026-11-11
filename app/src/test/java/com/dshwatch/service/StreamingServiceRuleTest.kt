@@ -135,4 +135,18 @@ class StreamingServiceRuleTest {
         val idx = rcv.indexOf("inForeground(context)")
         assertTrue("前台判断必须在 start() 之前", idx < rcv.indexOf("StreamingService.start"))
     }
+
+    @Test
+    fun `后台被挡掉的保活，生成结束时必须作废`() {
+        val svc = code("service/StreamingService.kt")
+        val release = functionBody(svc, "private fun release(").substringBefore("fun update(")
+        assertTrue(
+            "release 里不清 pendingStart，用户回到 App 时会拉起一个没有任务的前台服务，",
+            release.contains("pendingStart = false"),
+        )
+        assertTrue(
+            "补保活要有入口，否则「发完消息立刻息屏」那一轮永远没有保活",
+            svc.contains("fun resumePending("),
+        )
+    }
 }

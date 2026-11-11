@@ -616,6 +616,14 @@ class StreamingService : Service() {
             // 还有别的占用者（例如设备操控仍在进行）就不停
             if (holds.isNotEmpty()) return
             running = false
+            /*
+             * 生成已经结束，那次没发出去的保活请求也就作废了。
+             *
+             * 不清的话会留一颗雷：用户回到 App 时 `onResume` 看到 pendingStart
+             * 还是 true，会拉起一个**没有任何任务在跑**的前台服务 ——
+             * 通知栏挂着「正在生成」，实际什么都不做，只能等它自己超时。
+             */
+            pendingStart = false
             progressText = ""
             /*
              * 服务还在就在本进程里直接收：`stopSelf()` 走的路径和 onDestroy
