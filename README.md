@@ -52,7 +52,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 模型返回 `tool_calls` → 手表本地执行 → 结果回灌 → 再问模型，直到收敛。
 步数不设硬上限，改用停滞检测；长任务用 `todo_write` 维护清单，进度实时可见。
 
-**51 个内置工具**：
+**52 个内置工具**：
 
 | 分组 | 工具 |
 |---|---|
@@ -62,15 +62,16 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 | 检索 2 | `glob` `grep` |
 | 构建与云端 3 | `build_project` `cloud_build` `cloud_job` |
 | 本机执行 1 | `run_script` |
+| 提权执行 1 | `adb_shell` |
 | 交互与提醒 7 | `ask_user` `todo_write` `set_alarm` `list_alarms` `cancel_alarm` `vibrate` `create_event` |
 | 设备联动 3 | `open_file` `open_screen` `get_clipboard` |
 | 设备操控 4 | `device_screen` `device_act` `device_open` `device_handoff` |
-
-表格里是全部 52 个工具，但**不是每次都全发给模型**：常驻的只有 13 个
-（`tool_search` 与读写改搜跑、提醒自己进度的那几个），其余按「文件 / 构建 / 网络 /
-提醒 / B站 / 设备」分组，只给一行目录。模型判断需要某类时调 `tool_search`，
-取到的工具从下一轮起带完整参数 —— 每轮的工具表因此从 18365 字降到约 5 千字。
 | B 站 16 | `bili_status` `bili_search` `bili_video` `bili_subtitle` `bili_comments` `bili_inbox` `bili_thread` `bili_report` `bili_reply` `bili_dm` `bili_like` `bili_coin` `bili_fav` `bili_fav_folders` `bili_fav_list` `bili_dyn` |
+
+每次请求都把当前开启的工具**全量**发给模型，不做分组、不做按需取用。
+1.20 试过「常驻 13 个 + 其余进目录、模型先 `tool_search`」，固定成本从
+18365 字降到约 5 千字，但真机上模型会卡在取工具这一步：反复搜、或者搜到了
+却记不住「下一轮才生效」，任务直接停在那里。省 token 不能拿可用性换。
 
 另外支持：
 
@@ -86,10 +87,8 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
   **系统设置页可以操作**（开勿扰、调亮度、连蓝牙）；权限管理、应用安装、
   系统界面仍然只读 —— 那几页点错不可逆。
   开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
-  **操控期间也只开放这四个工具**：工具表是每轮重发的固定成本，三十步的任务里，
-  四十多个工具的 schema 就是几十万 token 的纯浪费。任务结束（交还 / 停止）后其余工具自动回来。
-  历史里的旧屏幕同样按步折叠，只保留最近三屏 —— 旧编号指向的东西早就变了，
-  留着不但费 token，还会把模型带偏。
+  历史里的旧屏幕按步折叠，只保留最近三屏 —— 旧编号指向的东西早就变了，
+  留着不但费 token，还会把模型带偏。工具表不跟着收窄：模型做完操控还要能写总结。
 
 - **内置文件浏览器（默认开）**：一部分手表 ROM 没有文件管理器，系统 `ACTION_OPEN_DOCUMENT`
   拿不到结果 —— 点「＋文件」什么都不发生。内置浏览器不依赖第三方 App，直接翻
@@ -209,7 +208,7 @@ Gradle 发行版本身建议从华为镜像下载，wrapper 的 `networkTimeout`
 app/src/main/java/com/dshwatch/
 ├─ core/        AppContainer（手写 DI）、日志、JSON、ID
 ├─ domain/      ChatEngine（对话与 Agent 循环）、TokenEstimator、PerfProfile
-│  ├─ agent/    ToolRegistry、tools/（51 个工具）、exec/、cloud/、mcp/、build/（静态校验）
+│  ├─ agent/    ToolRegistry、tools/（52 个工具）、exec/、cloud/、mcp/、build/（静态校验）
 │  ├─ plugin/   工具结果插件与 TOON 编码
 │  └─ model/    ChatMessage / Conversation / Provider / Media
 ├─ data/        SettingsRepository（DataStore）、ConversationStore（JSON）、SecureKeyStore

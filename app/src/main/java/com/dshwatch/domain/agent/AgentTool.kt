@@ -99,13 +99,6 @@ class ToolContext(
      * 而 [ToolContext] 是构造时快照的。匿名时返回空串。
      */
     val biliCookie: () -> String = { "" },
-    /**
-     * 本会话「按需加载」的工具集合。
-     *
-     * 为 null 表示不启用渐进披露（离线脚本、单测）：此时全部工具照常下发。
-     * 引擎每次发送都会新建一个，工具执行时靠它把 `tool_search` 的结果记下来。
-     */
-    val toolScope: ToolScope? = null,
 ) {
     fun requireContext(): Context =
         appContext ?: error("该工具需要 Android Context，当前运行环境没有提供")
@@ -117,7 +110,7 @@ class ToolContext(
      * 换一个会话目录的副本。
      * ToolRegistry 是应用级单例，而会话目录是执行时才确定的，所以每次执行都要换一副「眼镜」。
      */
-    fun withSession(dir: String, scope: ToolScope? = null): ToolContext = ToolContext(
+    fun withSession(dir: String): ToolContext = ToolContext(
         appContext = appContext,
         workspace = workspace,
         usage = usage,
@@ -134,8 +127,6 @@ class ToolContext(
         cloudRuns = cloudRuns,
         github = github,
         biliCookie = biliCookie,
-        // 不传就沿用原来的：换目录不该把「本轮加载过哪些工具」丢掉
-        toolScope = scope ?: toolScope,
     )
 
     /** 模型给的路径 → 工作空间内的全局相对路径（落在本会话目录之下）。null = 路径非法 */

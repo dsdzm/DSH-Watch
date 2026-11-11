@@ -872,13 +872,13 @@ class ChatEngine(
             provider.type == ProviderType.OPENAI_COMPAT &&
             registry.tools.isNotEmpty()
         /*
-         * 渐进式披露的会话状态：本轮加载过哪些工具。
+         * 工具表全量下发。
          *
-         * 51 个工具的描述 + schema 是 18123 字，而它每一轮都要重发。常驻的只有
-         * 读写改搜跑那十几个，其余三十多个平时只以「目录」形式出现在提示里，
-         * 模型要用时先 tool_search，取到的工具从下一轮起带完整参数下发。
+         * 1.20 试过「常驻十几个 + 其余进目录、模型先 tool_search」，固定成本确实
+         * 从一万八降到五千，但真机上模型会卡在这一步：先搜「构建」，再搜别的，
+         * 或者搜到了却记不住「下一轮才生效」。省下的是 token，赔进去的是一整个
+         * 任务。可用性优先，机制整体移除。
          */
-        val toolScope = com.dshwatch.domain.agent.ToolScope { registry.tools }
         // 不再用 settings.maxAgentSteps 限制轮数：它和任务复杂度无关 ——
         // 读 8 个文件改 5 个文件的重构，20 步根本不够；而模型卡住时，
         // 20 步全是重复调同一个工具，白烧二十轮 token。
@@ -1002,25 +1002,14 @@ class ChatEngine(
             // 它没有错 —— 它看到的确实只有那几个；错在这个事实只存在于 tools 数组里，
             // 而"本轮是收窄的、下一轮会放开"这件事它无从得知。
             /*
-             * 设备操控进行中收窄工具面。
+             * 工具面只受插件路由影响，不再按设备模式收窄。
              *
-             * 工具表是**每轮**随请求重发的固定成本：51 个工具的描述 + schema
-             * 共 18123 字。三十步的操控就是五十多万字符的纯浪费 —— 而这段时间里
-             * 模型只会用 device_* 这四个。收窄后只剩 1741 字，任务结束
-             * （handoff / 用户点停止 / 说完话）后其余工具自动回来。
-             *
-             * 只在「确实已经在操控」时收窄：第一步之前 running 还是 false，
-             * 模型必须先看到 device_screen 才可能开始。
+             * 早先操控期间只下发 device_*，省了固定成本，但模型做完操控想写总结
+             * 时看不见 write_file，只会说「我没法写文件」。这个失败模式比省下的
+             * 那点 token 贵得多。
              */
-            val deviceMode = settings.deviceControlEnabled &&
-                com.dshwatch.domain.device.DeviceControlHub.state.value.running
-            val visibleTools = if (deviceMode) {
-                com.dshwatch.domain.agent.DeviceToolScope.narrow(registry.tools)
-            } else {
-                com.dshwatch.domain.agent.ToolCatalog.visible(registry.tools, toolScope.snapshot())
-            }
-            // 风神的收窄是编程场景的，与设备操控不该叠加 —— 叠加会把设备工具也切掉
-            val allowed = if (deviceMode) null else overlay?.allowedTools
+            val visibleTools = registry.tools
+            val allowed = overlay?.allowedTools
             val roundNames = if (allowed != null) {
                 visibleTools.filter { it.name in allowed }.map { it.name }
             } else {
@@ -1037,27 +1026,8 @@ class ChatEngine(
                     if (allowed != null) {
                         // 这一句不能删：首轮收窄时，模型会据「名单里没有」推断「App 做不到」
                         append("\n（本轮只开放这些，下一轮放开其余 —— 「这里没有」≠「App 做不到」。）")
-                    } else if (deviceMode) {
-                        /*
-                         * 必须给出「怎么退出」。
-                         *
-                         * 收窄之后模型看不见 write_file / grep，如果它做完了想写个总结
-                         * 或改个文件，只会看到「工具列表里没有」，然后向用户解释
-                         * 「我没法写文件」。明确说 handoff 能换回来，它才有出路。
-                         */
-                        append("\n（操控中只带设备工具；做完或要用其他工具时先 device_handoff，之后自动恢复。）")
                     } else {
                         append("\n（以上已带完整参数，可直接调用。）")
-                        /*
-                         * 目录只列「没下发」的组。已经在下发名单里的再列一遍是重复收费，
-                         * 而模型的判断依据是「这组里有没有我要的能力」，不是工具名。
-                         */
-                        append(
-                            com.dshwatch.domain.agent.ToolCatalog.catalogPrompt(
-                                registry.tools,
-                                roundNames.toSet(),
-                            ),
-                        )
                     }
                 }
             }
@@ -1256,7 +1226,6 @@ class ChatEngine(
                 registry = registry,
                 deniedTools = deniedTools,
                 sessionDir = conv.workDir,
-                scope = toolScope,
             )
             executed.forEach { call ->
                 // 插件在这里接管工具结果 —— 这是**唯一**能省下 tool 结果 token 的位置。
@@ -1474,11 +1443,10 @@ class ChatEngine(
         registry: ToolRegistry,
         deniedTools: MutableSet<String>,
         sessionDir: String,
-        scope: com.dshwatch.domain.agent.ToolScope? = null,
     ): List<ToolCallRecord> {
         // 工具集是应用级单例，而工作目录是每个会话各自的 —— 这里换一副「眼镜」，
         // 之后所有相对路径都会被解析到本会话的目录下。
-        val toolCtx = registry.toolContext.withSession(sessionDir, scope)
+        val toolCtx = registry.toolContext.withSession(sessionDir)
         val out = ArrayList<ToolCallRecord>(calls.size)
         for (call in calls) {
             if (!currentCoroutineContext().isActive) {

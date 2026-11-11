@@ -415,8 +415,7 @@ class ChatEngineTest {
             this,
             settings,
             backend,
-            // 两个都用常驻工具：delete_file 属于长尾，现在要 tool_search 才会下发，
-            // 拿它验证「收窄 → 放开」会混进另一套机制
+            // 两个都用常驻工具：验证「收窄 → 放开」时不要混进插件之外的机制
             tools = listOf(NamedTool("read_file"), NamedTool("todo_write")),
         )
 
@@ -464,6 +463,30 @@ class ChatEngineTest {
         assertThat(prompt).contains("cloud_build")
         // 没有收窄时不该出现"本轮只开放"这种限定语
         assertThat(prompt).doesNotContain("本轮只开放")
+    }
+
+    @Test
+    fun `长尾工具也不用先取，第一轮就随请求下发`() = runTest {
+        // 1.20 的教训：把长尾工具藏进目录、让模型先 tool_search，
+        // 真机上模型会卡在取工具这一步 —— 反复搜，或者搜到了却以为同一轮能用。
+        // 现在必须一次全给，且提示里不能再出现目录。
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(agentMode = AgentMode.AUTO_ALL)
+        val (engine, _) = buildEngine(
+            this, settings, backend,
+            tools = listOf(
+                NamedTool("read_file"),
+                NamedTool("delete_file"),
+                NamedTool("cloud_build"),
+            ),
+        )
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().tools.map { it.toolName() })
+            .containsExactly("read_file", "delete_file", "cloud_build")
+        assertThat(backend.requests.first().systemPrompt).doesNotContain("工具目录")
     }
 
     @Test

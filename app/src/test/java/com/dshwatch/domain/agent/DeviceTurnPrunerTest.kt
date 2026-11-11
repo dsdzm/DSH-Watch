@@ -23,17 +23,6 @@ class DeviceTurnPrunerTest {
         "[$it] 按钮 会话 $n-$it 的一条比较长的名字用来把正文撑过折叠阈值"
     }
 
-    private fun fakeTool(name: String): AgentTool = object : AgentTool {
-        override val name = name
-        override val description = ""
-        override val safety = ToolSafety.READ_ONLY
-        override val parameters = Schema.obj(properties = emptyMap())
-        override suspend fun execute(
-            args: kotlinx.serialization.json.JsonObject,
-            ctx: ToolContext,
-        ) = ToolResult.ok("")
-    }
-
     @Test
     fun `fewer than keep screens are left alone`() {
         val turns = (1..3).flatMap { pair("c$it", "device_screen", screen(it)) }
@@ -97,18 +86,5 @@ class DeviceTurnPrunerTest {
         val once = DeviceTurnPruner.prune(turns, keep = 3)
         val twice = DeviceTurnPruner.prune(once, keep = 3)
         assertThat(twice).isEqualTo(once)
-    }
-
-    @Test
-    fun `narrowing keeps device tools only`() {
-        val tools = listOf(fakeTool("device_screen"), fakeTool("read_file"))
-        assertThat(DeviceToolScope.narrow(tools).map { it.name }).containsExactly("device_screen")
-    }
-
-    @Test
-    fun `narrowing falls back to the full set when nothing matches`() {
-        val tools = listOf(fakeTool("read_file"))
-        // 空工具面会让模型直接摆烂，宁可发全量
-        assertThat(DeviceToolScope.narrow(tools)).isEqualTo(tools)
     }
 }

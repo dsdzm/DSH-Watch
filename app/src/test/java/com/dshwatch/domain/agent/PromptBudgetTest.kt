@@ -47,13 +47,11 @@ class PromptBudgetTest {
     @Test
     fun `设备工具子集只占全量的一小部分`() {
         val all = com.dshwatch.domain.agent.tools.BuiltinTools.all()
-        val device = DeviceToolScope.narrow(all)
+        val device = all.filter { it.name.startsWith(DeviceTurnPruner.PREFIX) }
         fun cost(tools: List<AgentTool>) =
             tools.sumOf { it.description.length + it.parameters.toString().length }
-        val deviceCost = cost(device)
-        val allCost = cost(all)
-        // 操控期间只带设备工具：收窄必须真的省下一个数量级，否则这个机制没有意义
-        assertTrue("设备子集 ${device.size} 个、$deviceCost 字；全量 $allCost 字",
-            deviceCost * 4 < allCost)
+        // 设备工具只是全量的一小部分：这意味着「打开设备操控」不会额外顶爆工具表
+        assertTrue("设备工具 ${device.size} 个、${cost(device)} 字；全量 ${cost(all)} 字",
+            cost(device) * 4 < cost(all))
     }
 }

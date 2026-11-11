@@ -50,8 +50,6 @@ import kotlin.math.roundToInt
 object BuiltinTools {
 
     fun all(): List<AgentTool> = listOf(
-        // 排在最前：它是取其他工具的入口，模型扫工具表时第一眼要看到
-        ToolSearchTool,
         DateTimeTool,
         CalculatorTool,
         DeviceInfoTool,

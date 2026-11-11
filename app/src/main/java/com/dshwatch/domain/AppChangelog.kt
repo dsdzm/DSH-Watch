@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.21.1",
+            date = "2026-11-11",
+            highlights = listOf(
+                "工具恢复全量下发：模型不再需要先取工具，卡在「获取工具」的问题消失",
+                "操控设备期间也不再收窄工具表，做完能直接写文件或总结",
+                "旧读屏内容的折叠保留，长任务的历史仍然只占几行",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.21.0",
             date = "2026-11-11",
             highlights = listOf(

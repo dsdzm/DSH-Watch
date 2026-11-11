@@ -15,7 +15,7 @@
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
 | 工具链 | AGP 8.7.3 · Kotlin 2.0.21 · Gradle 8.11.1 |
 | 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1 |
-| 规模 | 207 个 Kotlin 文件 / 55.6k 行；83 个测试文件 / 851 个用例 |
+| 规模 | 212 个 Kotlin 文件 / 56.9k 行；86 个测试文件 / 880 个用例 |
 | 体积 | 8.2 MB，单一通用包（v7a / v8a / x86 / x86_64） |
 
 **没有第二个体积档位**。v1.12 移除了本地 Python 引擎（Chaquopy 与 `libpython3.11.so`，约 20 MB），
@@ -28,7 +28,7 @@
 ```
 ui/           Compose 界面（chat / sessions / settings / workspace / usage / provider / pair / diagnostics）
    │  StateFlow + ViewModel
-domain/       ChatEngine（对话与 Agent 循环）、agent/tools（51 个工具）、
+domain/       ChatEngine（对话与 Agent 循环）、agent/tools（52 个工具）、
    │          agent/exec（本机执行）、agent/cloud（GitHub Actions）、agent/mcp、agent/build（代码解析/校验）、plugin
 data/         SettingsRepository（DataStore）、ConversationStore（JSON）、WorkspaceStore、SecureKeyStore、UsageStore
 net/          ChatBackend 抽象 + OpenAiCompatBackend / DshServerBackend / IoBackend、SseReader、TurnSanitizer
@@ -123,7 +123,7 @@ core/         AppContainer（手写 DI）、Logx、Jsonx、Ids
 
 ---
 
-## 4. 工具系统（51 个）
+## 4. 工具系统（52 个）
 
 `AgentTool` 接口：`name` / `description` / `safety` / `parameters`（JSON Schema）/ `execute()`。
 `ToolRegistry` 负责注册、按名字分发、统一异常包装（工具内部抛异常 → `ToolResult.fail`，不炸整个循环）。

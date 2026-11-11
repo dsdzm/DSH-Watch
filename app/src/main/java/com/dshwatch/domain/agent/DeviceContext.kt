@@ -3,20 +3,17 @@ package com.dshwatch.domain.agent
 import com.dshwatch.domain.model.ChatTurn
 
 /**
- * 设备操控期间的两处上下文瘦身。
+ * 设备操控期间的上下文折叠。
  *
- * ## 为什么单独拎出来
+ * ## 为什么只折历史，不动工具表
  *
- * 操控设备是**长轨迹**任务：一次三十步很常见。每一步的固定成本（工具表、
- * 系统提示）与累积成本（历史里的每一屏）都会随步数放大 —— 三十步就是三十次
- * 重复发送。真正需要模型记住的只有「我刚做了什么」和「现在这一屏是什么」，
- * 三步以前的完整控件列表既没用，还会让模型照着旧编号去点。
+ * 操控设备是**长轨迹**任务：一次三十步很常见。真正会随步数放大的是累积成本
+ * （历史里的每一屏），而不是工具表 —— 工具表是固定成本，收窄它省下的是
+ * 一次性的一万多字，代价却是模型看不见 `write_file`，做完操控想写个总结
+ * 只看到「工具列表里没有」，于是向用户解释「我没法写文件」。
  *
- * ## 两件事
- *
- *  - [DeviceToolScope]：操控期间只开放 `device_*`，其余工具的描述与 schema
- *    不再随每轮请求发出去；
- *  - [DeviceTurnPruner]：历史里较早的读屏结果只留动作那一行，屏幕正文折叠掉。
+ * 早先试过操控期间只下发 `device_*`（`DeviceToolScope.narrow`），真机上
+ * 反复出现「模型以为 App 做不到」。收益远小于这种失败，已移除。
  *
  * ## 为什么不做「只发变化」
  *
@@ -24,24 +21,10 @@ import com.dshwatch.domain.model.ChatTurn
  * 模型记错一行就会按错编号，而编号对应的元素是它自己重新读出来的。
  * 这里选择「每屏自包含 + 旧屏折叠」，出错面小得多。
  */
-object DeviceToolScope {
-
-    /** 设备工具的统一前缀。收窄与折叠都靠它识别。 */
-    const val PREFIX = "device_"
-
-    /**
-     * 只留设备工具。
-     *
-     * 一个都不剩时**原样返回**：空工具面会让模型直接放弃，
-     * 表现为「这轮它只回一段文字，什么都不做」。
-     */
-    fun narrow(tools: List<AgentTool>): List<AgentTool> {
-        val device = tools.filter { it.name.startsWith(PREFIX) }
-        return device.ifEmpty { tools }
-    }
-}
-
 object DeviceTurnPruner {
+
+    /** 设备工具的统一前缀。折叠靠它识别。 */
+    const val PREFIX = "device_"
 
     /** 保留最近这么多条屏幕全文。再往前只有「做过什么」还有价值。 */
     const val KEEP = 3
@@ -70,7 +53,7 @@ object DeviceTurnPruner {
         val deviceIndexes = turns.indices.filter { i ->
             val turn = turns[i]
             turn.role == "tool" &&
-                names[turn.toolCallId]?.startsWith(DeviceToolScope.PREFIX) == true
+                names[turn.toolCallId]?.startsWith(PREFIX) == true
         }
         if (deviceIndexes.size <= keep) return turns
 
