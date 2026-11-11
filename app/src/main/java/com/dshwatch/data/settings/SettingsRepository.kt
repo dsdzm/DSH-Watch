@@ -9,12 +9,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.BuiltinProviders
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dsh_settings")
@@ -65,10 +67,25 @@ class SettingsRepository(
     override suspend fun update(transform: (AppSettings) -> AppSettings): AppSettings {
         var updated = AppSettings()
         runCatching {
-            context.settingsDataStore.edit { prefs ->
-                val current = decode(prefs[prefsKey])
-                updated = transform(current)
-                prefs[prefsKey] = json.encodeToString(AppSettings.serializer(), updated)
+            /*
+             * **写入必须跑完，哪怕调用方的协程已经死了。**
+             *
+             * 界面层是用 `rememberCoroutineScope()` 调进来的，手表上这个作用域
+             * 死得非常频繁：设置页停着不动、屏幕一黑，系统就把 Activity 回收了，
+             * composition 一散，scope 连同里面正在跑的 DataStore.edit 一起取消。
+             * 用户的原话是「改了设置，过一会儿又变回去了」—— 日志里就是连着四条
+             * `写入设置失败 · JobCancellationException: ... left the composition`。
+             *
+             * `NonCancellable` 把这段挂到不可取消的上下文里：界面可以没，
+             * 用户已经做出的这个决定不能被一起带走。DataStore 的 edit 本身是
+             * 事务性的，跑完就是原子落盘，不存在写一半。
+             */
+            withContext(NonCancellable) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = decode(prefs[prefsKey])
+                    updated = transform(current)
+                    prefs[prefsKey] = json.encodeToString(AppSettings.serializer(), updated)
+                }
             }
         }.onFailure {
             // 写不进去（磁盘满 / 兼容层文件系统异常）不该让调用方的协程崩掉。

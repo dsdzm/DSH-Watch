@@ -3,6 +3,7 @@ package com.dshwatch.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.dshwatch.DshWatchApp
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.bili.BiliSchedule
@@ -39,8 +40,22 @@ class BiliDailyReceiver : BroadcastReceiver() {
             .onFailure { Logx.w(TAG, "排下一次失败：${it.message}") }
 
         // 后台跑十几分钟必须有前台服务，否则手表一熄屏就被冻结
-        runCatching { StreamingService.start(context) }
-            .onFailure { Logx.w(TAG, "前台服务启动失败：${it.message}") }
+        //
+        // 但 Android 12 起，**广播接收器这类后台上下文里根本不允许起前台服务**：
+        // Context.startForegroundService() 会同步抛 ForegroundServiceStartNotAllowedException。
+        // 这不是 bug，是系统明令。定时任务的广播正好落在这条禁令里 ——
+        // 以前每次都抛一次、被 runCatching 吞掉，看起来"跑了"，其实一行保活都没有。
+        //
+        // 所以先看自己在不在前台：在就正常起；不在就明说没保活，
+        // 让用户知道这一轮结果可能因为熄屏而中断，而不是留一条假的成功日志。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !StreamingService.inForeground(context)
+        ) {
+            Logx.w(TAG, "Android 12+ 后台不允许启动前台服务，本轮不做保活（熄屏可能中断）")
+        } else {
+            runCatching { StreamingService.start(context) }
+                .onFailure { Logx.w(TAG, "前台服务启动失败：${it.message}") }
+        }
 
         runCatching { app.container.engine.send(BiliSchedule.prompt(settings)) }
             .onFailure { Logx.w(TAG, "定时任务启动失败：${it.message}") }

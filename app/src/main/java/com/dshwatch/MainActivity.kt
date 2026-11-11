@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.core.CrashLog
+import com.dshwatch.service.StreamingService
 import com.dshwatch.ui.AppRoot
 import com.dshwatch.ui.nav.rememberWatchNavigator
 import com.dshwatch.ui.theme.DshWatchTheme
@@ -122,6 +123,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * 界面回到前台时补一次被挡掉的保活。
+     *
+     * Android 12 起后台不允许起前台服务。如果用户在「发完消息」和
+     * 「引擎真正开始流式」之间息了屏，那次保活请求会被挡下 —— 生成在跑，
+     * 通知栏却什么都没有。这里补上。
+     *
+     * 放在 onResume 而不是 onCreate：界面被系统回收后重建时，onResume 每次都会走。
+     */
+    override fun onResume() {
+        super.onResume()
+        runCatching { StreamingService.resumePending(this) }
+    }
+
     /**
      * Android 13（API 33）起通知是运行时权限，不申请就等于没有。
      *

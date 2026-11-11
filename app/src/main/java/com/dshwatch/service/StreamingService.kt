@@ -1,5 +1,6 @@
 package com.dshwatch.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -42,6 +44,10 @@ class StreamingService : Service() {
      */
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /** 最近一次 onStartCommand 的 startId，`stopSelf(id)` 要用 */
+    @Volatile
+    private var lastStartId: Int = -1
+
     private val renewHandler = Handler(Looper.getMainLooper())
 
     private val renewTask = object : Runnable {
@@ -54,38 +60,57 @@ class StreamingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * 进前台要尽可能早，所以放在 [onCreate]。
+     *
+     * `startForegroundService()` 之后系统只给 5 秒（Android 12 起 10 秒），
+     * 到点没看到 `startForeground()` 就往主线程抛
+     * `ForegroundServiceDidNotStartInTimeException`，整个进程一起没。
+     *
+     * onStartCommand 比 onCreate **晚一个主线程消息周期**。平时这点延迟是
+     * 零，但手表上不是：界面被系统回收后重建（用户日志里连着三次）时，
+     * 主线程正在跑 Compose 全量重组，那一轮消息可能排出去好几秒。
+     * 1.21.2 的崩溃现场正是这样 —— 服务被拉起，onStartCommand 迟迟不来，
+     * 10 秒后死在 ActivityThread$H 里，日志上除了这行异常什么都没有。
+     *
+     * 所以死线内能做的事，全部挪到 onCreate，而且用一条**不读任何业务状态**
+     * 的最小通知：渠道、图标、标题，三样静态资源，构建耗时在微秒级。
+     * 带「停止」按钮的正式通知在 onStartCommand 里再覆盖上去。
+     */
     override fun onCreate() {
         super.onCreate()
         instance = this
+        enterForegroundQuietly()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        this.lastStartId = startId
+
         /*
-         * 第一件事就是进前台，而且**对所有 action 都进**。
+         * onCreate 已经进过前台的话，这里只剩「把通知换成带按钮的正式版」。
          *
-         * 系统只认一件事：只要服务是被 startForegroundService() 拉起来的，
-         * 就必须在 5 秒内调用 startForeground()，否则进程被直接干掉 ——
-         * 抛的是 RemoteServiceException，堆栈停在 ActivityThread$H，
-         * 从日志完全看不出是「谁启动的、为什么慢」，只留下一行
-         * `Context.startForegroundService() did not then call Service.startForeground()`。
-         *
-         * 之前只有 ACTION_START 会进前台，ACTION_UPDATE 走的是同一条拉起通道
-         * 却从不调用它 —— 那是一条必然崩溃的路径，只是平时 instance 还在、
-         * 根本走不到 startForegroundService 那一行，所以一直没暴露。
+         * 之前这里只有一条路：goForeground() 失败就 stopSelf()。问题是
+         * stopSelf() 取消不了系统那边的 fgRequired 记账（在某些 ROM 上
+         * 反而会留下一个"启动过但没进前台"的 ServiceRecord），10 秒后照样崩。
+         * 现在改成：只要有任何一次成功的 startForeground，死线就解除了。
          */
+        if (!isForegrounded()) {
+            enterForegroundQuietly()
+        }
+        if (!isForegrounded()) {
+            Logx.w(TAG, "进入前台失败，主动停止服务（startId=$startId）")
+            stopSelfSafely(startId)
+            return START_NOT_STICKY
+        }
+
         val lag = SystemClock.elapsedRealtime() - requestedAt
         if (lag > 1500L) {
-            // 5 秒是死线。记录延迟，下次再崩就能直接看出是「主线程被谁堵住了」
             Logx.w(TAG, "onStartCommand 延迟 ${lag}ms 才执行（主线程繁忙）")
         }
 
-        if (!goForeground()) {
-            // 进不了前台就别赖着：再等几秒系统一样会崩掉整个进程，
-            // 不如自己收干净，生成还能在 Application 作用域里继续跑
-            Logx.w(TAG, "进入前台失败，主动停止服务")
-            stopSelfSafely()
-            return START_NOT_STICKY
-        }
+        // 前台状态已就位，再把通知升级成带「停止」按钮的正式版。
+        // 这一步失败只丢按钮，不影响前台状态，所以不参与任何分支。
+        upgradeNotification()
 
         when (intent?.action) {
             ACTION_START -> {
@@ -119,10 +144,10 @@ class StreamingService : Service() {
                         AppContainer.of(app).engine.stop()
                     }.start()
                 }.onFailure { Logx.w(TAG, "停止生成失败：${it.message}") }
-                stopSelfSafely()
+                stopSelfSafely(startId)
             }
 
-            ACTION_STOP_SELF -> stopSelfSafely()
+            ACTION_STOP_SELF -> stopSelfSafely(startId)
         }
         /*
          * START_STICKY：被系统回收后由系统重新拉起。
@@ -133,7 +158,7 @@ class StreamingService : Service() {
          * 内存吃紧时系统按优先级回收，前台服务通常是最后几个。
          */
         if (holds.isEmpty()) {
-            stopSelfSafely()
+            stopSelfSafely(startId)
             return START_NOT_STICKY
         }
         return START_STICKY
@@ -142,6 +167,7 @@ class StreamingService : Service() {
     override fun onDestroy() {
         running = false
         instance = null
+        foregroundedAt = 0L
         renewHandler.removeCallbacks(renewTask)
         releaseWakeLock()
         // 被 stopService() 直接收掉时也要把常驻通知摘掉，否则会留一条永远「正在生成」
@@ -157,39 +183,44 @@ class StreamingService : Service() {
     }
 
     /**
-     * 进入前台。成功返回 true。
+     * 进前台。成功返回进来的时刻（`elapsedRealtime`），失败返回 0。
      *
-     * 分三步且每步都兜住异常：建渠道 → 构通知 → startForeground。
-     * 任何一步失败都只返回 false，由调用方停服务 —— 绝不能让「调用过
-     * startForegroundService 但我们这边悄悄失败了」这种状态存在，
-     * 那等于埋一颗 5 秒后引爆的雷。
+     * 用的是**最小通知**：不含 PendingIntent、不读 [com.dshwatch.domain.device.DeviceControlHub]、
+     * 不做字符串拼接。死线之内只允许花这几微秒 —— 正式通知在
+     * [onStartCommand] 里覆盖上去，那时前台状态已经稳了，慢一点无所谓。
+     *
+     * 渠道必须在 startForeground 之前存在（O+ 上渠道缺失会直接抛
+     * `IllegalArgumentException: Invalid notification (no valid small icon)` 之外的
+     * 另一类异常），所以先建渠道；渠道建不出来就说明系统通知服务本身不正常，
+     * 这时候任何通知都进不了前台，只能让调用方收摊。
      */
-    private fun goForeground(): Boolean {
+    private fun enterForegroundQuietly(): Boolean {
         runCatching { ensureChannel() }
             .onFailure { Logx.w(TAG, "通知渠道创建失败：${it.message}") }
 
-        val notification = runCatching { buildNotification() }
+        val notification = runCatching { minimalNotification() }
             .getOrElse {
-                Logx.w(TAG, "通知构建失败：${it.message}")
-                buildFallbackNotification()
+                Logx.w(TAG, "最小通知构建失败：${it.message}")
+                return false
             }
-        return runCatching {
+        val at = runCatching {
             startForeground(NOTIFICATION_ID, notification)
-            true
+            SystemClock.elapsedRealtime()
         }.getOrElse {
             Logx.w(TAG, "startForeground 失败：${it.message}")
-            false
+            return false
         }
+        foregroundedAt = at
+        return true
     }
 
     /**
-     * 最简通知。
+     * 死线专用的最小通知。三样静态资源，没有一次查表、没有一次锁。
      *
-     * 正常那条带 PendingIntent 和 action，任一环节出问题（比如包名被改、
-     * 图标资源被裁）都会让 buildNotification 抛异常。而这时候系统仍然要求
-     * 我们进前台 —— 一条只有标题的通知远好过一个必崩的进程。
+     * 刻意不带 `setContentIntent`：PendingIntent 要跨进程解析 Activity，
+     * 在冷启动 / 界面重建期间这一步偶发几十毫秒。进前台不需要它。
      */
-    private fun buildFallbackNotification(): Notification =
+    private fun minimalNotification(): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.notification_title))
@@ -197,6 +228,20 @@ class StreamingService : Service() {
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+
+    /**
+     * 把最小通知换成带「停止」按钮的正式通知。
+     *
+     * 直接用 `notify()` 覆盖，而不是再调一次 `startForeground()`：
+     * 后者每次都会走一遍 foregroundServiceType 的权限校验，一旦某个 ROM
+     * 在这一点上判失败，会把**已经进好的前台状态**搞没。
+     */
+    private fun upgradeNotification() {
+        runCatching {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification())
+        }.onFailure { Logx.w(TAG, "通知升级失败：${it.message}") }
+    }
 
     /** 直接刷通知（不走 startService，后台调用不会被系统拦） */
     private fun refreshNotification() {
@@ -239,7 +284,17 @@ class StreamingService : Service() {
         wakeLock = null
     }
 
-    private fun stopSelfSafely() {
+    /**
+     * 收掉自己。
+     *
+     * [startId] 传具体值走 `stopSelf(id)`：只停到这一次 start 为止。
+     * 无参的 `stopSelf()` 会停掉**所有**已投递的 start —— 上一版就是无参版本，
+     * 而 release() 释放完立刻又 hold() 的路径在手表上很常见（一轮生成结束、
+     * 用户马上追问第二轮）。后一次 start 刚进队列就被前一次的无参 stopSelf
+     * 抹掉，系统那边却仍记着「startForegroundService 过」，10 秒后照样崩。
+     * 传 id 之后，先到的 stop 只能停掉它自己那一次，碰不到后来者。
+     */
+    private fun stopSelfSafely(startId: Int) {
         releaseWakeLock()
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -249,7 +304,8 @@ class StreamingService : Service() {
                 stopForeground(true)
             }
         }
-        stopSelf()
+        foregroundedAt = 0L
+        if (startId >= 0) stopSelf(startId) else stopSelf()
     }
 
     private fun buildNotification(): Notification {
@@ -326,6 +382,18 @@ class StreamingService : Service() {
         /** 唤醒锁最长持有时间，防止异常情况下漏释放把电池耗光 */
         private const val WAKE_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
 
+        /**
+         * 看门狗等多久才认定「这一次没进前台」。
+         *
+         * 系统死线在两代 Android 上不一样：**API 26–30 是 5 秒，API 31 起是 10 秒**。
+         * 按 8 秒取值在 API 31 的设备上是够的，但在 API 30 及更老的机器上
+         * 反而比死线还晚 —— 那等于看门狗刚睁眼，进程已经被带走了。
+         *
+         * 所以取 3 秒：对两代死线都留出至少 2 秒余量，又远大于正常启动耗时
+         * （实测进前台是几十毫秒级）。
+         */
+        private const val DEADLINE_GUARD_MS = 3_000L
+
         private const val RENEW_INTERVAL_MS = 8 * 60 * 1000L
 
         /** 通知上的第二行。跨进程单例，Service 与调用方都读这一份 */
@@ -367,12 +435,48 @@ class StreamingService : Service() {
         /**
          * 最近一次 start() 的时刻。
          *
-         * 只用于诊断：onStartCommand 的主线程排队时间一旦接近系统的 5 秒红线，
+         * 只用于诊断：onStartCommand 的主线程排队时间一旦接近系统的死线（5 或 10 秒），
          * 崩起来是"进程直接没了"、没有任何现场。先把它记进日志，
          * 下次再出问题就能一眼看出是不是主线程被堵住。
          */
         @Volatile
         private var requestedAt: Long = 0L
+
+        /**
+         * 最近一次**成功**进前台（`startForeground` 返回）的时刻。
+         *
+         * 0 表示还没进过。看门狗拿它和本次 start 的时刻比较，判断
+         * 「这一次启动到底进没进前台」—— 只有这个能决定要不要主动撤销。
+         */
+        @Volatile
+        private var foregroundedAt: Long = 0L
+
+        /** 本次 start 的序号，让老的看门狗认得出自己已经过期 */
+        @Volatile
+        private var startSeq: Int = 0
+
+        /**
+         * 被「后台不许起前台服务」挡掉的那次请求。
+         *
+         * 「发完消息立刻息屏」在手表上是常态：那一刻 App 已经不算前台，
+         * 硬起会被 ROM 排队、最后拖成死线异常。但生成还在跑，保活是需要的 ——
+         * 所以先记下来，等 [resumePending] 在界面回到前台时补上。
+         */
+        @Volatile
+        private var pendingStart: Boolean = false
+
+        /**
+         * 界面回到前台时补一次被挡掉的保活。
+         *
+         * 由 `MainActivity.onResume` 调用（界面被系统回收后重建也会走到这里，
+         * 那正是最需要补的一次）。
+         */
+        fun resumePending(context: Context) {
+            if (!pendingStart) return
+            pendingStart = false
+            if (running) return
+            hold(context, REASON_STREAM)
+        }
 
         fun start(context: Context) = hold(context, REASON_STREAM)
 
@@ -390,11 +494,59 @@ class StreamingService : Service() {
 
         fun releaseDevice(context: Context) = release(context, REASON_DEVICE)
 
+        /** 当前这个服务实例有没有成功进过前台 */
+        private fun isForegrounded(): Boolean =
+            instance != null && foregroundedAt > 0L
+
+        /**
+         * 本进程现在算不算「前台」。
+         *
+         * Android 11 起第三方应用调 `getRunningAppProcesses()` 只能看到自己，
+         * 但这里要的恰好就是自己。取到 FOREGROUND_SERVICE（125）为止 ——
+         * 前台服务在跑也算「允许起前台服务」。
+         */
+        fun inForeground(context: Context): Boolean = runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.runningAppProcesses?.any {
+                it.pid == Process.myPid() &&
+                    it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+            } == true
+        }.getOrDefault(false)
+
         private fun hold(context: Context, reason: String) {
+            /*
+             * Android 12 起，**后台不允许起前台服务**。
+             *
+             * 这条限制的可怕之处在于它有两种表现：AOSP 上抛
+             * ForegroundServiceStartNotAllowedException（能被 runCatching 接住），
+             * 而国产 ROM（EMUI 尤其明显）选择「接受请求、排队等应用回前台」——
+             * 不抛异常，ServiceRecord 却已经登记了。于是 onStartCommand 迟迟不来，
+             * 10 秒后由 system_server 往主线程抛 ForegroundServiceDidNotStartInTime，
+             * 整个进程没。1.21.2 那次崩溃就是这个形状：日志上什么都没有，
+             * 只有一行 from ActivityThread$H 的异常。
+             *
+             * 所以从零启动之前先看自己在不在前台：不在就**根本不发这个请求**。
+             * 少一次保活远好过整进程崩溃，况且这种请求在 Android 12 上本来就不会成功。
+             *
+             * 只对「生成」生效：设备操控是用户明确点下去的动作，那时 App 已经
+             * moveTaskToBack，不能按同一条标准拦。
+             */
+            if (reason == REASON_STREAM &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                !running && !inForeground(context)
+            ) {
+                Logx.w(TAG, "应用在后台，跳过前台服务启动（Android 12+ 不允许）")
+                // 记下来，等界面回到前台再补 —— 否则「发完消息立刻息屏」这一轮
+                // 就永远没有保活了，而生成还在跑
+                pendingStart = true
+                return
+            }
             holds.add(reason)
             if (running) return
             running = true
-            requestedAt = SystemClock.elapsedRealtime()
+            val startedAt = SystemClock.elapsedRealtime()
+            requestedAt = startedAt
+            val seq = ++startSeq
             runCatching {
                 ContextCompat.startForegroundService(
                     context,
@@ -408,7 +560,54 @@ class StreamingService : Service() {
                  */
                 holds.remove(reason)
                 running = false
-                Logx.w(TAG, "启动失败：${it.message}")
+                /*
+                 * Android 12 起，后台调 startForegroundService 会抛
+                 * ForegroundServiceStartNotAllowedException。这不是意外，
+                 * 是系统在明确告诉你「现在不允许起前台服务」—— 最典型的
+                 * 来源是定时任务的广播接收器。记清楚，别让人以为是别的毛病。
+                 */
+                Logx.w(TAG, "启动失败（$reason）：${it.javaClass.simpleName}: ${it.message}")
+            }.onSuccess {
+                // 起来了才需要看门狗；异常已经同步抛出，那种情况系统没登记
+                watchForegroundDeadline(context.applicationContext, seq, startedAt)
+            }
+        }
+
+        /**
+         * 死线看门狗：3 秒内没进前台，就**主动撤销这次启动**。
+         *
+         * 系统那头有一条计时器（Android 12 起 10 秒；更早是 5 秒），
+         * 触发时往主线程抛 `ForegroundServiceDidNotStartInTimeException`，
+         * 进程整个没。我们没法延长它，但可以抢在它前面把事情做掉：
+         * `stopService()` 会让 framework 在 `bringDownServiceLocked` 里
+         * `removeMessages(SERVICE_FOREGROUND_TIMEOUT_MSG)`，计时器随之取消。
+         *
+         * 代价是这一次没有前台保护，生成退回普通后台进程 —— 但生成本身
+         * 跑在 Application 作用域里，不会因为这个停；而进程崩掉是全都完蛋。
+         *
+         * 用裸线程而不是 Handler：看门狗要防的正是「主线程不转」，
+         * 把它的执行也放在主线程上，等于在堵住的那条路上再排一个队。
+         */
+        private fun watchForegroundDeadline(app: Context, seq: Int, startedAt: Long) {
+            runCatching {
+                Thread {
+                    runCatching { Thread.sleep(DEADLINE_GUARD_MS) }
+                    // 期间又起了一次新的，这条已经过期，让新的那条去管
+                    if (seq != startSeq) return@Thread
+                    if (foregroundedAt >= startedAt) return@Thread
+                    Logx.w(
+                        TAG,
+                        "3 秒未进前台，主动撤销这次启动" +
+                            "（避免系统的 5/10 秒死线把整个进程带走）",
+                    )
+                    runCatching {
+                        app.stopService(Intent(app, StreamingService::class.java))
+                    }
+                    running = false
+                }.apply {
+                    isDaemon = true
+                    name = "dsh-fgs-deadline"
+                }.start()
             }
         }
 
@@ -417,6 +616,14 @@ class StreamingService : Service() {
             // 还有别的占用者（例如设备操控仍在进行）就不停
             if (holds.isNotEmpty()) return
             running = false
+            /*
+             * 生成已经结束，那次没发出去的保活请求也就作废了。
+             *
+             * 不清的话会留一颗雷：用户回到 App 时 `onResume` 看到 pendingStart
+             * 还是 true，会拉起一个**没有任何任务在跑**的前台服务 ——
+             * 通知栏挂着「正在生成」，实际什么都不做，只能等它自己超时。
+             */
+            pendingStart = false
             progressText = ""
             /*
              * 服务还在就在本进程里直接收：`stopSelf()` 走的路径和 onDestroy
@@ -424,9 +631,13 @@ class StreamingService : Service() {
              * 绕一层 stopService 反而有竞态 —— 服务刚被 startForegroundService
              * 拉起但 onStartCommand 还没跑时，stopService 会把它取消掉，
              * 系统那边仍记着「启动过但没进前台」，于是照样在 5 秒后崩。
+             *
+             * 传 lastStartId 而不是无参：**无参 stopSelf 会停掉所有已投递的 start**。
+             * 「生成结束 → 用户马上追问」在手表上是常态，前一次的无参 stop
+             * 会顺手把后一次刚投递的 start 也抹掉，而系统的死线记账仍然在。
              */
             instance?.let { svc ->
-                runCatching { svc.stopSelfSafely() }
+                runCatching { svc.stopSelfSafely(svc.lastStartId) }
                     .onFailure { Logx.w(TAG, "停止服务失败：${it.message}") }
                 return
             }

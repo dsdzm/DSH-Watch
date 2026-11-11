@@ -6,6 +6,85 @@
 
 ---
 
+## [1.21.4] — 2026-11-11（versionCode 68）
+
+修一个跑满半小时后把整个进程带走的崩溃，以及「设置改了又变回去」。
+
+### 后台服务死在自己的起跑线上
+
+```
+ForegroundServiceDidNotStartInTimeException:
+  Context.startForegroundService() did not then call Service.startForeground():
+  ServiceRecord{eecaeed u0 com.dshwatch/.service.StreamingService}
+```
+
+`startForegroundService()` 之后，系统只给一小段时间等你调 `startForeground()`
+（API 26–30 是 5 秒，API 31 起 10 秒）。到点没看到，就往主线程抛异常，
+**整个进程一起没**，堆栈只停在 `ActivityThread$H`，没有任何现场。
+
+上一版把「进前台」写在 `onStartCommand` 里。它比 `onCreate` 晚一个主线程
+消息周期 —— 平时这点延迟是零，但日志显示界面被系统连续回收重建了三次，
+那时主线程正在跑 Compose 全量重组。这一轮消息排出去超过十秒，
+死线就是这么走完的。崩溃报告里连一条 `onStartCommand 延迟` 都没有，
+说明它根本没轮到执行。
+
+三处改动：
+
+- **进前台挪到 `onCreate`**，并且用一条只含图标和标题的最小通知 ——
+  不查 `DeviceControlHub`、不建 `PendingIntent`。带「停止」按钮的正式通知
+  随后用 `notify()` 覆盖上去，失败也只丢按钮，不影响前台状态。
+- **三秒看门狗**：拉起服务后开一个裸线程，3 秒内没进前台就主动
+  `stopService()`。framework 会在 `bringDownServiceLocked` 里把
+  `SERVICE_FOREGROUND_TIMEOUT_MSG` 摘掉，计时器随之取消 —— 抢在它引爆之前撤。
+  用裸线程而不是 Handler，是因为要防的正是「主线程不转」。
+- **`stopSelf()` 改成 `stopSelf(startId)`**。无参会停掉所有已投递的 start：
+  「生成结束 → 用户马上追问」时，前一次的无参 stop 会把后一次刚投递的 start
+  一起抹掉，系统的死线记账却还在。这是第二条只在实机上偶发的崩溃路径。
+- **应用在后台时根本不发这个请求**。Android 12 起后台不允许起前台服务，
+  AOSP 会抛异常，而国产 ROM（EMUI 尤其明显）选择「接受请求、排队等回前台」——
+  不抛异常，ServiceRecord 却登记了，死线照走。用户这次崩的就是这个形状：
+  日志上什么都没有，只有一行来自 `ActivityThread$H` 的异常。
+  少一次保活，远好过整个进程被带走。
+
+### 定时任务的后台服务从来就没起来过
+
+`BiliDailyReceiver` 在广播里直接 `startForegroundService()`。Android 12 起，
+广播接收器这类后台上下文**不允许**起前台服务，会同步抛
+`ForegroundServiceStartNotAllowedException` —— 被 `runCatching` 吞掉，
+日志上看起来「启动过了」，其实一行保活都没有。
+
+现在先前台判断：在就正常起，不在就明说这一轮没保活，不再制造假成功。
+
+### 设置改了又变回去
+
+```
+E/Settings 写入设置失败 · J: JobCancellationException:
+  StandaloneCoroutine was cancelled
+  (rememberCoroutineScope left the composition)
+```
+
+界面层用 `rememberCoroutineScope()` 写设置。手表上这个作用域死得极其频繁 ——
+设置页停着不动、屏幕一黑，系统就把 Activity 回收了，composition 一散，
+scope 连同里面正在跑的 `DataStore.edit` 一起取消。用户看到的就是
+「调好的滑块，过一会儿自己弹回去了」。
+
+`SettingsRepository.update()` 现在用 `withContext(NonCancellable)` 包住写入：
+界面可以没，用户已经做出的这个决定不能被一起带走。DataStore 的 edit 本身
+是事务性的，跑完就是原子落盘。
+
+### 顺带
+
+新增 5 条结构测试守住上面这些约束 —— 它们都编译得过、也不会在正常路径上
+冒出来，只能靠源码形状盯住：
+
+- 进前台必须在 `onCreate` 里
+- 进前台失败必须自停（带 `startId`）
+- 不许出现无参 `stopSelfSafely()`
+- `startForegroundService` 之后必须挂看门狗
+- 看门狗时限必须短于 5 秒（对两代死线都留余量）
+
+---
+
 ## [1.21.3] — 2026-11-11（versionCode 67）
 
 修「Shizuku 装着、服务在跑、里面也勾了本应用，App 还是说没连上」。

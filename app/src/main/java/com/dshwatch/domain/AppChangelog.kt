@@ -23,6 +23,12 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.21.4",
+            date = "2026-11-11",
+            // 纯修复版：后台服务死线、定时任务保活、设置写入，没有新能力
+            highlights = emptyList(),
+        ),
+        ChangelogEntry(
             version = "1.21.3",
             date = "2026-11-11",
             // 纯修复版：只补了清单里漏掉的一条 API 权限声明，没有新能力
