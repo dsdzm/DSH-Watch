@@ -455,6 +455,29 @@ class StreamingService : Service() {
         @Volatile
         private var startSeq: Int = 0
 
+        /**
+         * 被「后台不许起前台服务」挡掉的那次请求。
+         *
+         * 「发完消息立刻息屏」在手表上是常态：那一刻 App 已经不算前台，
+         * 硬起会被 ROM 排队、最后拖成死线异常。但生成还在跑，保活是需要的 ——
+         * 所以先记下来，等 [resumePending] 在界面回到前台时补上。
+         */
+        @Volatile
+        private var pendingStart: Boolean = false
+
+        /**
+         * 界面回到前台时补一次被挡掉的保活。
+         *
+         * 由 `MainActivity.onResume` 调用（界面被系统回收后重建也会走到这里，
+         * 那正是最需要补的一次）。
+         */
+        fun resumePending(context: Context) {
+            if (!pendingStart) return
+            pendingStart = false
+            if (running) return
+            hold(context, REASON_STREAM)
+        }
+
         fun start(context: Context) = hold(context, REASON_STREAM)
 
         fun stop(context: Context) = release(context, REASON_STREAM)
@@ -513,6 +536,9 @@ class StreamingService : Service() {
                 !running && !inForeground(context)
             ) {
                 Logx.w(TAG, "应用在后台，跳过前台服务启动（Android 12+ 不允许）")
+                // 记下来，等界面回到前台再补 —— 否则「发完消息立刻息屏」这一轮
+                // 就永远没有保活了，而生成还在跑
+                pendingStart = true
                 return
             }
             holds.add(reason)
