@@ -54,6 +54,12 @@
       （不是没有安装器，是查不到），据此做判断会误报「无法安装」。
     -->
     <queries>
+        <!--
+          Android 11+ 的包可见性：不声明这一段，getPackageInfo 会直接抛
+          NameNotFoundException，Shizuku 明明装了也会被判成「未安装」。
+          这里写的是应用的包名，不是权限前缀。
+        -->
+        <package android:name="moe.shizuku.privileged.api" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="application/vnd.android.package-archive" />

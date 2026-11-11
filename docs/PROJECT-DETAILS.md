@@ -15,7 +15,7 @@
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
 | 工具链 | AGP 8.7.3 · Kotlin 2.0.21 · Gradle 8.11.1 |
 | 主要依赖 | OkHttp 4.12、Compose BOM 2024.10、kotlinx.serialization、DataStore、Rhino 1.9.1 |
-| 规模 | 212 个 Kotlin 文件 / 56.9k 行；86 个测试文件 / 880 个用例 |
+| 规模 | 212 个 Kotlin 文件 / 56.9k 行；86 个测试文件 / 882 个用例 |
 | 体积 | 8.2 MB，单一通用包（v7a / v8a / x86 / x86_64） |
 
 **没有第二个体积档位**。v1.12 移除了本地 Python 引擎（Chaquopy 与 `libpython3.11.so`，约 20 MB），

@@ -6,6 +6,35 @@
 
 ---
 
+## [1.21.2] — 2026-11-11（versionCode 66）
+
+修一个「装了、跑了、授权了，App 还是说你没装」的判定错误。
+
+### 包名写成了权限前缀
+
+```kotlin
+const val PACKAGE = "moe.shizuku.manager"   // 错
+const val PACKAGE = "moe.shizuku.privileged.api"  // 对
+```
+
+`moe.shizuku.manager` 是它**权限名里的前缀**（`moe.shizuku.manager.permission.API_V23`），
+不是应用包名。用 `getPackageInfo` 查一个不存在的包会抛 `NameNotFoundException`，
+被 `runCatching` 吞掉后返回 `false` —— 于是 `state()` 第一关就判成
+`NOT_INSTALLED`，后面「服务没运行」「没授权」两个分支永远走不到。
+
+设置页里「打开 Shizuku」按钮也是拿这个常量拼 intent，所以那个按钮同样没反应。
+
+### Android 11+ 还要声明包可见性
+
+就算包名写对，`getPackageInfo` 在 Android 11 及以上默认只能看到自己声明过的包。
+`<queries>` 里没有 `<package android:name="moe.shizuku.privileged.api" />` 时，
+系统直接抛 `NameNotFoundException`，表现和「没装」一模一样。
+
+这两条是同一个症状的两个独立原因，只修一个仍然会误报。
+现在设置页能按真实状态显示：未安装 / 服务未运行（去启动）/ 未授权（去授权）/ 已就绪。
+
+---
+
 ## [1.21.1] — 2026-11-11（versionCode 65）
 
 把 1.20 引入的工具按需取用整个移除，工具表恢复全量下发。

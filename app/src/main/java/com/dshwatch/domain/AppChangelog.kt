@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.21.2",
+            date = "2026-11-11",
+            highlights = listOf(
+                "修好「装了 Shizuku、也授权了，App 仍说没装」：之前查的包名写错了",
+                "补上 Android 11+ 的包可见性声明，查询不再被系统拦掉",
+                "设置页的「打开 Shizuku」按钮现在能真的跳过去",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.21.1",
             date = "2026-11-11",
             highlights = listOf(

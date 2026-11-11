@@ -37,7 +37,15 @@ object ShizukuShell {
     /** 单次返回给模型的上限：日志类命令动辄几 MB，全塞进上下文等于烧钱 */
     private const val MAX_OUTPUT = 12_000
 
-    const val PACKAGE = "moe.shizuku.manager"
+    /**
+     * Shizuku 的**应用包名**。
+     *
+     * 注意别写成 `moe.shizuku.manager` —— 那是它的**权限前缀**
+     * （`moe.shizuku.manager.permission.API_V23`），不是包名。
+     * 写成权限前缀会让 [installed] 永远返回 false，表现为「装了、跑了、授权了，
+     * App 还是说没装」。
+     */
+    const val PACKAGE = "moe.shizuku.privileged.api"
 
     data class Outcome(
         val exitCode: Int,
