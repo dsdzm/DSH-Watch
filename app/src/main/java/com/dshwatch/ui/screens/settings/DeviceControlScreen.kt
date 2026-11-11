@@ -73,6 +73,9 @@ fun DeviceControlScreen(
     var exempt by remember { mutableStateOf(BatteryKeepAlive.isExempt(context)) }
     // Shizuku 的状态随时会变（用户切出去启动服务/授权再回来），跟着同一个轮询走
     var shellState by remember { mutableStateOf(ShizukuShell.state(context)) }
+    // 连不上时展开的一行行自查结果。手表上复制粘贴很别扭，直接把结果摊在屏幕上，
+    // 截图就能问人。
+    var showDiag by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         var tick = 0
         while (true) {
@@ -222,7 +225,7 @@ fun DeviceControlScreen(
                     ShizukuShell.State.NOT_INSTALLED ->
                         if (zh) "未安装 Shizuku" else "Shizuku not installed"
                     ShizukuShell.State.NOT_RUNNING ->
-                        if (zh) "Shizuku 未运行" else "Shizuku not running"
+                        if (zh) "没连上 Shizuku 服务" else "Not connected to Shizuku"
                     ShizukuShell.State.NOT_GRANTED ->
                         if (zh) "已连接，未授权给 DSH" else "Running, not granted"
                     ShizukuShell.State.READY ->
@@ -266,11 +269,13 @@ fun DeviceControlScreen(
                         ShizukuShell.State.NOT_RUNNING -> {
                             HintText(
                                 if (zh) {
-                                    "Shizuku 装着但服务没起来。打开它，按提示启动（Android 11+ 用无线调试，" +
-                                        "重启手机后需要重新启动一次）。"
+                                    "已经装了 Shizuku，但本应用没拿到它的连接。先打开 Shizuku 确认服务在运行，" +
+                                        "再从最近任务里划掉本应用重新打开 —— 服务重启后不会主动重推连接，" +
+                                        "老进程会一直拿着一个已经死掉的。"
                                 } else {
-                                    "Installed but the service is not running. Open Shizuku and start " +
-                                        "it (wireless debugging on Android 11+; restart after reboot)."
+                                    "Shizuku is installed but this app has no connection to it. Open " +
+                                        "Shizuku, make sure the service is running, then swipe this app " +
+                                        "away and reopen it — a restarted service does not re-push."
                                 },
                             )
                             Spacer(Modifier.height(6.dp))
@@ -286,6 +291,23 @@ fun DeviceControlScreen(
                                     }
                                 },
                             )
+                            Spacer(Modifier.height(6.dp))
+                            GhostButton(
+                                text = if (zh) {
+                                    if (showDiag) "收起诊断" else "连接诊断"
+                                } else {
+                                    if (showDiag) "Hide diagnostics" else "Diagnostics"
+                                },
+                                onClick = { showDiag = !showDiag },
+                            )
+                            if (showDiag) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = ShizukuShell.diagnose(context),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
 
                         ShizukuShell.State.NOT_GRANTED -> {
