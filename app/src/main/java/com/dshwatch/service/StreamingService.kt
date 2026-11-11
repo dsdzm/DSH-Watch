@@ -435,7 +435,7 @@ class StreamingService : Service() {
         /**
          * 最近一次 start() 的时刻。
          *
-         * 只用于诊断：onStartCommand 的主线程排队时间一旦接近系统的 5 秒红线，
+         * 只用于诊断：onStartCommand 的主线程排队时间一旦接近系统的死线（5 或 10 秒），
          * 崩起来是"进程直接没了"、没有任何现场。先把它记进日志，
          * 下次再出问题就能一眼看出是不是主线程被堵住。
          */
@@ -574,9 +574,9 @@ class StreamingService : Service() {
         }
 
         /**
-         * 死线看门狗：8 秒内没进前台，就**主动撤销这次启动**。
+         * 死线看门狗：3 秒内没进前台，就**主动撤销这次启动**。
          *
-         * 系统那头有一条 10 秒的计时器（Android 12 起；更早是 5 秒），
+         * 系统那头有一条计时器（Android 12 起 10 秒；更早是 5 秒），
          * 触发时往主线程抛 `ForegroundServiceDidNotStartInTimeException`，
          * 进程整个没。我们没法延长它，但可以抢在它前面把事情做掉：
          * `stopService()` 会让 framework 在 `bringDownServiceLocked` 里
