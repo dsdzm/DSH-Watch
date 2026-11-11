@@ -1,11 +1,9 @@
 package com.dshwatch.service
 
-import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Process
 import com.dshwatch.DshWatchApp
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.bili.BiliSchedule
@@ -50,7 +48,9 @@ class BiliDailyReceiver : BroadcastReceiver() {
         //
         // 所以先看自己在不在前台：在就正常起；不在就明说没保活，
         // 让用户知道这一轮结果可能因为熄屏而中断，而不是留一条假的成功日志。
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !inForeground(context)) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            !StreamingService.inForeground(context)
+        ) {
             Logx.w(TAG, "Android 12+ 后台不允许启动前台服务，本轮不做保活（熄屏可能中断）")
         } else {
             runCatching { StreamingService.start(context) }
@@ -60,20 +60,6 @@ class BiliDailyReceiver : BroadcastReceiver() {
         runCatching { app.container.engine.send(BiliSchedule.prompt(settings)) }
             .onFailure { Logx.w(TAG, "定时任务启动失败：${it.message}") }
     }
-
-    /**
-     * 本进程现在算不算「前台」。
-     *
-     * Android 11 起第三方应用调 getRunningAppProcesses() 只能看到自己这一个进程，
-     * 查别人的隐私被关掉了，但查自己恰好还够用 —— 这里要的就是自己。
-     */
-    private fun inForeground(context: Context): Boolean = runCatching {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        am.runningAppProcesses?.any {
-            it.pid == Process.myPid() &&
-                it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
-        } == true
-    }.getOrDefault(false)
 
     private companion object {
         const val TAG = "BiliDaily"

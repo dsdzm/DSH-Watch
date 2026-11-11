@@ -40,6 +40,11 @@ ForegroundServiceDidNotStartInTimeException:
 - **`stopSelf()` 改成 `stopSelf(startId)`**。无参会停掉所有已投递的 start：
   「生成结束 → 用户马上追问」时，前一次的无参 stop 会把后一次刚投递的 start
   一起抹掉，系统的死线记账却还在。这是第二条只在实机上偶发的崩溃路径。
+- **应用在后台时根本不发这个请求**。Android 12 起后台不允许起前台服务，
+  AOSP 会抛异常，而国产 ROM（EMUI 尤其明显）选择「接受请求、排队等回前台」——
+  不抛异常，ServiceRecord 却登记了，死线照走。用户这次崩的就是这个形状：
+  日志上什么都没有，只有一行来自 `ActivityThread$H` 的异常。
+  少一次保活，远好过整个进程被带走。
 
 ### 定时任务的后台服务从来就没起来过
 

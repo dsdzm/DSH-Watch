@@ -1,5 +1,6 @@
 package com.dshwatch.service
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -473,7 +475,46 @@ class StreamingService : Service() {
         private fun isForegrounded(): Boolean =
             instance != null && foregroundedAt > 0L
 
+        /**
+         * 本进程现在算不算「前台」。
+         *
+         * Android 11 起第三方应用调 `getRunningAppProcesses()` 只能看到自己，
+         * 但这里要的恰好就是自己。取到 FOREGROUND_SERVICE（125）为止 ——
+         * 前台服务在跑也算「允许起前台服务」。
+         */
+        fun inForeground(context: Context): Boolean = runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.runningAppProcesses?.any {
+                it.pid == Process.myPid() &&
+                    it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE
+            } == true
+        }.getOrDefault(false)
+
         private fun hold(context: Context, reason: String) {
+            /*
+             * Android 12 起，**后台不允许起前台服务**。
+             *
+             * 这条限制的可怕之处在于它有两种表现：AOSP 上抛
+             * ForegroundServiceStartNotAllowedException（能被 runCatching 接住），
+             * 而国产 ROM（EMUI 尤其明显）选择「接受请求、排队等应用回前台」——
+             * 不抛异常，ServiceRecord 却已经登记了。于是 onStartCommand 迟迟不来，
+             * 10 秒后由 system_server 往主线程抛 ForegroundServiceDidNotStartInTime，
+             * 整个进程没。1.21.2 那次崩溃就是这个形状：日志上什么都没有，
+             * 只有一行 from ActivityThread$H 的异常。
+             *
+             * 所以从零启动之前先看自己在不在前台：不在就**根本不发这个请求**。
+             * 少一次保活远好过整进程崩溃，况且这种请求在 Android 12 上本来就不会成功。
+             *
+             * 只对「生成」生效：设备操控是用户明确点下去的动作，那时 App 已经
+             * moveTaskToBack，不能按同一条标准拦。
+             */
+            if (reason == REASON_STREAM &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                !running && !inForeground(context)
+            ) {
+                Logx.w(TAG, "应用在后台，跳过前台服务启动（Android 12+ 不允许）")
+                return
+            }
             holds.add(reason)
             if (running) return
             running = true
