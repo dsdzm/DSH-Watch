@@ -24,6 +24,21 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
+      Shizuku 的 API 权限。**这一条不是可选的。**
+
+      Shizuku 服务端在推 binder 之前会读目标应用的 requestedPermissions，只认
+      两个名字：MANAGER（它自己的管理器）和 API_V23（第三方客户端）。两个都不在
+      就直接 continue —— 不报错、不提示、不推 binder。客户端这边表现为
+      Shizuku.pingBinder() 永远 false，于是 state() 判成「未运行」，
+      哪怕 Shizuku 装着、服务跑着、里面也勾了本应用。
+
+      下面 provider 上的 android:permission 是**另一件事**（要求调用方持有它），
+      有它不代表自己申请过。曾经因为只看 provider 属性、漏了这一行，
+      单测也照样通过（断言匹配到了 provider 里那个同名字符串）。
+    -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <!--
       内置文件浏览器：读「下载 / 文档 / 图片 / 相机」这些公共目录。
 
       两档，因为 Android 在这里改过一次规则：

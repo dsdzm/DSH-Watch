@@ -47,6 +47,24 @@ object ShizukuShell {
      */
     const val PACKAGE = "moe.shizuku.privileged.api"
 
+    /**
+     * Shizuku 的 API 权限名。**必须在清单里以 `<uses-permission>` 申请。**
+     *
+     * Shizuku 服务端的 `BinderSender` 是这么筛应用的：
+     *
+     * ```
+     * 读目标应用的 requestedPermissions
+     *   有 MANAGER  → 它是 Shizuku 管理器自己
+     *   有 API_V23  → 推 binder 给它
+     *   都没有      → continue（不报错、不提示、不推）
+     * ```
+     *
+     * 少这一条，`Shizuku.pingBinder()` 永远是 false，界面上表现为
+     * 「Shizuku 装好了、服务跑着、里面也勾了本应用，但 App 说没运行」。
+     * provider 上那个 `android:permission` 是要求**调用方**持有它，跟自己是两回事。
+     */
+    const val API_PERMISSION = "moe.shizuku.manager.permission.API_V23"
+
     data class Outcome(
         val exitCode: Int,
         val stdout: String,
@@ -84,6 +102,46 @@ object ShizukuShell {
         !binderAlive() -> State.NOT_RUNNING
         !granted() -> State.NOT_GRANTED
         else -> State.READY
+    }
+
+    /**
+     * 自查结果，一行一条。
+     *
+     * 「装了却说没运行」有好几种互不相干的原因，光看 [state] 分不出来：binder
+     * 没推过来、自己没申请 API 权限、服务被杀之后没重推。真机上排查一次要来回
+     * 好几轮，所以把这几项直接摊开给人看，比猜快。
+     *
+     * 其中「已申请 API 权限」是决定性的一项：Shizuku 服务端不申请就不推 binder，
+     * 而且全程不报错，这是唯一能直接看出问题的地方。
+     */
+    fun diagnose(context: Context): String = buildString {
+        val pkg = context.packageName
+        append("包名 ").append(pkg).append('\n')
+        append("进程 uid ").append(android.os.Process.myUid()).append('\n')
+
+        val self = runCatching {
+            context.packageManager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS)
+        }.getOrNull()
+        val asked = self?.requestedPermissions?.contains(API_PERMISSION) == true
+        append("已申请 API 权限 ").append(if (asked) "是" else "否 ← 为否时 Shizuku 不会推 binder").append('\n')
+
+        val sz = runCatching {
+            context.packageManager.getPackageInfo(PACKAGE, 0)
+        }.getOrNull()
+        append("Shizuku ").append(if (sz != null) "已安装 ${sz.versionName}" else "未安装").append('\n')
+
+        val alive = binderAlive()
+        append("binder ").append(if (alive) "已连接" else "未连接").append('\n')
+        if (alive) {
+            append("服务版本 ").append(runCatching { Shizuku.getVersion() }.getOrDefault(-1)).append('\n')
+            val ok = runCatching {
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            }.getOrDefault(false)
+            append("授权 ").append(if (ok) "已授予" else "未授予")
+        } else {
+            append("排查顺序：① 上面那行权限是否为「是」 ② Shizuku 里服务是否在运行 " +
+                "③ 从最近任务划掉本应用再打开（服务重启后不会主动重推）")
+        }
     }
 
     /**

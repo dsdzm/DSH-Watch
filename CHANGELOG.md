@@ -6,6 +6,41 @@
 
 ---
 
+## [1.21.3] — 2026-11-11（versionCode 67）
+
+修「Shizuku 装着、服务在跑、里面也勾了本应用，App 还是说没连上」。
+
+### 少了一行 uses-permission
+
+```xml
+<uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+```
+
+Shizuku 服务端推 binder 之前会读目标应用的 `requestedPermissions`，只认两个名字：
+`MANAGER`（它自己的管理器）和 `API_V23`（第三方客户端）。两个都不在就 `continue`
+—— 不报错、不提示、不推 binder。客户端这边 `Shizuku.pingBinder()` 于是永远
+`false`，`state()` 判成「未运行」。
+
+1.21.2 修的是「认不出装了没」，这一条修的是「认出来了也连不上」。两处都在同一段
+流程上，症状很像，但原因完全无关。
+
+### 上一版为什么没测出来
+
+`ShizukuManifestTest` 里那条断言写的是 `manifest.contains("moe.shizuku.manager.permission.API_V23")`
+—— 而 provider 上的 `android:permission="moe.shizuku.manager.permission.API_V23"`
+里就有这个字符串。**测试一直是假通过**：它匹配到的是「要求调用方持有该权限」，
+不是「自己申请了该权限」。
+
+现在改成解析所有 `<uses-permission>` 的 `android:name` 再断言，两个概念分开测。
+
+### 连不上时能自己看原因
+
+设置页「没连上 Shizuku 服务」下面多了「连接诊断」，展开显示一行行自查结果：
+是否申请了 API 权限、Shizuku 版本、binder 是否连接、服务版本与授权状态。
+手表上复制粘贴很别扭，所以直接把结果摊在屏幕上，截图就能问人。
+
+---
+
 ## [1.21.2] — 2026-11-11（versionCode 66）
 
 修一个「装了、跑了、授权了，App 还是说你没装」的判定错误。
