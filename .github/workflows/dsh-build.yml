@@ -3,9 +3,10 @@
 # 由手表端 App 的 cloud_build 工具触发，用来在云端构建本项目的 APK ——
 # 手表上改代码、云端出可安装的包，这是本机永远做不到的那一类需求。
 #
-# 说明：release 包需要签名密钥（仓库里不含密钥，见 README 的「正式签名」）。
-# 想在云端出正式签名包，把 keystore 用 base64 存进仓库 Secrets
-# 并在这里解码即可；默认产出的是可直接安装的 debug 包。
+# 说明：release 包必须签名才能安装。仓库里不含密钥，所以默认产出的是
+# unsigned 包 —— 能构建、装不上。要云端直接出可安装的包，把 keystore
+# 转成 base64 存进四个 Secrets（见下方 Sign APKs 步骤），不配也能跑，
+# 只是会在 Job Summary 里说明产物未签名。
 
 name: Build APK
 
@@ -296,9 +297,71 @@ jobs:
         if: always()
         shell: bash
         run: |
+          set -uo pipefail
           mkdir -p dsh-out
           find "${PROJECT_DIR:-.}/app/build/outputs/apk" -name "*.apk" -exec cp {} dsh-out/ \; || true
           ls -la dsh-out || true
+
+          # 构建被中断时 Gradle 会留下半截 apk：文件在、能上传、装的时候才报
+          # 「解析软件包时出现问题」。这里当场判死，日志第一屏就能看到原因。
+          shopt -s nullglob
+          for f in dsh-out/*.apk; do
+            if ! unzip -tq "$f" > /dev/null 2>&1; then
+              echo "::error::产物损坏（缺 zip 中央目录，多半是构建中断或磁盘写满）：$f"
+              exit 1
+            fi
+            if [ "$(stat -c%s "$f")" -lt 3000000 ]; then
+              echo "::error::产物只有 $(stat -c%s "$f") 字节，疑似未完成：$f"
+              exit 1
+            fi
+          done
+
+      # 可选签名。四个 Secret 配齐就出可直接安装的包；不配则保持 unsigned，
+      # 但会在 Job Summary 里说清楚「装了会失败」，而不是让人自己猜。
+      - name: Sign APKs
+        if: always()
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KS_B64:-}" ] || [ -z "${KS_PASS:-}" ]; then
+            {
+              echo "### 产物未签名"
+              echo ""
+              echo "没有配置 \`ANDROID_KEYSTORE_BASE64\` / \`ANDROID_KEYSTORE_PASSWORD\` / \`ANDROID_KEY_ALIAS\` / \`ANDROID_KEY_PASSWORD\`。"
+              echo "APK 本身是好的，但 Android 拒绝安装未签名的包 —— 下载后需要本地 apksigner 签名。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)"
+          printf '%s' "$KS_B64" | base64 -d > /tmp/dsh-ks.jks
+          trap 'rm -f /tmp/dsh-ks.jks' EXIT
+
+          for f in dsh-out/*.apk; do
+            "$BT/zipalign" -f -p 4 "$f" "$f.aligned"
+            OUT="${f%.apk}"; OUT="${OUT/-unsigned/}-signed.apk"
+            "$BT/apksigner" sign --ks /tmp/dsh-ks.jks --ks-key-alias "${KEY_ALIAS:-dsh}" \
+              --ks-pass "pass:$KS_PASS" --key-pass "pass:${KEY_PASS:-$KS_PASS}" \
+              --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+              --out "$OUT" "$f.aligned"
+            "$BT/apksigner" verify --print-certs "$OUT" | head -3
+            rm -f "$f" "$f.aligned"
+          done
+
+          {
+            echo "### 产物已签名"
+            echo ""
+            echo '| 文件 | 大小 |'
+            echo '| --- | --- |'
+            for f in dsh-out/*.apk; do
+              echo "| \`$(basename "$f")\` | $(stat -c%s "$f") B |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()
