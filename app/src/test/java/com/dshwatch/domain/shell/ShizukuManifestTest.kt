@@ -55,7 +55,30 @@ class ShizukuManifestTest {
     fun `清单注册了 ShizukuProvider`() {
         assertThat(manifest).contains("rikka.shizuku.ShizukuProvider")
         assertThat(manifest).contains("\${applicationId}.shizuku")
-        // 这里说的是 provider 属性，与上面那条 uses-permission 是两回事
-        assertThat(manifest).contains("""android:permission="moe.shizuku.manager.permission.API_V23"""")
+    }
+
+    @Test
+    fun `provider 的访问权限是 shell 持有的系统权限，不是 API_V23`() {
+        /*
+         * 这条踩过一次，而且踩了很久。
+         *
+         * 来 provider 里推 binder 的是 **Shizuku 服务端进程（uid 2000 shell）**，
+         * 不是 Shizuku 应用本体。API_V23 是签名级权限，只有 Shizuku 本体持有；
+         * shell 没有。于是 AMS 的 checkComponentPermission 直接把请求拦下，
+         * 服务端只留一句 "provider is null"，客户端 pingBinder() 永远 false。
+         *
+         * 界面上表现为「已安装 / 已申请 API 权限 是 / binder 未连接」——
+         * 三项全绿却连不上，光看界面完全推不出原因。
+         *
+         * 正确值是官方文档给的示例：INTERACT_ACROSS_USERS_FULL，
+         * shell 有、普通第三方应用没有。
+         */
+        val idx = manifest.indexOf("rikka.shizuku.ShizukuProvider")
+        assertThat(idx).isGreaterThan(0)
+        val perm = Regex("""android:permission="([^"]+)"""")
+            .find(manifest.substring(idx))
+            ?.groupValues?.get(1)
+        assertThat(perm).isEqualTo("android.permission.INTERACT_ACROSS_USERS_FULL")
+        assertThat(perm).isNotEqualTo("moe.shizuku.manager.permission.API_V23")
     }
 }

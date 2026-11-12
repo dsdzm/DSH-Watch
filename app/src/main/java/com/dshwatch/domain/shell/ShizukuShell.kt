@@ -31,6 +31,9 @@ object ShizukuShell {
 
     private const val TAG = "ShizukuShell"
 
+    /** 清单里注册的 provider 类名，诊断时用它从 PackageInfo 里挑出自己那一条 */
+    private const val PROVIDER_NAME = "rikka.shizuku.ShizukuProvider"
+
     /** 申请权限用的 requestCode，设置页与这里共用 */
     const val REQUEST_CODE = 4213
 
@@ -64,6 +67,38 @@ object ShizukuShell {
      * provider 上那个 `android:permission` 是要求**调用方**持有它，跟自己是两回事。
      */
     const val API_PERMISSION = "moe.shizuku.manager.permission.API_V23"
+
+    /**
+     * 有没有「收到过」binder。
+     *
+     * 与 [binderAlive] 不是一回事：服务端被杀之后 binder 会变成 dead，
+     * 但我们是收到过的。分开记才能区分「推送从来没成功」和「推送成功过、
+     * 服务后来没了」—— 这两种的修法完全不同。
+     */
+    @Volatile
+    private var everReceived = false
+
+    /**
+     * 挂上 binder 的到达/死亡监听。
+     *
+     * Shizuku 是**推送**模型：服务端只在进程启动、变成活跃这些时机推一次，
+     * 推不进来也不会重试。所以不能只在点按钮时 ping 一下 —— 推送如果比
+     * 界面晚到，界面就会一直停在「未连接」，用户只能反复划掉重开。
+     * sticky 版本在注册时如果已经有 binder 会立刻回调一次。
+     *
+     * 必须在进程最早的时候调用，晚于第一次 ping 就可能错过推送。
+     */
+    fun installListeners() {
+        runCatching {
+            Shizuku.addBinderReceivedListenerSticky {
+                everReceived = true
+                Logx.i(TAG, "binder 已送达")
+            }
+            Shizuku.addBinderDeadListener {
+                Logx.w(TAG, "binder 已断开（Shizuku 服务停了）")
+            }
+        }.onFailure { Logx.w(TAG, "挂 binder 监听失败：${it.message}") }
+    }
 
     data class Outcome(
         val exitCode: Int,
@@ -120,10 +155,29 @@ object ShizukuShell {
         append("进程 uid ").append(android.os.Process.myUid()).append('\n')
 
         val self = runCatching {
-            context.packageManager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS)
+            context.packageManager.getPackageInfo(
+                pkg,
+                PackageManager.GET_PERMISSIONS or PackageManager.GET_PROVIDERS,
+            )
         }.getOrNull()
         val asked = self?.requestedPermissions?.contains(API_PERMISSION) == true
         append("已申请 API 权限 ").append(if (asked) "是" else "否 ← 为否时 Shizuku 不会推 binder").append('\n')
+
+        /*
+         * provider 的 android:permission 决定了「shell 能不能把 binder 推进来」。
+         * 这一行以前不显示，于是出现过最坑的组合：上面两项全绿、binder 未连接，
+         * 现场没有任何线索。现在直接把实际生效的值打出来。
+         */
+        val prov = self?.providers?.firstOrNull { it.name == PROVIDER_NAME }
+        val provPerm = prov?.readPermission ?: prov?.writePermission
+        append("provider 权限 ").append(
+            when {
+                prov == null -> "未注册 ← 清单漏了 ShizukuProvider"
+                provPerm == null -> "未声明 ← 任何人都能调，不该这样"
+                provPerm == "android.permission.INTERACT_ACROSS_USERS_FULL" -> "正确"
+                else -> "$provPerm ← 应为 INTERACT_ACROSS_USERS_FULL"
+            },
+        ).append('\n')
 
         val sz = runCatching {
             context.packageManager.getPackageInfo(PACKAGE, 0)
@@ -132,6 +186,9 @@ object ShizukuShell {
 
         val alive = binderAlive()
         append("binder ").append(if (alive) "已连接" else "未连接").append('\n')
+        if (!alive) {
+            append("收到过 binder ").append(if (everReceived) "是（服务后来断了）" else "否").append('\n')
+        }
         if (alive) {
             append("服务版本 ").append(runCatching { Shizuku.getVersion() }.getOrDefault(-1)).append('\n')
             val ok = runCatching {
@@ -139,7 +196,7 @@ object ShizukuShell {
             }.getOrDefault(false)
             append("授权 ").append(if (ok) "已授予" else "未授予")
         } else {
-            append("排查顺序：① 上面那行权限是否为「是」 ② Shizuku 里服务是否在运行 " +
+            append("排查顺序：① provider 权限那行是否为「正确」 ② Shizuku 里服务是否在运行 " +
                 "③ 从最近任务划掉本应用再打开（服务重启后不会主动重推）")
         }
     }

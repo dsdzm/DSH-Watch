@@ -23,6 +23,12 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.21.5",
+            date = "2026-11-12",
+            // 纯修复版：Shizuku provider 的访问权限写错，binder 推不进来
+            highlights = emptyList(),
+        ),
+        ChangelogEntry(
             version = "1.21.4",
             date = "2026-11-11",
             // 纯修复版：后台服务死线、定时任务保活、设置写入，没有新能力

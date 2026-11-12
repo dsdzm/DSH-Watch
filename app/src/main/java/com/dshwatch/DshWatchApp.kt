@@ -23,6 +23,11 @@ class DshWatchApp : Application() {
         // 晚一步就会表现为「授权成功但 newProcess 拿不到 binder」。
         runCatching { rikka.shizuku.ShizukuProvider.enableMultiProcessSupport(true) }
         super.onCreate()
+
+        // 监听 binder 送达。Shizuku 是推送模型，只在进程启动/变活跃时推一次，
+        // 推不进来不会重试；界面不能只靠点按钮那一刻的 ping 判断。
+        // 越早挂越好（sticky 版会在已经有 binder 时立刻回调一次）。
+        com.dshwatch.domain.shell.ShizukuShell.installListeners()
         // 最开头就写下"启动中"标记。
         //
         // 顺序很重要：必须在任何可能崩的事情之前。这个 App 启动路径上有几个

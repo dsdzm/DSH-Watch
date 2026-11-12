@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
@@ -58,6 +59,14 @@ fun MathView(
     color: Color = Color.Unspecified,
     fontSize: Float = 20f,
     compact: Boolean = false,
+    /**
+     * 高度上限。
+     *
+     * 只在圆屏全屏时用：公式卡片是个矩形，宽度收到了圆内，高度一超四角照样
+     * 会冲出圆周。传了上限，超出的部分**整体等比缩小**，不是裁掉 ——
+     * 多行公式（矩阵、多行推导）在手表上本来也读不清，缩进圆里至少完整。
+     */
+    maxHeight: Dp? = null,
 ) {
     val measurer = rememberTextMeasurer(cacheSize = 64)
     val resolved = if (color == Color.Unspecified) Color(0xFFE8E8F0) else color
@@ -74,17 +83,26 @@ fun MathView(
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         // 高度跟着盒子走：固定高度会把多行公式裁掉，自适应又需要密度换算
-        val heightDp = with(LocalDensity.current) { (box.height + 6f).toDp() }
+        val natural = with(LocalDensity.current) { (box.height + 6f).toDp() }
+        val heightDp = if (maxHeight != null && natural > maxHeight) maxHeight else natural
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(heightDp),
         ) {
-            val scale = if (box.width > size.width - 2f && box.width > 0f) {
+            // 宽和高各算一个比例，取小的那个：哪个方向放不下就按哪个缩，
+            // 两向都放得下时是 1
+            val byWidth = if (box.width > size.width - 2f && box.width > 0f) {
                 (size.width - 2f) / box.width
             } else {
                 1f
             }
+            val byHeight = if (box.height > size.height - 2f && box.height > 0f) {
+                (size.height - 2f) / box.height
+            } else {
+                1f
+            }
+            val scale = minOf(byWidth, byHeight)
             // 超宽公式整体缩到可视宽度内：等宽换行做不到（公式没有合法的断点），
             // 缩放在 200dp 的屏幕上反而是可读性最好的选择
             withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
