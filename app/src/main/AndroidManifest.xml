@@ -32,9 +32,13 @@
       Shizuku.pingBinder() 永远 false，于是 state() 判成「未运行」，
       哪怕 Shizuku 装着、服务跑着、里面也勾了本应用。
 
-      下面 provider 上的 android:permission 是**另一件事**（要求调用方持有它），
-      有它不代表自己申请过。曾经因为只看 provider 属性、漏了这一行，
-      单测也照样通过（断言匹配到了 provider 里那个同名字符串）。
+      这笔账要分清两件事，两个值不一样：
+        · 这里 <uses-permission>：我要 API_V23，才有人推 binder 给我；
+        · 下面 provider 的 android:permission：谁有权调我的 provider。
+          那个必须是 shell 持有的系统权限，不能也写 API_V23 —— 否则
+          shell 进程调不进来，binder 根本到不了。
+      曾经因为只看 provider 属性、漏了这一行，单测也照样通过
+      （断言匹配到了 provider 里那个同名字符串）。
     -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
@@ -187,9 +191,19 @@
         <!--
           Shizuku：借 adb（shell 用户）权限执行命令，不需要 root。
 
-          这个 provider 是 Shizuku 的「权限代理」：它由 moe.shizuku.manager 签名持有，
-          本应用只能通过 moe.shizuku.manager.permission.API_V23 访问，所以
-          exported=true 是必须的，但外部应用没有那个签名权限也调不到。
+          这个 provider 是 binder 的**入口**：Shizuku 服务端（跑在 shell 身份下）
+          通过它把 binder 推进本应用。所以那个 android:permission 必须是
+          **shell 持有、普通应用没有**的系统权限。
+
+          这里写 moe.shizuku.manager.permission.API_V23 是错的，而且错得很安静：
+          那是签名级权限，只有 Shizuku 本体持有；来推送的却是 shell 进程，
+          它没有这个签名 → ActivityManagerService 做 checkComponentPermission 时
+          直接拒绝 → 服务端日志只有一句 "provider is null" / "failed send binder"，
+          客户端 pingBinder() 永远 false。表现就是用户截图里的那样：
+          「已安装 1.5.0_Next / 已申请 API 权限 是 / binder 未连接」。
+
+          INTERACT_ACROSS_USERS_FULL 是 Shizuku 官方文档给的示例值：
+          shell 有、第三方应用没有，正好满足「只有自己和 Shizuku 能调」。
         -->
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
@@ -197,7 +211,7 @@
             android:enabled="true"
             android:exported="true"
             android:multiprocess="false"
-            android:permission="moe.shizuku.manager.permission.API_V23" />
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- Wear OS 2.x/3.x 独立运行（不依赖手机端 App） -->
         <meta-data

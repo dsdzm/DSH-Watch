@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -27,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.dshwatch.ui.components.tap
+import com.dshwatch.ui.wear.CircleGeometry
 
 /**
  * 画布类内容的统一外壳：公式 / 思维导图 / 几何图。
@@ -140,54 +144,139 @@ fun CanvasFullscreen(
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // 圆屏和方屏得走两套布局。圆屏上「铺满」等于四个角全被切掉，
+        // 右上角那个关闭按钮直接落在圆外 —— 全屏进去就出不来。
+        val circle = com.dshwatch.ui.wear.LocalCircle.current
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xF00B0D12))
-                .padding(10.dp),
+                .background(Color(0xF00B0D12)),
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = kind.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF8FB4E8),
-                    )
-                    Text(
-                        text = "关闭 ✕",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF9AA7BD),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .tap(onClick = onClose)
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp)),
-                ) {
-                    when (kind) {
-                        CanvasKind.MATH -> MathView(latex = source, fontSize = 26f)
-                        CanvasKind.MINDMAP -> MindMapView(source = source, modifier = Modifier.fillMaxSize())
-                        CanvasKind.GEOMETRY -> GeometryView(source = source, modifier = Modifier.fillMaxSize())
-                    }
-                }
-            }
-            // 关闭热区铺满整屏底部：圆屏边缘的「关闭」文字不好点
-            Box(
+            if (circle != null) RoundFullscreen(circle, kind, source, onClose)
+            else WideFullscreen(kind, source, onClose)
+        }
+    }
+}
+
+/**
+ * 圆屏全屏画布。
+ *
+ * 两件事必须做对：
+ *
+ * 1. **内容收进圆内**。圆屏「铺满」时四角在圆外，公式卡片、思维导图的
+ *    边角会被裁掉一圈。能完整放进圆里的最大正方形是 `直径 / √2`；公式是横条，
+ *    可以给到 0.86 的宽度（圆在中线附近最宽），二维图形则按内接正方形收。
+ * 2. **关闭按钮挪到顶部中央**。手表圆屏的 x 轴上，越靠上可用宽度越窄：
+ *    在 y≈40dp 那一行整个可用宽度只有约 150dp，右上角那个位置根本在圆外，
+ *    看不见也点不到。
+ *
+ * 几何值一律从 [CircleGeometry] 取，不自己拿屏幕宽高当直径 ——
+ * 有些表是 412×502，圆只占中间那条 412 宽的带子，用屏幕高算会整体错位。
+ */
+@Composable
+private fun RoundFullscreen(
+    circle: CircleGeometry,
+    kind: CanvasKind,
+    source: String,
+    onClose: () -> Unit,
+) {
+    val d = circle.diameter
+    Box(Modifier.fillMaxSize()) {
+        when (kind) {
+            // 公式：横条，宽度可以给到 0.86d。高度上限卡在 0.40d，
+            // 保证「宽度 0.86d × 高度 0.40d + 内边距」这个矩形四角还在圆内；
+            // 多行公式超出时 MathView 会整体等比缩小，而不是被裁掉。
+            CanvasKind.MATH -> Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .fillMaxWidth()
-                    .height(48.dp),
+                    .align(Alignment.Center)
+                    .width(d * 0.86f),
+            ) {
+                MathView(latex = source, fontSize = 24f, maxHeight = d * 0.40f)
+            }
+
+            // 二维图形：必须整个矩形都在圆内，用内接正方形，再留 4% 余量
+            CanvasKind.MINDMAP -> Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(d * CircleGeometry.SQRT_HALF * 0.96f),
+            ) {
+                MindMapView(source = source, modifier = Modifier.fillMaxSize())
+            }
+
+            CanvasKind.GEOMETRY -> Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(d * CircleGeometry.SQRT_HALF * 0.96f),
+            ) {
+                GeometryView(source = source, modifier = Modifier.fillMaxSize())
+            }
+        }
+
+        // 圆顶中央。40dp 是手表上不用瞄准的触摸尺寸，再小就得「点两下试试」。
+        // circle.top 是圆顶相对屏幕顶的偏移（屏幕比圆高时不是 0）。
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = circle.top + 6.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.10f))
+                .tap(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "✕",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFFDCE4F2),
             )
+        }
+    }
+}
+
+/** 方屏（模拟器、方形手表）全屏画布：原来那套，铺满即可 */
+@Composable
+private fun WideFullscreen(
+    kind: CanvasKind,
+    source: String,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = kind.title,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color(0xFF8FB4E8),
+            )
+            Text(
+                text = "关闭 ✕",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color(0xFF9AA7BD),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .tap(onClick = onClose)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp)),
+        ) {
+            when (kind) {
+                CanvasKind.MATH -> MathView(latex = source, fontSize = 26f)
+                CanvasKind.MINDMAP -> MindMapView(source = source, modifier = Modifier.fillMaxSize())
+                CanvasKind.GEOMETRY -> GeometryView(source = source, modifier = Modifier.fillMaxSize())
+            }
         }
     }
 }
