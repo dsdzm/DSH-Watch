@@ -107,8 +107,13 @@ class CanvasPaletteTest {
          * 这些色值一旦在别处再写一遍，就会绕过调色板 —— 浅色模式下那处又是隐形的，
          * 而测试仍然全绿（因为它只测了调色板本身）。
          * 所以扫整个 ui/canvas 目录，只有 CanvasPalette.kt 允许出现它们。
+         *
+         * 0xF00B0D12 是全屏那层写死的近黑底，正是「浅色模式深字压黑底」的源头。
          */
-        val banned = listOf("0xFFE8E8F0", "0xFF8FB4E8", "0xFFE0B04A", "0xFFDCE4F2", "0xFF5A6C8C")
+        val banned = listOf(
+            "0xFFE8E8F0", "0xFF8FB4E8", "0xFFE0B04A", "0xFFDCE4F2", "0xFF5A6C8C",
+            "0xF00B0D12",
+        )
         val offenders = canvasDir.walkTopDown()
             .filter { it.isFile && it.extension == "kt" && it.name != "CanvasPalette.kt" }
             .filter { f ->
@@ -124,15 +129,38 @@ class CanvasPaletteTest {
     }
 
     @Test
-    fun `全屏画布固定用深色档`() {
+    fun `全屏底色与文字色同源`() {
         /*
-         * 全屏的底是自己画的近黑层，不跟主题走。如果这里跟着主题换成浅色档，
-         * 就变成「深色字压在深色底上」—— 同一个 bug 的镜像版本。
+         * 这条守的是「浅色模式全屏变成黑底深字」。
+         *
+         * 成因不是某个色值错了，而是**底色和字色各走各的**：外壳固定画近黑，
+         * View 按主题取字色。只要外壳重新开始写死底色，这个 bug 就会回来。
          */
         val block = stripComments(File(canvasDir, "CanvasBlock.kt").readText())
         assertTrue(
-            "全屏要用 darkPalette()，不能用 rememberCanvasPalette()",
-            block.contains("val fullscreenPalette = darkPalette()"),
+            "全屏不能再写死某一档调色板，要按主题取",
+            !block.contains("darkPalette()"),
+        )
+        assertTrue(
+            "全屏底色必须取 palette.cardBase，才能和字色用同一档配色",
+            block.contains(".background(fullscreenPalette.cardBase)"),
+        )
+        assertTrue(
+            "全屏要把 palette 下发给子 View，否则它们还是按主题猜",
+            block.contains("LocalCanvasPalette provides"),
+        )
+    }
+
+    @Test
+    fun `全屏按钮底色往背景的反方向走`() {
+        // 深色底上用半透明白、浅色底上用半透明黑。写死其中一个，另一个就隐形
+        assertTrue(
+            "深色档的按钮应该比底色亮",
+            darkPalette().chromeWash.luminance() > darkPalette().cardBase.luminance(),
+        )
+        assertTrue(
+            "浅色档的按钮应该比底色暗",
+            lightPalette().chromeWash.luminance() < lightPalette().cardBase.luminance(),
         )
     }
 }

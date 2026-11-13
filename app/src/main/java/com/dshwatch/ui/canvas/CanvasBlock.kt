@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.dshwatch.ui.components.tap
+import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.wear.CircleGeometry
 
 /**
@@ -66,6 +68,18 @@ enum class CanvasKind(val id: String, val title: String) {
 }
 
 /**
+ * 这一类画布的强调色。
+ *
+ * 卡片标题和全屏标题必须一致，否则同一个「几何图」在消息流里是橙色、
+ * 点开全屏变成蓝色 —— 看起来像是两段不同的内容。
+ */
+fun CanvasKind.accentOf(palette: CanvasPalette): Color = when (this) {
+    CanvasKind.MATH -> palette.math
+    CanvasKind.MINDMAP -> palette.mind
+    CanvasKind.GEOMETRY -> palette.geom
+}
+
+/**
  * 消息流里的画布卡片。
  *
  * @param compact 给聊天流用（矮一点）；全屏时传 false
@@ -80,11 +94,7 @@ fun CanvasCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val palette = rememberCanvasPalette()
-    val accent = when (kind) {
-        CanvasKind.MATH -> palette.math
-        CanvasKind.MINDMAP -> palette.mind
-        CanvasKind.GEOMETRY -> palette.geom
-    }
+    val accent = kind.accentOf(palette)
 
     Column(
         modifier = modifier
@@ -148,17 +158,22 @@ fun CanvasFullscreen(
         // 圆屏和方屏得走两套布局。圆屏上「铺满」等于四个角全被切掉，
         // 右上角那个关闭按钮直接落在圆外 —— 全屏进去就出不来。
         //
-        // 全屏的底固定是近黑，**不跟主题走**：点开全屏是为了看图，
-        // 浅色主题下把图摊在一张白纸上，细线和小字反而更糊。
-        val fullscreenPalette = darkPalette()
+        // 底色**跟主题走**，并且和文字颜色取自同一个 palette：
+        // 曾经这里固定画近黑底、而 View 按主题取字色，浅色模式下就成了
+        // 「深字压黑底」，一整屏推导只剩轮廓。
+        val dark = LocalDarkTheme.current
+        val fullscreenPalette = rememberCanvasPalette(dark)
         val circle = com.dshwatch.ui.wear.LocalCircle.current
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xF00B0D12)),
-        ) {
-            if (circle != null) RoundFullscreen(circle, kind, source, onClose, fullscreenPalette)
-            else WideFullscreen(kind, source, onClose, fullscreenPalette)
+        CompositionLocalProvider(LocalCanvasPalette provides fullscreenPalette) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // cardBase 就是这套 palette 做对比度自检时假定的背景
+                    .background(fullscreenPalette.cardBase),
+            ) {
+                if (circle != null) RoundFullscreen(circle, kind, source, onClose, fullscreenPalette)
+                else WideFullscreen(kind, source, onClose, fullscreenPalette)
+            }
         }
     }
 }
@@ -226,7 +241,7 @@ private fun RoundFullscreen(
                 .padding(top = circle.top + 6.dp)
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.10f))
+                .background(palette.chromeWash)
                 .tap(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
@@ -260,7 +275,7 @@ private fun WideFullscreen(
             Text(
                 text = kind.title,
                 style = MaterialTheme.typography.labelMedium,
-                color = palette.math,
+                color = kind.accentOf(palette),
             )
             Text(
                 text = "关闭 ✕",
@@ -268,7 +283,7 @@ private fun WideFullscreen(
                 color = palette.inkDim,
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
+                    .background(palette.chromeWash)
                     .tap(onClick = onClose)
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             )
