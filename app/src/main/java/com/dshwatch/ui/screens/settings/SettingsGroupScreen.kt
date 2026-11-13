@@ -46,6 +46,7 @@ import com.dshwatch.domain.bili.BiliImages
 import com.dshwatch.domain.bili.BiliMode
 import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTones
+import com.dshwatch.domain.plugin.PluginLoader
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.Appearances
 import com.dshwatch.domain.model.AppSettings
@@ -176,7 +177,7 @@ fun SettingsGroupScreen(
                 SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, s)
                 SettingsGroups.FILES -> FilesGroup(settings, update, container, nav, s)
                 SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
-                SettingsGroups.PLUGINS -> PluginsGroup(settings, update, s)
+                SettingsGroups.PLUGINS -> PluginsGroup(settings, update, container, s)
                 SettingsGroups.MCP -> McpGroup(settings, update, container, s)
                 SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
                 else -> ConnectionGroup(settings, update, container, nav, s)
@@ -1029,14 +1030,23 @@ private fun RuntimeGroup(
  * 却联想不到这里。
  */
 @Composable
-private fun PluginsGroup(settings: AppSettings, update: Update, s: AppStrings) {
+private fun PluginsGroup(
+    settings: AppSettings,
+    update: Update,
+    container: AppContainer,
+    s: AppStrings,
+) {
+    val scope = rememberCoroutineScope()
     val enabled = settings.pluginsResolved(PluginRegistry.defaultEnabled())
+    val all = PluginRegistry.allFor(settings)
+    var notice by remember { mutableStateOf<String?>(null) }
+    var scanning by remember { mutableStateOf(false) }
 
     SettingCard {
-        PluginRegistry.ALL.forEach { plugin ->
+        all.forEach { plugin ->
             SwitchRow(
-                title = s.pluginTitle(plugin.id),
-                subtitle = s.pluginDesc(plugin.id),
+                title = plugin.displayName ?: s.pluginTitle(plugin.id),
+                subtitle = plugin.displayDesc ?: s.pluginDesc(plugin.id),
                 checked = plugin.id in enabled,
                 onCheckedChange = { on ->
                     val next = if (on) enabled + plugin.id else enabled - plugin.id
@@ -1044,6 +1054,37 @@ private fun PluginsGroup(settings: AppSettings, update: Update, s: AppStrings) {
                 },
             )
         }
+    }
+
+    /*
+     * 声明式插件从工作空间的 plugins/ 目录读。
+     *
+     * 不做文件监听：手表上「改完立刻生效」的收益，抵不过一个常驻 watch 的耗电。
+     * 用户改完清单回来点一下，是这条链路上唯一需要记住的操作。
+     */
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        SettingRow(
+            title = if (scanning) "正在扫描…" else "重新扫描插件目录",
+            subtitle = notice
+                ?: "把 JSON 清单放进工作空间的 plugins/ 目录，点这里加载",
+            trailing = "↻",
+            onClick = {
+                if (!scanning) {
+                    scanning = true
+                    scope.launch {
+                        val scan = PluginLoader.scan(container.workspaceStore)
+                        update { it.copy(pluginManifests = scan.manifests) }
+                        notice = when {
+                            scan.errors.isNotEmpty() -> scan.errors.first()
+                            scan.manifests.isEmpty() -> "plugins/ 里没有可用的清单"
+                            else -> "已加载 ${scan.manifests.size} 个插件，开关在上面"
+                        }
+                        scanning = false
+                    }
+                }
+            },
+        )
     }
 
     Spacer(Modifier.height(6.dp))

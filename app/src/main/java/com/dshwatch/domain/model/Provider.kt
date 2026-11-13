@@ -446,6 +446,18 @@ data class AppSettings(
     val enabledPlugins: Set<String> = emptySet(),
 
     /**
+     * 用户装进来的声明式插件清单。
+     *
+     * 存**解析后的对象**而不是 JSON 字符串：设置本来就是一份 JSON，
+     * 再套一层字符串会让「设置备份/迁移」变成两次解析，出错点翻倍。
+     * 清单里的字段全部带默认值，老设置缺这整个字段时也能正常读。
+     *
+     * 上限见 [com.dshwatch.domain.plugin.PluginLoader.MAX_FILES]：
+     * 这是「插件」，不是「提示词库」，装十几个已经远超正常使用。
+     */
+    val pluginManifests: List<com.dshwatch.domain.plugin.PluginManifest> = emptyList(),
+
+    /**
      * 用户是否动过插件开关。
      *
      * 需要这个标志的原因：`enabledPlugins` 为空既可能是"用户全关了"，
