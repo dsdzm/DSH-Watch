@@ -131,6 +131,7 @@ import com.dshwatch.util.Fmt
 import com.dshwatch.util.findActivity
 import kotlinx.coroutines.launch
 import java.io.File
+import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.LocalGlass
 import androidx.compose.foundation.interaction.MutableInteractionSource
 
@@ -805,11 +806,14 @@ private fun BubbleScaffold(
      * 但浅色主题里正文用的是 `colorScheme.onSurface`（深色字），深底深字直接糊成一片 ——
      * 也就是「用户发的话看不清」。
      *
-     * 判断明暗看 `background` 的亮度：Material3 没有现成的 isLight()，
-     * 而 luminance() 是线性的，0.5 这个阈值对纯黑/纯白两端足够可靠，
-     * 也自动适配动态取色出来的任意色调。
+     * 判断明暗**问主题**，不再看 `background` 的亮度。
+     *
+     * 旧写法是 `background.luminance() > 0.5`，理由是「Material3 没有现成的
+     * isLight()」。但玻璃预设的 background 是透明的，而 luminance() 只看 RGB ——
+     * 透明色恒为 0，于是浅色模式下这条判断永远是「深色」，气泡就一直用深底白字，
+     * 和同一屏里深色的正文对不上。明暗是主题的属性，`LocalDarkTheme` 直接给。
      */
-    val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val light = !LocalDarkTheme.current
     val glass = LocalGlass.current
     val bubbleColor = when {
         isUser && light -> MaterialTheme.colorScheme.secondaryContainer

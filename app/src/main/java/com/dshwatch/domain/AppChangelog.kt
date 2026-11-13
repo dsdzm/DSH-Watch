@@ -23,6 +23,13 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.22.4",
+            date = "2026-11-13",
+            highlights = listOf(
+                "修复 浅色模式下玻璃卡片与弹窗被误判成深色，整块变黑、文字读不出来",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.22.3",
             date = "2026-11-13",
             highlights = listOf(

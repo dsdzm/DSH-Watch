@@ -26,9 +26,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.LocalGlass
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -102,7 +102,8 @@ fun GlassDialog(
     shadow: Boolean = false,
 ) {
     val glass = LocalGlass.current
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.35f
+    // 同上：透明背景不能反推明暗，问主题要
+    val dark = LocalDarkTheme.current
     // 系统是否真的**能把背景糊掉**。不是「API 够不够」，而是「这个窗口有没有开模糊」——
     // Android 12 起才有，而且用户可以在开发者选项 / 无障碍里关掉。
     // 关掉时 Comose 的 Modifier.blur 还能用（它自己画离屏层），
