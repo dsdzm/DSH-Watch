@@ -97,7 +97,7 @@ class PluginManifestTest {
     @Test
     fun `manifest only applies to matching model`() {
         val m = manifest(model = "deepseek-*")
-        val plugin = ManifestPromptPlugin(m)
+        val plugin = ManifestPlugin(m)
 
         assertThat(plugin.contribute(PromptContext(settings("deepseek-chat", listOf(m)), "")))
             .contains("先给结论")
@@ -111,7 +111,7 @@ class PluginManifestTest {
     @Test
     fun `variables are filled from the active provider`() {
         val m = manifest(append = "你是 {{model}}，由 {{provider}} 提供。")
-        val plugin = ManifestPromptPlugin(m)
+        val plugin = ManifestPlugin(m)
         val text = plugin.contribute(PromptContext(settings("deepseek-chat", listOf(m)), ""))
         assertThat(text).isEqualTo("你是 deepseek-chat，由 测试 提供。")
     }
@@ -119,7 +119,7 @@ class PluginManifestTest {
     @Test
     fun `unknown variable stays untouched`() {
         val m = manifest(append = "{{nope}} 保持原样")
-        val plugin = ManifestPromptPlugin(m)
+        val plugin = ManifestPlugin(m)
         assertThat(plugin.contribute(PromptContext(settings("m", listOf(m)), "")))
             .isEqualTo("{{nope}} 保持原样")
     }
@@ -184,5 +184,169 @@ class PluginManifestTest {
 
         // 目录是平的、只认 .json —— 「插件从哪些文件读出来」必须一句话说得完
         assertThat(scan.manifests).isEmpty()
+    }
+
+    // ---------------- 工具面（schema 2） ----------------
+
+    private fun toolManifest(
+        hide: List<String> = emptyList(),
+        only: List<String> = emptyList(),
+        confirm: List<String> = emptyList(),
+        append: String = "",
+    ) = PluginManifest(
+        id = "dsh-plugin-tools",
+        name = "收窄",
+        description = "测试用",
+        prompt = if (append.isEmpty()) null else PromptPart(append = append),
+        tools = ToolsPart(hide = hide, only = only, confirm = confirm),
+    )
+
+    @Test
+    fun `hide blocks the tool in the registry`() {
+        val m = toolManifest(hide = listOf("run_script", "adb_shell"))
+        val s = settings("deepseek-chat", listOf(m))
+        val registry = PluginRegistry.from(s)
+
+        // 这是真的权限边界：不是「少给模型看」，是引擎执行前会拒
+        assertThat(registry.deniedTools(s)).containsExactly("run_script", "adb_shell")
+        assertThat(registry.allowOnlyTools(s)).isNull()
+    }
+
+    @Test
+    fun `only keeps just the listed tools`() {
+        val m = toolManifest(only = listOf("read_file", "web_search"))
+        val s = settings("deepseek-chat", listOf(m))
+        assertThat(PluginRegistry.from(s).allowOnlyTools(s))
+            .containsExactly("read_file", "web_search")
+    }
+
+    @Test
+    fun `two whitelists intersect instead of union`() {
+        // 交集只会更严，并集会悄悄多放行 —— 这里守的是方向
+        val a = toolManifest(only = listOf("read_file", "write_file")).copy(id = "dsh-plugin-a")
+        val b = toolManifest(only = listOf("read_file", "run_script")).copy(id = "dsh-plugin-b")
+        val s = settings("deepseek-chat", listOf(a, b))
+        assertThat(PluginRegistry.from(s).allowOnlyTools(s)).containsExactly("read_file")
+    }
+
+    @Test
+    fun `confirm tools add up across plugins`() {
+        val a = toolManifest(confirm = listOf("write_file")).copy(id = "dsh-plugin-a")
+        val b = toolManifest(confirm = listOf("edit_file")).copy(id = "dsh-plugin-b")
+        val s = settings("deepseek-chat", listOf(a, b))
+        assertThat(PluginRegistry.from(s).confirmTools(s)).containsExactly("write_file", "edit_file")
+    }
+
+    @Test
+    fun `hide and only cannot be combined`() {
+        val m = toolManifest(hide = listOf("run_script"), only = listOf("read_file"))
+        assertThat(m.validate()).contains("只能写一个")
+    }
+
+    @Test
+    fun `bad tool name is rejected`() {
+        val m = toolManifest(hide = listOf("Run-Script!"))
+        assertThat(m.validate()).contains("不是合法的工具名")
+    }
+
+    @Test
+    fun `tools only manifest needs no prompt`() {
+        // 纯收窄型插件不带一句提示词也应该能装
+        assertThat(toolManifest(hide = listOf("run_script")).validate()).isNull()
+    }
+
+    @Test
+    fun `empty tools section is rejected`() {
+        assertThat(toolManifest().validate()).contains("不会产生任何效果")
+    }
+
+    @Test
+    fun `condition also gates the tool face`() {
+        val m = toolManifest(hide = listOf("run_script")).copy(
+            tools = ToolsPart(hide = listOf("run_script"), condition = Condition("deepseek-*")),
+        )
+        val qwen = AppSettings(
+            providers = listOf(Provider(id = "p", name = "测试", defaultModel = "qwen3-32b")),
+            activeProviderId = "p",
+        )
+        assertThat(ManifestPlugin(m).denyTools(qwen)).isEmpty()
+    }
+
+    // ---------------- 只能收紧 ----------------
+
+    @Test
+    fun `approval widening fields are rejected outright`() {
+        // 静默忽略会让用户以为免确认生效了 —— 这是最危险的一种「成功」
+        val bad = """{"id":"dsh-plugin-x","name":"x","prompt":{"append":"a"},"autoApprove":["run_script"]}"""
+        val r = PluginLoader.parse(bad)
+        assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
+        assertThat((r as PluginLoader.Parsed.Err).message).contains("只能收紧")
+    }
+
+    @Test
+    fun `tools allow is rejected too`() {
+        val bad = """{"id":"dsh-plugin-x","name":"x","tools":{"allow":["run_script"]}}"""
+        val r = PluginLoader.parse(bad)
+        assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
+        assertThat((r as PluginLoader.Parsed.Err).message).contains("只能收紧")
+    }
+
+    @Test
+    fun `harmless unknown fields are still ignored`() {
+        val ok = """{"id":"dsh-plugin-xxx","name":"x","homepage":"https://e.com","prompt":{"append":"a"}}"""
+        assertThat(PluginLoader.parse(ok)).isInstanceOf(PluginLoader.Parsed.Ok::class.java)
+    }
+
+    @Test
+    fun `schema 1 manifest still loads`() {
+        val old = """{"schema":1,"id":"dsh-plugin-old","name":"旧","prompt":{"append":"规则"}}"""
+        assertThat(PluginLoader.parse(old)).isInstanceOf(PluginLoader.Parsed.Ok::class.java)
+    }
+
+    // ---------------- 导入与目录并存 ----------------
+
+    @Test
+    fun `imported plugins survive a directory rescan`() {
+        val imported = manifest(id = "dsh-plugin-imported")
+        val fromDir = manifest(id = "dsh-plugin-dir")
+        val s = AppSettings(
+            pluginManifests = listOf(fromDir),
+            importedPlugins = listOf(imported),
+        )
+        // 目录扫描会整个替换 pluginManifests —— 导入的那份不能跟着丢
+        assertThat(PluginRegistry.allFor(s).map { it.id })
+            .containsAtLeast("dsh-plugin-imported", "dsh-plugin-dir")
+    }
+
+    @Test
+    fun `imported wins when ids collide`() {
+        val dir = manifest(id = "dsh-plugin-x").copy(name = "目录版")
+        val imp = manifest(id = "dsh-plugin-x").copy(name = "导入版")
+        val s = AppSettings(pluginManifests = listOf(dir), importedPlugins = listOf(imp))
+        val same = PluginRegistry.allFor(s).filterIsInstance<ManifestPlugin>().filter { it.id == "dsh-plugin-x" }
+        assertThat(same).hasSize(1)
+        assertThat(same.first().displayName).isEqualTo("导入版")
+    }
+
+    // ---------------- 文档里的示例 ----------------
+
+    /**
+     * docs/plugins 下的每份示例都必须真的能通过校验。
+     *
+     * 用户是照着这些文件改的。示例一旦过期（比如 schema 升了、字段改名了），
+     * 用户抄出来的第一份清单就是坏的，而他不会怀疑文档 —— 只会觉得插件功能坏了。
+     * 这条测试把文档和校验器绑在一起。
+     */
+    @Test
+    fun `bundled examples all parse`() {
+        val dir = listOf(File("docs/plugins"), File("../docs/plugins"))
+            .firstOrNull { it.isDirectory }
+            ?: error("找不到 docs/plugins，测试的工作目录是 ${File(".").absolutePath}")
+        val files = dir.listFiles { f -> f.extension == "json" }.orEmpty()
+        assertThat(files.size).isAtLeast(3)
+        files.forEach { f ->
+            val r = PluginLoader.parse(f.readText(), f.name)
+            assertThat(r).isInstanceOf(PluginLoader.Parsed.Ok::class.java)
+        }
     }
 }

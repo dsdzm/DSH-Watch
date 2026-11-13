@@ -1,0 +1,32 @@
+{
+  "schema": 2,
+  "id": "dsh-plugin-focus-offline",
+  "name": "离线专注（示例）",
+  "description": "只留本地读写与执行，拿掉联网、云端和设备类工具。适合没网、或不想让任务出网的时候",
+  "version": "1.0.0",
+  "author": "DSH Watch",
+  "prompt": {
+    "append": "本任务是离线任务：不联网、不调用云端接口，资料只从本地工作空间取。\n缺信息就直接说要什么，不要用网络搜索或云端构建代替。\n删除文件之前先把要删的路径列出来，等确认。"
+  },
+  "tools": {
+    "only": [
+      "read_file",
+      "write_file",
+      "edit_file",
+      "append_file",
+      "list_files",
+      "glob",
+      "grep",
+      "make_dir",
+      "move_file",
+      "delete_file",
+      "run_script",
+      "todo_write",
+      "ask_user"
+    ],
+    "confirm": [
+      "delete_file",
+      "run_script"
+    ]
+  }
+}

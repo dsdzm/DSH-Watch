@@ -104,7 +104,20 @@ object ApprovalPolicy {
         safety: ToolSafety,
         args: JsonObject,
         sessionApproved: Set<String>,
+        mustConfirm: Set<String> = emptySet(),
     ): Boolean {
+        /*
+         * 插件要求加严的工具排在最前面。
+         *
+         * 位置很重要：放在下面任何一条之后，都会被「本会话允许」「自动允许」
+         * 「只读工具免问」这些规则提前返回掉 —— 那插件写的 confirm 就形同虚设。
+         * 唯一仍然豁免的是设备操控进行中：那时弹窗画在用户看不见的 Activity 上，
+         * 问了也等不到回答，卡住的是整个任务。
+         */
+        if (toolName in mustConfirm) {
+            if (toolName in DEVICE_TOOLS && DeviceControlHub.state.value.running) return false
+            return true
+        }
         // 设备会话进行中：弹窗在后台看不见，问了也等不到
         if (toolName in DEVICE_TOOLS && DeviceControlHub.state.value.running) return false
         // shell：永远拦，除非本会话已经放行

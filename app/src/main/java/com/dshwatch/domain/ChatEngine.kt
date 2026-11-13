@@ -1000,6 +1000,38 @@ class ChatEngine(
         var lastMessageId = ""
         var awaitingMoreSteps = false
 
+        /*
+         * 声明式插件给的工具面约束：整个任务生效，不随轮次变化。
+         *
+         * 在循环外算一次，而不是每轮重算：它只依赖 settings 和已启用的插件，
+         * 两者在这个任务期间都不会变。更重要的是 —— 每轮重算意味着
+         * 某轮算出来不一样时，模型会看到工具表在任务中途变来变去，
+         * 那比一开始就没有这个工具更让人困惑。
+         */
+        val pluginDenied = plugins.deniedTools(settings)
+        val pluginOnly = plugins.allowOnlyTools(settings)
+        val pluginConfirm = plugins.confirmTools(settings)
+
+        /*
+         * 白名单里一个工具名都对不上时，按「没写」处理，而不是按「全禁」。
+         *
+         * 工具名有四十多个，`web_search` 写成 `webs_search` 是很常见的失误。
+         * 照字面执行白名单，结果是**所有**工具都被拦掉 —— 用户看到的现象是
+         * 模型突然什么都不会做，却完全联想不到是插件里少了一个字母。
+         * 这时候退回不加约束并明说，比「严格执行」更接近用户的真实意图。
+         */
+        val (blockedNames, onlyIgnored) = blockedTools(
+            denied = pluginDenied,
+            only = pluginOnly,
+            known = registry.tools.map { it.name },
+        )
+        if (onlyIgnored) {
+            _banner.value = Banner(
+                "插件里的工具白名单没有一个对得上现有工具，这次先不限制；" +
+                    "检查一下插件里的工具名（例如 run_script、web_search）。",
+            )
+        }
+
         for (step in 1..maxSteps) {
             if (!currentCoroutineContext().isActive) break
             usedSteps = step
@@ -1017,13 +1049,18 @@ class ChatEngine(
             // 它没有错 —— 它看到的确实只有那几个；错在这个事实只存在于 tools 数组里，
             // 而"本轮是收窄的、下一轮会放开"这件事它无从得知。
             /*
-             * 工具面只受插件路由影响，不再按设备模式收窄。
+             * 工具面只受插件路由与声明式插件约束，不再按设备模式收窄。
              *
              * 早先操控期间只下发 device_*，省了固定成本，但模型做完操控想写总结
              * 时看不见 write_file，只会说「我没法写文件」。这个失败模式比省下的
              * 那点 token 贵得多。
+             *
+             * 声明式插件的 `tools.hide` / `tools.only` 在这里先扣一遍：
+             * 模型看不到就等于不会去调。真正的拦截在 executeTools 里 ——
+             * 这一层只是让提示词里的【可用工具】名单和 tools 数组保持一致，
+             * 否则模型会从名单里读到它不能用的工具，然后反复尝试。
              */
-            val visibleTools = registry.tools
+            val visibleTools = registry.tools.filter { it.name !in blockedNames }
             val allowed = overlay?.allowedTools
             val roundNames = if (allowed != null) {
                 visibleTools.filter { it.name in allowed }.map { it.name }
@@ -1241,6 +1278,8 @@ class ChatEngine(
                 registry = registry,
                 deniedTools = deniedTools,
                 sessionDir = conv.workDir,
+                blocked = blockedNames,
+                mustConfirm = pluginConfirm,
             )
             executed.forEach { call ->
                 // 插件在这里接管工具结果 —— 这是**唯一**能省下 tool 结果 token 的位置。
@@ -1458,6 +1497,8 @@ class ChatEngine(
         registry: ToolRegistry,
         deniedTools: MutableSet<String>,
         sessionDir: String,
+        blocked: Set<String> = emptySet(),
+        mustConfirm: Set<String> = emptySet(),
     ): List<ToolCallRecord> {
         // 工具集是应用级单例，而工作目录是每个会话各自的 —— 这里换一副「眼镜」，
         // 之后所有相对路径都会被解析到本会话的目录下。
@@ -1472,6 +1513,24 @@ class ChatEngine(
             }
 
             val tool = registry.get(call.name)
+            /*
+             * 插件禁用的工具在这里**硬拦**，而不是只靠「不下发」。
+             *
+             * tools 数组里没有，模型仍然可能凭对话历史里的旧名字猜一个出来。
+             * 只靠不下发的话，关掉 `run_script` 就只是让它看不见 ——
+             * 一次幻觉就能把闸门撞开，那样「插件能关掉一个能力」这句话就是假的。
+             */
+            if (call.name in blocked && tool != null) {
+                val rec = call.copy(
+                    status = ToolStatus.DENIED,
+                    result = "「${call.name}」已被插件禁用，这个能力当前不可用。" +
+                        "需要恢复的话，去 设置 → 插件 关掉相应插件。",
+                    summary = call.name,
+                )
+                out += rec
+                updateToolCall(messageId, rec)
+                continue
+            }
             if (tool == null) {
                 val rec = call.copy(
                     status = ToolStatus.FAILED,
@@ -1512,7 +1571,7 @@ class ChatEngine(
                 continue
             }
 
-            if (needsApproval(settings, tool, args)) {
+            if (needsApproval(settings, tool, args, mustConfirm)) {
                 updateToolCall(
                     messageId,
                     call.copy(status = ToolStatus.AWAITING_APPROVAL, summary = summary),
@@ -1620,13 +1679,19 @@ class ChatEngine(
         }
     }
 
-    private fun needsApproval(settings: AppSettings, tool: AgentTool, args: JsonObject): Boolean =
+    private fun needsApproval(
+        settings: AppSettings,
+        tool: AgentTool,
+        args: JsonObject,
+        mustConfirm: Set<String> = emptySet(),
+    ): Boolean =
         ApprovalPolicy.needsApproval(
             settings = settings,
             toolName = tool.name,
             safety = tool.safety,
             args = args,
             sessionApproved = sessionApproved,
+            mustConfirm = mustConfirm,
         )
 
     /** 把某条助手消息里的工具记录替换成最新状态，并落盘 */
@@ -1897,6 +1962,33 @@ class ChatEngine(
          */
         val ALWAYS_CONFIRM_TOOLS = ApprovalPolicy.ALWAYS_CONFIRM
         private const val TAG = "ChatEngine"
+
+        /**
+         * 由插件的「禁用集 + 白名单」算出本次任务真正要拦下的工具。
+         *
+         * 返回 `(被拦的工具, 白名单是否因为一个都对不上而被忽略)`。
+         *
+         * 为什么需要第二项：[PluginRegistry] 只认识插件，不认识工具表 ——
+         * 「白名单里写的名字是不是真有这个工具」只有拿得到 registry 的这一层才知道。
+         * 而一个全错的 `only` 会让**所有**工具消失，症状是「AI 变笨了」，
+         * 用户很难联想到插件，所以宁可退回不限制并提示。
+         *
+         * @param denied 插件要求禁用的工具（只会加，不会减）
+         * @param only 插件要求保留的白名单；null 表示没有白名单
+         * @param known 本机实际注册的工具名
+         */
+        internal fun blockedTools(
+            denied: Set<String>,
+            only: Set<String>?,
+            known: Collection<String>,
+        ): Pair<Set<String>, Boolean> {
+            if (only == null) return denied to false
+            if (known.none { it in only }) return denied to true
+            return buildSet {
+                addAll(denied)
+                known.forEach { if (it !in only) add(it) }
+            } to false
+        }
 
         /** 等用户回答 ask_user 的最长时间；超时后交给模型自行收尾 */
         private const val QUESTION_TIMEOUT_MS = 5 * 60 * 1000L

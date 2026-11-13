@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.22.1",
+            date = "2026-11-13",
+            highlights = listOf(
+                "新增 插件清单的 tools 段：隐藏工具、只留白名单、给指定工具加确认",
+                "新增 插件导入：从剪贴板、链接或本地文件直接装，装之前先预检",
+                "支持 多份插件同时生效，白名单取交集、确认项取并集，只会越收越紧",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.22.0",
             date = "2026-11-13",
             highlights = listOf(

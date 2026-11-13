@@ -114,3 +114,42 @@ data class TurnOverlay(
     val promptSuffix: String = "",
     val allowedTools: Set<String>? = null,
 )
+
+/**
+ * 工具面约束。这是**真的权限边界**，不是 [TurnOverlay.allowedTools] 那种「少给模型看」。
+ *
+ * 两者的区别必须说清，因为它们看起来很像：
+ *
+ * | | 生效位置 | 模型看不到 | 幻觉调用了会被执行吗 |
+ * | --- | --- | --- | --- |
+ * | [TurnOverlay.allowedTools] | 构造请求的 tools 数组 | 是 | **会** |
+ * | [GuardPlugin.denyTools] | 构造请求 + 执行前拦截 | 是 | **不会**，直接拒绝 |
+ *
+ * 风神那种首轮路由用前者就够：它只是把注意力收窄，下一轮就放开。
+ * 而声明式插件的 `tools.hide` 是用户「我不要这个能力」的明确表达，
+ * 模型猜出工具名也不能绕过 —— 否则关掉 `run_script` 只是让它看不见，
+ * 一次幻觉就能把闸门撞开。
+ *
+ * ## 方向只有一个
+ *
+ * [confirmTools] **只加严**：把工具推进「每次都要确认」的集合，
+ * 永远不会把 `ALWAYS_CONFIRM` 里的工具拉出来。没有对应的「放宽」方法，
+ * 也不该有 —— 见 [PluginManifest] 里「只能收紧」那段。
+ */
+interface GuardPlugin : Plugin {
+
+    /** 这些工具本会话禁用。空集 = 不管 */
+    fun denyTools(settings: AppSettings): Set<String> = emptySet()
+
+    /**
+     * 白名单。非 null 时**只**允许这些工具，其余全关。
+     *
+     * 与 [denyTools] 是两种写法，同时返回时取交集（更严的那个赢）——
+     * 但清单校验阶段会禁止一份清单同时写 `hide` 和 `only`，
+     * 所以这里只可能来自两个不同插件。
+     */
+    fun allowOnly(settings: AppSettings): Set<String>? = null
+
+    /** 这些工具本会话必须逐次确认。空集 = 不管 */
+    fun confirmTools(settings: AppSettings): Set<String> = emptySet()
+}

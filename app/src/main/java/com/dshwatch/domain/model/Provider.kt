@@ -458,6 +458,18 @@ data class AppSettings(
     val pluginManifests: List<com.dshwatch.domain.plugin.PluginManifest> = emptyList(),
 
     /**
+     * 用户**导入**进来的清单（剪贴板粘贴、从链接拉取）。
+     *
+     * 与 [pluginManifests] 分开存，不是为了区分来源好看，而是因为两者
+     * 的生命周期不一样：目录扫描每次都会把 `pluginManifests` 整个替换成
+     * 当前目录的实际内容，而导入的插件在文件系统里根本没有对应文件 ——
+     * 混在一个列表里，用户点一次「重新扫描」就会把刚导入的全抹掉。
+     *
+     * 合并逻辑见 `PluginRegistry.allFor`：同 id 时以这里为准。
+     */
+    val importedPlugins: List<com.dshwatch.domain.plugin.PluginManifest> = emptyList(),
+
+    /**
      * 用户是否动过插件开关。
      *
      * 需要这个标志的原因：`enabledPlugins` 为空既可能是"用户全关了"，
