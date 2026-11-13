@@ -19,7 +19,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -65,9 +64,19 @@ fun MindMapView(
         return
     }
 
-    val textStyle = TextStyle(fontSize = if (compact) 11.sp else 13.sp, color = Color(0xFFE6E6F0))
-    val rootStyle = textStyle.copy(fontWeight = FontWeight.Bold, color = Color(0xFFB9D8FF))
-    val placed = remember(source, compact) { MindMap.layout(tree, measurer, textStyle, rootStyle) }
+    /*
+     * 配色必须进 remember 的 key。
+     *
+     * 这里量的是 TextLayoutResult，颜色是**量的时候**写进结果里的。只按
+     * (source, compact) 缓存，用户切换明暗之后拿到的还是上一套颜色的排版结果 ——
+     * 表现为「切到浅色模式，导图文字还是白的」。
+     */
+    val palette = rememberCanvasPalette()
+    val textStyle = TextStyle(fontSize = if (compact) 11.sp else 13.sp, color = palette.ink)
+    val rootStyle = textStyle.copy(fontWeight = FontWeight.Bold, color = palette.math)
+    val placed = remember(source, compact, palette) {
+        MindMap.layout(tree, measurer, textStyle, rootStyle)
+    }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -78,7 +87,7 @@ fun MindMapView(
             // 全屏时交给外层撑满：写死高度会让「全屏」只剩中间一条
             .then(if (compact) Modifier.height(150.dp) else Modifier.fillMaxSize())
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+            .background(palette.cardWash)
             .pointerInput(placed) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     scale = (scale * zoom).coerceIn(0.4f, 3f)
@@ -118,18 +127,18 @@ fun MindMapView(
                         moveTo(sx, sy)
                         cubicTo(sx + dx, sy, ex - dx, ey, ex, ey)
                     }
-                    drawPath(path, Color(0xFF5A6C8C), style = Stroke(width = 1.4f))
+                    drawPath(path, palette.link, style = Stroke(width = 1.4f))
                 }
                 // 2) 节点
                 placed.nodes.forEach { n ->
                     drawRoundRect(
-                        color = if (n.depth == 0) Color(0xFF2B4A72) else Color(0xFF232A38),
+                        color = if (n.depth == 0) palette.nodeFillRoot else palette.nodeFill,
                         topLeft = Offset(n.x, n.y),
                         size = Size(n.w, n.h),
                         cornerRadius = CornerRadius(n.h / 2.6f),
                     )
                     drawRoundRect(
-                        color = if (n.depth == 0) Color(0xFF6E9BD6) else Color(0xFF46536B),
+                        color = if (n.depth == 0) palette.nodeStrokeRoot else palette.nodeStroke,
                         topLeft = Offset(n.x, n.y),
                         size = Size(n.w, n.h),
                         cornerRadius = CornerRadius(n.h / 2.6f),

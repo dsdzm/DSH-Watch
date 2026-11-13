@@ -416,6 +416,9 @@ interface AppStrings {
     // 更新
     val updateCheck: String
     val autoCheckUpdate: String
+    val updateChannel: String
+    val updateChannelStable: String
+    val updateChannelBeta: String
     val updateTitle: String
     val updateNewVersion: String
     val updateChecking: String
@@ -960,6 +963,9 @@ object Zh : AppStrings {
 
     override val updateCheck = "检查更新"
     override val autoCheckUpdate = "自动检查更新"
+    override val updateChannel = "更新通道"
+    override val updateChannelStable = "稳定版"
+    override val updateChannelBeta = "测试版"
     override val updateTitle = "检查更新"
     override val updateNewVersion = "有新版本"
     override val updateChecking = "正在检查…"
@@ -1598,6 +1604,9 @@ object En : AppStrings {
 
     override val updateCheck = "Check for updates"
     override val autoCheckUpdate = "Auto-check for updates"
+    override val updateChannel = "Update channel"
+    override val updateChannelStable = "Stable"
+    override val updateChannelBeta = "Beta"
     override val updateTitle = "Update"
     override val updateNewVersion = "New version"
     override val updateChecking = "Checking…"

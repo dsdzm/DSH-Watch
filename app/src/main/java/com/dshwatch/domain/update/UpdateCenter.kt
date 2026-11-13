@@ -68,7 +68,7 @@ class UpdateCenter(
             settings.update { it.copy(lastUpdateCheckAt = now) }
 
             if (!checking.compareAndSet(false, true)) return@launch
-            val result = UpdateChecker.check()
+            val result = UpdateChecker.check(channel = UpdateChannel.of(current.updateChannel))
             checking.set(false)
 
             if (result is UpdateResult.Available) {
@@ -82,14 +82,22 @@ class UpdateCenter(
         }
     }
 
-    /** 用户主动点「检查更新」。不看节流，也不受上次结果影响 */
-    fun checkNow() {
+    /**
+     * 用户主动点「检查更新」。不看节流，也不受上次结果影响。
+     *
+     * @param channel 指定通道。默认 null = 读设置里的当前值。
+     *   设置页切换通道时要显式传：`update {}` 是异步写盘，紧接着读 `settings.current()`
+     *   很可能还是旧值，于是「切到测试版」之后查的还是稳定版 —— 看起来像切换没生效。
+     */
+    fun checkNow(channel: UpdateChannel? = null) {
         // 下载中途重查会把进度条顶掉，用户看到的是「检查中」然后回到起点
         if (_state.value is UpdateState.Downloading) return
         if (!checking.compareAndSet(false, true)) return
         scope.launch {
             _state.value = UpdateState.Checking
-            when (val result = UpdateChecker.check()) {
+            // 没显式指定就现读：用户可能刚在设置里切到测试版，紧接着就点了检查
+            val use = channel ?: UpdateChannel.of(settings.current().updateChannel)
+            when (val result = UpdateChecker.check(channel = use)) {
                 is UpdateResult.Available -> _state.value = UpdateState.Available(result.manifest)
                 UpdateResult.UpToDate -> {
                     // 已经是最新，缓存里的旧包没用了

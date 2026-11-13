@@ -69,7 +69,15 @@ fun MathView(
     maxHeight: Dp? = null,
 ) {
     val measurer = rememberTextMeasurer(cacheSize = 64)
-    val resolved = if (color == Color.Unspecified) Color(0xFFE8E8F0) else color
+    /*
+     * 默认正文色跟着主题走。
+     *
+     * 原来是写死的 `#E8E8F0`（近白）：深色卡片上正好，浅色卡片上就是
+     * 「白字压白纸」—— 对比度 1.04 : 1，用户看到的是一段空白，
+     * 只会以为公式没渲染出来。深色档的色值没变，改的只是「从哪来」。
+     */
+    val palette = rememberCanvasPalette()
+    val resolved = if (color == Color.Unspecified) palette.ink else color
     val sized = if (compact) fontSize * 0.86f else fontSize
     val box = remember(latex, sized, resolved) {
         val node = Latex.parse(latex)
@@ -79,7 +87,7 @@ fun MathView(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+            .background(palette.cardWash)
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         // 高度跟着盒子走：固定高度会把多行公式裁掉，自适应又需要密度换算
@@ -686,9 +694,11 @@ object Latex {
 /** 兜底：解析失败时展示原文，不让一张坏公式把整条消息吞掉 */
 @Composable
 fun MathFallback(latex: String) {
+    // 解析失败时至少要用当前主题的正文色 —— 否则浅色模式下这段原文也是隐形的
+    val palette = rememberCanvasPalette()
     Text(
         text = latex,
         modifier = Modifier.fillMaxWidth().padding(4.dp),
-        style = TextStyle(fontSize = 12.sp, color = Color(0xFFB0B0C0)),
+        style = TextStyle(fontSize = 12.sp, color = palette.inkDim),
     )
 }

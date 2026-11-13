@@ -56,6 +56,7 @@ import com.dshwatch.domain.model.PerfMode
 import com.dshwatch.domain.model.ScreenShapes
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.domain.model.WorkspaceLocation
+import com.dshwatch.domain.update.UpdateChannel
 import com.dshwatch.ui.components.AgentModeDialog
 import com.dshwatch.ui.components.SegmentedRow
 import com.dshwatch.ui.components.SettingCard
@@ -356,6 +357,7 @@ private fun AppearanceGroup(
     var editingAppearance by remember { mutableStateOf(false) }
     var editingAccent by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
+    var editingBackground by remember { mutableStateOf(false) }
     val dark = when (settings.themeMode) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
@@ -421,7 +423,29 @@ private fun AppearanceGroup(
         SettingRow(
             title = s.accentColor,
             trailing = s.accentLabel(settings.accentColor) + " ›",
+            showDivider = true,
             onClick = { editingAccent = true },
+        )
+        /*
+         * 自定义背景放在配色之后。
+         *
+         * 它是「在已经选好的颜色之上，再垫一张自己的图」，属于最后一层 ——
+         * 放在明暗/预设之前，用户会先看到「背景」再看到「配色」，
+         * 心理顺序上像是两件冲突的事，而实际上它们是叠加的。
+         */
+        SettingRow(
+            title = "自定义背景",
+            subtitle = if (settings.customBackground.isNotBlank()) {
+                "已设置 · 遮罩 " + String.format(
+                    java.util.Locale.US,
+                    "%.0f%%",
+                    settings.customBackgroundDim * 100,
+                )
+            } else {
+                "用自己的照片当底，玻璃会透出它"
+            },
+            trailing = if (settings.customBackground.isNotBlank()) "已设置 ›" else "未设置 ›",
+            onClick = { editingBackground = true },
         )
         Spacer(Modifier.height(4.dp))
         SwitchRow(
@@ -717,6 +741,14 @@ private fun AppearanceGroup(
                 }
             },
             buttons = { GlassDialogButton(s.close, onClick = { editingAccent = false }) },
+        )
+    }
+
+    if (editingBackground) {
+        BackgroundDialog(
+            settings = settings,
+            update = update,
+            onDismiss = { editingBackground = false },
         )
     }
 
@@ -1204,6 +1236,39 @@ private fun ConnectionGroup(
             checked = settings.autoCheckUpdate,
             onCheckedChange = { v -> update { it.copy(autoCheckUpdate = v) } },
         )
+        Spacer(Modifier.height(6.dp))
+        /*
+         * 更新通道。
+         *
+         * 放在「自动检查」下面而不是更新页里：这两件事是同一个决定的两半 ——
+         * 要不要查、查哪个。分到两个页面，用户会以为「通道」是某种高级设置，
+         * 而它其实就是「我愿不愿意试新东西」。
+         */
+        Text(
+            text = s.updateChannel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+        )
+        SegmentedRow(
+            options = listOf(s.updateChannelStable, s.updateChannelBeta),
+            selectedIndex = if (UpdateChannel.of(settings.updateChannel) == UpdateChannel.BETA) 1 else 0,
+            onSelect = { index ->
+                val next = if (index == 1) UpdateChannel.BETA else UpdateChannel.STABLE
+                update { it.copy(updateChannel = next.id) }
+                // 切完立刻按新通道查一次：否则用户看到的还是上一条通道的结果，
+                // 会以为「切了没反应」
+                container.updateCenter.checkNow(next)
+            },
+        )
+        if (UpdateChannel.of(settings.updateChannel) == UpdateChannel.BETA) {
+            Text(
+                text = "测试版可能不稳定，遇到问题请切回稳定版并反馈",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp, top = 3.dp, end = 2.dp),
+            )
+        }
         /*
          * 「检查更新」紧跟在开关下面。
          *
