@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.22.2",
+            date = "2026-11-13",
+            highlights = listOf(
+                "新增 从文件导入插件：.tgz / .tar.gz / .json，用系统选择器直接挑",
+                "支持 手表没有文件管理器时，从工作空间里选包",
+                "改进 链接导入能认出「这是网页不是文件」，直接说清怎么拿 raw 地址",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.22.1",
             date = "2026-11-13",
             highlights = listOf(
