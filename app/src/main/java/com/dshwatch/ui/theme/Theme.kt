@@ -16,7 +16,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -52,6 +51,25 @@ val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.ds
  * 几次纯色圆角矩形，比真模糊低一个数量级。
  */
 val LocalGlass = staticCompositionLocalOf { false }
+
+/**
+ * 当前主题是不是深色。
+ *
+ * 为什么不能像以前那样用 `colorScheme.background.luminance() < 0.35` 现算：
+ * **玻璃预设的 background 是全透明的**（见 ThemePresets，透明是玻璃能透出底色
+ * 的前提），而 `luminance()` 只看 RGB、不看 alpha —— `Color.Transparent` 的
+ * 亮度是 0，于是「浅色主题 + 玻璃」也会被算成深色。
+ *
+ * 后果不是「稍微偏暗」，是整条链路集体走错分支：
+ *
+ *   · 弹窗本体走深色分支（还叠了 1.22.3 加的 0.68 黑底）→ 浅色模式下弹窗是黑的
+ *   · 页面底色走深色分支 → 浅色模式下叠一层压暗渐变
+ *   · 用户气泡 / 雾面遮罩的明暗判断同样跟着错
+ *
+ * 用户看到的就是「浅色模式怎么也变黑了」。明暗是**主题的属性**，不该从
+ * 一个可能透明的颜色里反推，所以由 [DshWatchTheme] 直接告诉下面。
+ */
+val LocalDarkTheme = staticCompositionLocalOf { false }
 
 /**
  * 设备画像（屏幕尺寸、圆角安全边距等）。
@@ -201,8 +219,14 @@ fun DshWatchTheme(
     // 玻璃会变成「一块没有底色的灰玻璃」，所以此时强制退回 M3E。
     val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
 
-    // 浅色底判定要在 drawBehind 之外先取好：DrawScope 里读不到 composition
-    val lightBase = remember(colorScheme) { colorScheme.background.luminance() > 0.35f }
+    /*
+     * 浅色底判定直接取主题的明暗，不再看 background 的亮度。
+     *
+     * `Color.Transparent.luminance()` 是 0，而玻璃预设的 background 正是透明的 ——
+     * 于是「浅色 + 玻璃」会被判成深色底：色晕按 1.0 的力度铺（白底上就是一片
+     * 色块），中间还会压一道 0.10~0.30 的黑。浅色模式整个被压暗，根子在这里。
+     */
+    val lightBase = !dark
 
     val baseDensity = LocalDensity.current
     /*
@@ -258,6 +282,7 @@ fun DshWatchTheme(
         LocalUiScaleRecommended provides uiScaleRecommended,
         LocalStrings provides strings,
         LocalGlass provides glass,
+        LocalDarkTheme provides dark,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

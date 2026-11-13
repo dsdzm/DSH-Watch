@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dshwatch.domain.DeviceTier
+import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.theme.LocalPerf
 
@@ -154,7 +155,14 @@ fun Modifier.glassSurface(
     // 在 drawGlassPanel 里从来没被读过 —— 是个死参数，写什么都一样。
     // 更糟的是它跟 Modifiers.kt 的判据（`tier != LOW`）不一致，
     // 将来谁想用它，两条规则会打架。直接删掉。
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.35f
+    /*
+     * 明暗取自主题，不再从 background 反推。
+     *
+     * 玻璃预设的 background 是**透明**的，`luminance()` 只看 RGB，透明色算出来是 0 ——
+     * 于是浅色主题也会被当成深色：卡片走深色分支，再加上 1.22.3 的 0.68 黑底，
+     * 浅色模式直接变成黑卡片配深色字，什么都读不出来。
+     */
+    val dark = LocalDarkTheme.current
     // 浅色底上「压暗」用的颜色：正文色。在 Composable 作用域里取好再传进 DrawScope
     val onSurface = MaterialTheme.colorScheme.onSurface
 

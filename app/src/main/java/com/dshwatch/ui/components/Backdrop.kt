@@ -18,8 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
+import com.dshwatch.ui.theme.LocalDarkTheme
 
 /**
  * 「有弹窗时，整屏背景被糊掉」的总闸。
@@ -131,7 +131,8 @@ fun GlassBackdropHost(
     val real = Build.VERSION.SDK_INT >= MIN_SDK_REAL_BLUR
 
     // 浅色底要更重一点：白底上的雾很容易看不见，糊了跟没糊一样
-    val lightBase = MaterialTheme.colorScheme.background.luminance() > 0.35f
+    // 透明背景反推不出明暗（玻璃预设就是透明的），直接问主题
+    val lightBase = !LocalDarkTheme.current
 
     CompositionLocalProvider(LocalBackdropDepth provides depth) {
         Box(modifier = Modifier.fillMaxSize()) {
