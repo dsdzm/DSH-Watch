@@ -1127,6 +1127,7 @@ private fun PluginsGroup(
 
     if (importing) {
         PluginImportDialog(
+            workspace = container.workspaceStore,
             onDismiss = { importing = false },
             onImported = { m ->
                 if (settings.importedPlugins.size >= PluginRegistry.MAX_MANIFESTS &&

@@ -69,6 +69,20 @@ object PluginImporter {
             val text = runCatching { resp.body?.string().orEmpty() }.getOrElse { t ->
                 return@use PluginLoader.Parsed.Err("读取失败：${t.message.orEmpty().take(80)}")
             }
+            /*
+             * 拉回来一页 HTML，是这条通道最常见的一种失败。
+             *
+             * gist、GitHub、博客上的插件页面，地址栏里那条**不是**文件地址 ——
+             * 分享面板复制出来的往往还是网页版。直接把 HTML 交给 parse，
+             * 用户会看到「不是合法的插件清单」，然后开始怀疑清单本身。
+             * 这里先认出来，把话说到地址上。
+             */
+            if (looksLikeHtml(text)) {
+                return@use PluginLoader.Parsed.Err(
+                    "这个地址返回的是网页，不是清单文件。打开页面找「Raw」或「查看原始文件」，" +
+                        "用那个地址重新导入。",
+                )
+            }
             PluginLoader.parse(text, "链接")
         }
     }
@@ -87,4 +101,13 @@ object PluginImporter {
         if (!lower.startsWith("http://") && !lower.startsWith("https://")) return null
         return s
     }
+
+    /**
+     * 这段内容是不是一张网页。
+     *
+     * 只看开头：合法的清单一定以 `{` 起头，反序列化更严格；而网页一定以
+     * `<` 起头（doctype、html、注释、XML 声明都算）。中间出现 `<` 不算 ——
+     * 提示词里写「<你的名字>」是很正常的事。
+     */
+    internal fun looksLikeHtml(text: String): Boolean = text.trimStart().startsWith("<")
 }

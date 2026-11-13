@@ -328,6 +328,35 @@ class PluginManifestTest {
         assertThat(same.first().displayName).isEqualTo("导入版")
     }
 
+    // ---------------- 导入 ----------------
+
+    /**
+     * 从链接拉回来一页网页时，错误要指向地址，而不是让用户去怀疑清单。
+     *
+     * 这是用户真实撞到的一堵墙：把网页地址粘进「从链接导入」，拉了一整页 HTML
+     * 回来，看到的却是「超过 8000 字符」—— 完全猜不到问题在地址上。
+     */
+    @Test
+    fun `html from a link is called out as a page`() {
+        assertThat(PluginImporter.looksLikeHtml("<!DOCTYPE html><html><body>hi")).isTrue()
+        assertThat(PluginImporter.looksLikeHtml("  <html lang=\"zh\">")).isTrue()
+        assertThat(PluginImporter.looksLikeHtml("""{"id":"dsh-plugin-x"}""")).isFalse()
+        // 提示词里写 <名字> 很正常，不能因为中间有个尖括号就判成网页
+        assertThat(PluginImporter.looksLikeHtml("""{"append":"用 <你的名字> 称呼我"}""")).isFalse()
+    }
+
+    @Test
+    fun `an oversized copy blames the link when it came from one`() {
+        // 注意不能拿空白凑长度：parse 先 trim 再判长度，一片空格会被削成「{」
+        val fat = """{"append":"${"字".repeat(PluginManifest.MAX_CHARS)}"}"""
+        val fromLink = PluginLoader.parse(fat, "链接")
+        assertThat(fromLink).isInstanceOf(PluginLoader.Parsed.Err::class.java)
+        assertThat((fromLink as PluginLoader.Parsed.Err).message).contains("Raw")
+
+        val fromPaste = PluginLoader.parse(fat, "剪贴板")
+        assertThat((fromPaste as PluginLoader.Parsed.Err).message).contains("压缩包")
+    }
+
     // ---------------- 文档里的示例 ----------------
 
     /**

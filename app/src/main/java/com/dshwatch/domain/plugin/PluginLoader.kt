@@ -54,7 +54,22 @@ object PluginLoader {
         val body = text.trim()
         if (body.isEmpty()) return Parsed.Err("内容是空的")
         if (body.length > PluginManifest.MAX_CHARS) {
-            return Parsed.Err("超过 ${PluginManifest.MAX_CHARS} 字符，没加载")
+            /*
+             * 这条上限针对的是「清单文本」，不是文件大小。
+             *
+             * 用户最常见的撞墙方式：把网页地址当 raw 地址粘进「从链接导入」，
+             * 拉回来一整页 HTML，几万字符 —— 而他看到的是「超过 8000 字符」，
+             * 完全猜不到问题出在地址上。所以这里按来源给一句对得上号的话。
+             */
+            val where = if (source.isBlank()) "" else "$source："
+            val hint = if (source.contains("链接")) {
+                "拉回来的多半是一整页网页而不是原始文件 —— 打开页面点「Raw」，再复制那个地址。"
+            } else {
+                "插件清单不该这么长；如果这是压缩包，用「选择文件」导入，别复制文本。"
+            }
+            return Parsed.Err(
+                "$where 内容有 ${body.length} 字符，超过 ${PluginManifest.MAX_CHARS} 上限，没加载。$hint",
+            )
         }
 
         /*
