@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.22.3",
+            date = "2026-11-13",
+            highlights = listOf(
+                "支持 更大的插件包：不再整包读进内存，上限提到 32 MB，二进制包也吃得下",
+                "改进 深色玻璃弹窗加上压暗的底，正文对比度从 2.1:1 提到 4.6:1",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.22.2",
             date = "2026-11-13",
             highlights = listOf(

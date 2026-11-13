@@ -42,7 +42,6 @@ import com.dshwatch.ui.components.GlassDialogRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 
@@ -99,35 +98,22 @@ fun PluginImportDialog(
     }
 
     /**
-     * 把一堆字节交给解析器。
+     * 把一个流交给解析器。
      *
      * 文件名的用途只有一个：出错时告诉用户「是哪个文件不对」。
      * 解析本身按内容判断，不看扩展名 —— 把 .json 改名成 .tgz 是很常见的操作。
+     *
+     * **不要先把整包读成 ByteArray**：包可能几十 MB，而我们要的只是里面
+     * 那 8 KB 的清单。解析器自己会流式跳过用不上的条目。
      */
-    fun absorb(bytes: ByteArray, name: String) {
+    fun absorb(open: () -> InputStream?, name: String) {
         scope.launch {
             busy = true
             error = null
-            val r = withContext(Dispatchers.IO) {
-                runCatching { PluginArchive.parse(bytes, name) }
-                    .getOrElse { t -> PluginLoader.Parsed.Err("读取失败：${t.message.orEmpty().take(80)}") }
-            }
-            busy = false
-            accept(r)
-        }
-    }
-
-    fun absorb(uri: Uri) {
-        scope.launch {
-            busy = true
-            error = null
-            val name = displayName(context, uri) ?: "选中的文件"
             val r = withContext(Dispatchers.IO) {
                 runCatching {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use {
-                        readAtMost(it, PluginArchive.MAX_BYTES)
-                    } ?: return@runCatching PluginLoader.Parsed.Err("打不开这个文件，换一个再试。")
-                    PluginArchive.parse(bytes, name)
+                    val stream = open() ?: return@runCatching PluginLoader.Parsed.Err("打不开这个文件，换一个再试。")
+                    stream.use { PluginArchive.parse(it, name) }
                 }.getOrElse { t ->
                     PluginLoader.Parsed.Err("读取失败：${t.message.orEmpty().take(80)}")
                 }
@@ -145,7 +131,12 @@ fun PluginImportDialog(
      * 限死任何一个类别都会让文件变灰选不中。真正的过滤在解析阶段做。
      */
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { absorb(it) }
+        uri?.let { u ->
+            absorb(
+                open = { context.contentResolver.openInputStream(u) },
+                name = displayName(context, u) ?: "选中的文件",
+            )
+        }
     }
 
     LaunchedEffect(mode) {
@@ -255,23 +246,10 @@ fun PluginImportDialog(
                                 subtitle = humanSize(e.size),
                                 enabled = !busy,
                                 onClick = {
-                                    scope.launch {
-                                        busy = true
-                                        error = null
-                                        val r = withContext(Dispatchers.IO) {
-                                            runCatching {
-                                                val f = File(workspace.rootDir(), e.path)
-                                                val bytes = f.inputStream().use {
-                                                    readAtMost(it, PluginArchive.MAX_BYTES)
-                                                }
-                                                PluginArchive.parse(bytes, e.path.substringAfterLast('/'))
-                                            }.getOrElse { t ->
-                                                PluginLoader.Parsed.Err("读取失败：${t.message.orEmpty().take(80)}")
-                                            }
-                                        }
-                                        busy = false
-                                        accept(r)
-                                    }
+                                    absorb(
+                                        open = { File(workspace.rootDir(), e.path).inputStream() },
+                                        name = e.path.substringAfterLast('/'),
+                                    )
                                 },
                             )
                         }
@@ -372,26 +350,6 @@ private fun humanSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
-}
-
-/**
- * 读一个流，最多 [limit] 字节。
- *
- * 超限直接抛异常而不是截断：截断后的 gzip 一定解不开，用户会拿到
- * 「文件损坏」这种指向错误方向的说法。
- */
-private fun readAtMost(input: InputStream, limit: Int): ByteArray {
-    val out = ByteArrayOutputStream()
-    val buf = ByteArray(16 * 1024)
-    var total = 0
-    while (true) {
-        val n = input.read(buf)
-        if (n < 0) break
-        total += n
-        if (total > limit) throw IllegalArgumentException("文件超过 ${limit / 1024 / 1024} MB")
-        out.write(buf, 0, n)
-    }
-    return out.toByteArray()
 }
 
 /** SAF 给的文件名，只用于报错时指名道姓 */

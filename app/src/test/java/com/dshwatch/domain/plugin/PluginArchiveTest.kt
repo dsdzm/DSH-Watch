@@ -180,20 +180,69 @@ class PluginArchiveTest {
         assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
     }
 
+    /** 选错文件（比如一个安装包）时要在读之前就停 */
     @Test
-    fun `an oversized archive is refused before it is read`() {
-        val big = ByteArray(PluginArchive.MAX_BYTES + 1)
-        big[0] = 0x1f
-        big[1] = 0x8b.toByte()
-        val r = PluginArchive.parse(big)
+    fun `a file above the packed cap is stopped`() {
+        val pkg = gzip(tarBytes(entry("dsh-plugin.json", goodJson)))
+        val r = PluginArchive.parse(
+            pkg.inputStream(), "big.tgz",
+            maxPacked = 128,
+            maxUnpacked = 1 shl 20,
+        )
         assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
         assertThat((r as PluginLoader.Parsed.Err).message).contains("上限")
+    }
+
+    /**
+     * gzip 炸弹：压缩后几 KB，解出来几十 GB。
+     *
+     * 必须在**解的过程中**停 —— 等解完再量长度，内存已经没了。
+     */
+    @Test
+    fun `a bomb is stopped at the unpacked cap`() {
+        val pkg = gzip(
+            tarBytes(
+                entry("package/blob.bin", "0".repeat(8 * 1024)),
+                entry("dsh-plugin.json", goodJson),
+            ),
+        )
+        val r = PluginArchive.parse(
+            pkg.inputStream(), "bomb.tgz",
+            maxPacked = 1 shl 20,
+            maxUnpacked = 2048,
+        )
+        assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
+        assertThat((r as PluginLoader.Parsed.Err).message).contains("解压后")
+    }
+
+    /**
+     * 包里夹着一张 300 KB 的截图，清单照常读到。
+     *
+     * 这是「2 MB 装不进去」那个 bug 的回归点：以前是整包读进内存再解析，
+     * 包大一点就被挡在门外；现在用不到的条目只是 skip，不产生任何分配。
+     */
+    @Test
+    fun `a big unrelated file does not block the manifest`() {
+        val pkg = gzip(
+            tarBytes(
+                entry("package/dsh-plugin.json", goodJson),
+                entry("package/screenshots/demo.png", "x".repeat(300 * 1024)),
+            ),
+        )
+        val r = PluginArchive.parse(
+            pkg.inputStream(), "big.tgz",
+            maxPacked = 1 shl 20,
+            maxUnpacked = 1 shl 20,
+        )
+        assertThat(r).isInstanceOf(PluginLoader.Parsed.Ok::class.java)
     }
 
     /** 包里的清单自己超长时，提示要指向清单而不是「没找到」 */
     @Test
     fun `an oversized manifest is not confused with a missing one`() {
-        val fat = goodJson + " ".repeat(70 * 1024)
+        // 注意不能用空格凑长度：解析前会 trim，末尾的空白等于不存在。
+        // 100K 个汉字 = 300 KB，超过单条目 256 KB 的读取上限
+        val fat = goodJson.replace("先给结论。", "很".repeat(100 * 1024))
         val pkg = gzip(tarBytes(entry("dsh-plugin.json", fat)))
         val r = PluginArchive.parse(pkg)
         assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)

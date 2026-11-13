@@ -120,13 +120,22 @@ fun GlassDialog(
      *
      * 注意基准是**直径**不是屏幕高：这台机器 412×502，屏幕比圆高 72px。
      *
-     * 所以两件事一起收：宽度 0.74d，正文上限压到 0.30d。
+     * 所以宽度收 0.74d。正文上限给 0.36d：
+     *
+     *   矩形四角不出圆的条件是 W² + H² ≤ (2r)²，W = 0.74d：
+     *   0.5476d² + H² ≤ d²  →  H ≤ 0.673d ≈ 277dp（d = 412）
+     *
+     * 而 H 里除了正文还有标题、按钮、上下 padding，约 98dp。
+     * 所以正文最多 179dp —— 0.36d = 148dp 还留着 31dp 余量。
+     *
+     * 原来写的是 0.30d（124dp），四舍五入等于「菜单多到第三项就开始滚」，
+     * 而屏幕明明还有地方。调到 0.36 让四项菜单能一屏看完。
      */
     val circle = com.dshwatch.ui.wear.LocalCircle.current
     val contentMax = if (circle == null) {
         maxContentHeight.dp
     } else {
-        minOf(maxContentHeight.toFloat(), circle.diameter.value * 0.30f).dp
+        minOf(maxContentHeight.toFloat(), circle.diameter.value * 0.36f).dp
     }
     val widthMod = if (circle == null) Modifier.fillMaxWidth() else Modifier.fillMaxWidth(0.74f)
 
@@ -406,6 +415,14 @@ fun GlassDialogButton(
             .glassSurface(
                 shape = CircleShape,
                 tint = if (primary) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                /*
+                 * 主按钮做实心。
+                 *
+                 * 半透明的主色叠在**已经压暗**的弹窗底上，会暗到看不出是主按钮 ——
+                 * 而且 onPrimary 的文字压在偏暗的染色上，对比度也跟着掉。
+                 * 实心主色是这一层唯一「一眼看得出该按哪个」的东西。
+                 */
+                solid = primary,
                 interaction = src,
             )
             .tap(quiet = true, interaction = src, onClick = withHaptic(onClick))
