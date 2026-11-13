@@ -47,6 +47,7 @@ import com.dshwatch.domain.bili.BiliMode
 import com.dshwatch.domain.bili.BiliModes
 import com.dshwatch.domain.bili.BiliTones
 import com.dshwatch.domain.plugin.PluginLoader
+import com.dshwatch.domain.plugin.PluginManifest
 import com.dshwatch.domain.plugin.PluginRegistry
 import com.dshwatch.domain.model.Appearances
 import com.dshwatch.domain.model.AppSettings
@@ -1023,6 +1024,25 @@ private fun RuntimeGroup(
 // ---------------------------------------------------------------------------
 
 /**
+ * 导入成功后那句提示里的影响面。
+ *
+ * 用户粘完一份清单，最想知道的是「它动了什么」。只说「已导入」等于
+ * 让他自己去翻，而清单原文可能有一屏那么长。
+ */
+private fun impactOf(m: PluginManifest): String {
+    val t = m.tools
+    val parts = buildList {
+        if (t != null) {
+            if (t.hide.isNotEmpty()) add("禁用 ${t.hide.size} 个工具")
+            if (t.only.isNotEmpty()) add("只保留 ${t.only.size} 个工具")
+            if (t.confirm.isNotEmpty()) add("${t.confirm.size} 个改为每次确认")
+        }
+    }
+    if (parts.isEmpty()) return if (m.prompt != null) "（提示词插件）" else ""
+    return "：" + parts.joinToString("、")
+}
+
+/**
  * 插件开关。
  *
  * 每个开关下面都写清"它到底改了模型的什么" —— 这一页真正的风险不是点错，
@@ -1041,6 +1061,8 @@ private fun PluginsGroup(
     val all = PluginRegistry.allFor(settings)
     var notice by remember { mutableStateOf<String?>(null) }
     var scanning by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
 
     SettingCard {
         all.forEach { plugin ->
@@ -1065,9 +1087,15 @@ private fun PluginsGroup(
     Spacer(Modifier.height(6.dp))
     SettingCard {
         SettingRow(
+            title = "导入插件",
+            subtitle = notice ?: "从剪贴板或链接装一份清单",
+            trailing = "＋",
+            showDivider = true,
+            onClick = { importing = true },
+        )
+        SettingRow(
             title = if (scanning) "正在扫描…" else "重新扫描插件目录",
-            subtitle = notice
-                ?: "把 JSON 清单放进工作空间的 plugins/ 目录，点这里加载",
+            subtitle = "把 JSON 放进工作空间的 plugins/ 目录，点这里加载",
             trailing = "↻",
             onClick = {
                 if (!scanning) {
@@ -1083,6 +1111,50 @@ private fun PluginsGroup(
                         scanning = false
                     }
                 }
+            },
+        )
+        // 导入的插件在文件系统里没有对应文件，删不掉就只能清空设置
+        if (settings.importedPlugins.isNotEmpty()) {
+            SettingRow(
+                title = "移除导入的插件",
+                subtitle = "已导入 ${settings.importedPlugins.size} 个",
+                trailing = "－",
+                showDivider = true,
+                onClick = { removing = true },
+            )
+        }
+    }
+
+    if (importing) {
+        PluginImportDialog(
+            onDismiss = { importing = false },
+            onImported = { m ->
+                if (settings.importedPlugins.size >= PluginRegistry.MAX_MANIFESTS &&
+                    settings.importedPlugins.none { it.id == m.id }
+                ) {
+                    notice = "最多导入 ${PluginRegistry.MAX_MANIFESTS} 个，先移除一个"
+                    return@PluginImportDialog
+                }
+                update { cur ->
+                    cur.copy(
+                        importedPlugins = cur.importedPlugins.filterNot { it.id == m.id } + m,
+                    )
+                }
+                notice = "已导入「${m.name}」${impactOf(m)}，开关在上面（默认关闭）"
+            },
+        )
+    }
+
+    if (removing) {
+        PluginRemoveDialog(
+            manifests = settings.importedPlugins,
+            onDismiss = { removing = false },
+            onRemove = { m ->
+                update { cur -> cur.copy(importedPlugins = cur.importedPlugins.filterNot { it.id == m.id }) }
+                // 开关状态也要一起清：留着 id 在 enabledPlugins 里，导入同 id 的新版本会「自动开着」
+                update { cur -> cur.copy(enabledPlugins = cur.enabledPlugins - m.id) }
+                notice = "已移除「${m.name}」"
+                if (settings.importedPlugins.size <= 1) removing = false
             },
         )
     }
