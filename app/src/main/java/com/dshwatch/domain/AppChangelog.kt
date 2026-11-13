@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.0-beta.1",
+            date = "2026-11-13",
+            highlights = listOf(
+                "新增 测试更新通道：设置里切「稳定版 / 测试版」，测试版能收到预发布版本",
+                "新增 自定义背景：从相册选一张图，支持虚化与铺满",
+                "修复 浅色模式下全屏画板变成黑底深字，整屏推导只剩轮廓",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.22.4",
             date = "2026-11-13",
             highlights = listOf(

@@ -3,6 +3,7 @@ package com.dshwatch.ui.canvas
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.dshwatch.ui.theme.LocalDarkTheme
@@ -31,11 +32,16 @@ import com.dshwatch.ui.theme.LocalDarkTheme
  * 所以正文与次要文字用主题色（保证和界面一致），三个语义色用固定的色相，
  * 只在明暗两档之间调整**明度**，保证两档都过 4.5 : 1。
  *
- * ## 全屏画布是另一回事
+ * ## 全屏画布：底色和字色必须同源
  *
- * 全屏时背景固定是近黑的（`CanvasFullscreen` 自己画的那层），与主题无关 ——
- * 用户点开全屏是为了看图，不是看壁纸。所以那里固定用 [darkPalette]，
- * 不管当前是浅色还是深色主题。
+ * 全屏时底色由外壳自己画（[com.dshwatch.ui.canvas.CanvasFullscreen]），
+ * 文字颜色则由各个 View 自己取。这两件事一旦各走各的，就会出一个很典型的 bug：
+ * 外壳固定画了近黑底（「点开全屏是为了看图」），View 却在浅色主题下取了浅色档的
+ * 深色字 —— 深字压黑底，一整屏推导只剩几个模糊的轮廓。
+ *
+ * 所以规矩改成：**谁决定底色，谁就决定调色板**。外壳算出唯一的 palette，
+ * 通过 [LocalCanvasPalette] 下发给所有子 View，底色取同一个 palette 的
+ * [CanvasPalette.cardBase]。两边同源，就不可能再对不上。
  */
 @Immutable
 data class CanvasPalette(
@@ -68,6 +74,12 @@ data class CanvasPalette(
     val pointHalo: Color,
     /** 坐标轴 */
     val axis: Color,
+    /**
+     * 浮在背景上的小块「按钮」底色：全屏的关闭按钮、标题胶囊。
+     *
+     * 不能写死成半透明白 —— 浅色底上白叠白等于没有按钮，用户只能靠猜位置去点。
+     */
+    val chromeWash: Color,
     /**
      * 卡片底色（半透明的一层）。
      *
@@ -111,6 +123,7 @@ fun darkPalette(): CanvasPalette = CanvasPalette(
     point = Color(0xFFFF6B6B),
     pointHalo = Color(0x66FFFFFF),
     axis = Color(0x33FFFFFF),
+    chromeWash = Color.White.copy(alpha = 0.12f),
     cardWash = Color.White.copy(alpha = 0.04f),
     cardBase = Color(0xFF0E0F14),
 )
@@ -139,10 +152,20 @@ fun lightPalette(): CanvasPalette = CanvasPalette(
     point = Color(0xFFD93B3B),
     pointHalo = Color(0x33000000),
     axis = Color(0x33000000),
+    chromeWash = Color(0xFF1B1B1F).copy(alpha = 0.08f),
     // 浅色下卡片靠「压一点」成形，理由见 cardWash 的注释
     cardWash = Color(0xFF1B1B1F).copy(alpha = 0.05f),
     cardBase = Color(0xFFF7F8FA),
 )
+
+/**
+ * 外层指定的调色板。
+ *
+ * 只在「底色不是常规主题底色」的地方用 —— 目前就是全屏画布。子 View 一律
+ * 先看这里，没有再按主题推。这样外壳换底色时不需要逐个给 View 传参，
+ * 也就不会漏掉某一个（漏掉正是深字压黑底的成因）。
+ */
+val LocalCanvasPalette = compositionLocalOf<CanvasPalette?> { null }
 
 /**
  * 当前主题该用哪一档。
@@ -151,11 +174,29 @@ fun lightPalette(): CanvasPalette = CanvasPalette(
  * 见 Theme.kt 里那段说明）。
  */
 @Composable
-fun rememberCanvasPalette(): CanvasPalette {
-    val dark = LocalDarkTheme.current
+fun rememberCanvasPalette(): CanvasPalette =
+    LocalCanvasPalette.current ?: themedPalette(LocalDarkTheme.current)
+
+/**
+ * 指定明暗的调色板，用于「外框自己知道该是哪一档」的场合。
+ *
+ * 仍然优先让位给 [LocalCanvasPalette]：已经有人定过底色，就别再下一层判断。
+ */
+@Composable
+fun rememberCanvasPalette(dark: Boolean): CanvasPalette =
+    LocalCanvasPalette.current ?: themedPalette(dark)
+
+@Composable
+private fun themedPalette(dark: Boolean): CanvasPalette {
+    val base = if (dark) darkPalette() else lightPalette()
     // 卡片文字最终落在 surface / surfaceVariant 上，正文色直接取主题的，
     // 这样换预设、换强调色时画布文字和正文永远是一致的
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val base = if (dark) darkPalette() else lightPalette()
-    return if (dark) base else base.copy(ink = onSurface, inkDim = MaterialTheme.colorScheme.onSurfaceVariant)
+    return if (dark) {
+        base
+    } else {
+        base.copy(
+            ink = MaterialTheme.colorScheme.onSurface,
+            inkDim = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
