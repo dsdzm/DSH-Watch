@@ -77,6 +77,36 @@ data class UpdateManifest(
     val publishedAt: String = "",
 )
 
+/**
+ * 更新通道。
+ *
+ * ## 为什么要两个通道
+ *
+ * 发版节奏改成「攒一批再发」之后，中间那些改动总得有人先试 —— 否则等攒够
+ * 才发现方向错了，返工的成本比早试一次高得多。但把半成品推给所有人是不负责任的：
+ * 用户装 App 是为了用，不是为了当测试机。
+ *
+ * 所以拆成两条：
+ *
+ * | 通道 | 看到什么 | 适合谁 |
+ * |---|---|---|
+ * | [STABLE] | `/releases/latest`，GitHub 上「最新正式版」 | 默认，所有人 |
+ * | [BETA] | `/releases` 列表里 versionCode 最大的那条，**含预发布** | 愿意先试的人 |
+ *
+ * 两条通道用的都是**同一个安装包格式、同一套签名**，区别只在「查哪一次发布」。
+ * 用户在设置里随时能切回来 —— 切回稳定版不会降级，只是不再提示测试版。
+ */
+enum class UpdateChannel(val id: String) {
+    STABLE("stable"),
+    BETA("beta"),
+    ;
+
+    companion object {
+        /** 认不出的值一律当稳定版：这是「什么都不做」的那一侧，出错时最安全 */
+        fun of(id: String?): UpdateChannel = entries.firstOrNull { it.id == id } ?: STABLE
+    }
+}
+
 sealed interface UpdateResult {
     data object UpToDate : UpdateResult
 
@@ -124,7 +154,12 @@ object UpdateChecker {
         return mirrors + url
     }
 
-    fun releaseApiUrl(): String = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+    fun releaseApiUrl(channel: UpdateChannel = UpdateChannel.STABLE): String = when (channel) {
+        // 单条：GitHub 自己保证「最新且非预发布」，不用我们再排一遍
+        UpdateChannel.STABLE -> "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+        // 列表：一次拿 30 条，预发布也在里面，由 parseReleases 挑 versionCode 最大的
+        UpdateChannel.BETA -> "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=30"
+    }
 
     /**
      * 有没有新版本。
@@ -138,6 +173,7 @@ object UpdateChecker {
      * 查一次并和本机版本比较。
      */
     suspend fun check(
+        channel: UpdateChannel = UpdateChannel.STABLE,
         currentVersionCode: Int = BuildConfig.VERSION_CODE,
     ): UpdateResult = withContext(Dispatchers.IO) {
         val client = Http.client.newBuilder()
@@ -149,7 +185,7 @@ object UpdateChecker {
         runCatching {
             client.newCall(
                 Request.Builder()
-                    .url(releaseApiUrl())
+                    .url(releaseApiUrl(channel))
                     .header("Accept", "application/vnd.github+json")
                     .header("X-GitHub-Api-Version", "2022-11-28")
                     .build(),
@@ -165,7 +201,10 @@ object UpdateChecker {
 
                 val body = resp.body?.string().orEmpty()
                 if (body.isBlank()) return@use UpdateResult.Failed("回应是空的")
-                parseRelease(body, currentVersionCode)
+                when (channel) {
+                    UpdateChannel.STABLE -> parseRelease(body, currentVersionCode)
+                    UpdateChannel.BETA -> parseReleases(body, currentVersionCode)
+                }
             }
         }.getOrElse {
             Logx.w(TAG, "检查更新失败：${it.message}")
@@ -184,11 +223,52 @@ object UpdateChecker {
         val release = Jsonx.lenient.decodeFromString<GhRelease>(json)
         val asset = release.assets.firstOrNull { ASSET.matches(it.name) }
             ?: return UpdateResult.Failed("这次发布里没有安装包")
+        val manifest = manifestOf(release, asset)
+            ?: return UpdateResult.Failed("安装包名里没有版本号")
+        return decide(manifest, currentVersionCode)
+    }
 
+    /**
+     * 测试通道：一次给你一串发布，挑 versionCode 最大的那个。
+     *
+     * ## 为什么不是「取第一条」
+     *
+     * GitHub 的列表按**发布时间**排，而不是按 versionCode。两者绝大多数时候一致，
+     * 但有两种情况会岔开：
+     *
+     *  · 补发一个旧版本（比如 1.22.3 的修复包在 1.23.0 之后才发）；
+     *  · 先打了 tag、过一会儿才上传资产。
+     *
+     * 按时间取第一条，遇到这两种就会「提示更新，装完还是旧的」，用户得反复点。
+     * 按 versionCode 取最大，语义和「该装哪个包」完全一致。
+     *
+     * 草稿（draft）要排除：它只有仓库管理员看得见，普通 token 请求本来也拿不到，
+     * 但万一以后换成带权限的 token，草稿不该出现在用户的更新提示里。
+     */
+    internal fun parseReleases(json: String, currentVersionCode: Int): UpdateResult {
+        val releases = runCatching {
+            Jsonx.lenient.decodeFromString<List<GhRelease>>(json)
+        }.getOrNull() ?: return UpdateResult.Failed("发布列表读不出来")
+
+        val best = releases.asSequence()
+            .filterNot { it.draft }
+            .mapNotNull { release ->
+                release.assets.firstOrNull { ASSET.matches(it.name) }
+                    ?.let { manifestOf(release, it) }
+            }
+            // 只接受 https：别被中间人换成一个 http 地址
+            .filter { it.url.startsWith("https://") }
+            .maxByOrNull { it.versionCode }
+            ?: return UpdateResult.Failed("发布列表里没有可用的安装包")
+
+        return decide(best, currentVersionCode)
+    }
+
+    /** 一条发布 → 更新清单。缺安装包或者名字里没有版本号时返回 null */
+    private fun manifestOf(release: GhRelease, asset: GhAsset): UpdateManifest? {
         val code = ASSET.find(asset.name)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        if (code <= 0) return UpdateResult.Failed("安装包名里没有版本号")
-
-        val manifest = UpdateManifest(
+        if (code <= 0) return null
+        return UpdateManifest(
             versionCode = code,
             versionName = release.tagName.removePrefix("v"),
             url = asset.url,
@@ -197,14 +277,15 @@ object UpdateChecker {
             notes = notesOf(release.body),
             publishedAt = release.publishedAt,
         )
+    }
 
-        return when {
-            manifest.url.isBlank() -> UpdateResult.Failed("安装包没有下载地址")
-            // 只接受 https：别被中间人换成一个 http 地址
-            !manifest.url.startsWith("https://") -> UpdateResult.Failed("下载地址不是 HTTPS")
-            isNewer(manifest.versionCode, currentVersionCode) -> UpdateResult.Available(manifest)
-            else -> UpdateResult.UpToDate
-        }
+    /** 清单 → 结论。校验与比较只写这一处，两个通道共用 */
+    private fun decide(manifest: UpdateManifest, currentVersionCode: Int): UpdateResult = when {
+        manifest.url.isBlank() -> UpdateResult.Failed("安装包没有下载地址")
+        // 只接受 https：别被中间人换成一个 http 地址
+        !manifest.url.startsWith("https://") -> UpdateResult.Failed("下载地址不是 HTTPS")
+        isNewer(manifest.versionCode, currentVersionCode) -> UpdateResult.Available(manifest)
+        else -> UpdateResult.UpToDate
     }
 
     /**

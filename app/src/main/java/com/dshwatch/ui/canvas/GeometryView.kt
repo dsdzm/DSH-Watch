@@ -99,9 +99,11 @@ fun GeometryView(
     }
 
     val measurer = rememberTextMeasurer(cacheSize = 64)
+    // 同上：几何图靠颜色区分「线段 / 角 / 顶点」，浅色模式下必须整体换一档
+    val palette = rememberCanvasPalette()
     val labelStyle = TextStyle(
         fontSize = if (compact) 10.sp else 12.sp,
-        color = Color(0xFFDCE4F2),
+        color = palette.ink,
         fontWeight = FontWeight.Medium,
     )
 
@@ -114,7 +116,7 @@ fun GeometryView(
             // 全屏时交给外层撑满（见 MindMapView 同处注释）
             .then(if (compact) Modifier.height(170.dp) else Modifier.fillMaxSize())
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.04f))
+            .background(palette.cardWash)
             .pointerInput(scene) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     scale = (scale * zoom).coerceIn(0.5f, 4f)
@@ -137,7 +139,7 @@ fun GeometryView(
             fun px(x: Float) = ox + (x - scene.minX) * k
             fun py(y: Float) = oy + (scene.maxY - y) * k
 
-            if (scene.axes) drawAxes(scene, ::px, ::py, k)
+            if (scene.axes) drawAxes(scene, ::px, ::py, k, palette.axis)
 
             // 1) 多边形填充（最底层，避免盖住线）
             scene.polygons.forEach { poly ->
@@ -149,15 +151,15 @@ fun GeometryView(
                     if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
                 path.close()
-                drawPath(path, Color(0xFF4A7EDB).copy(alpha = 0.16f))
-                drawPath(path, Color(0xFF6E9BD6), style = Stroke(width = 1.6f))
+                drawPath(path, palette.shapeFill)
+                drawPath(path, palette.shapeStroke, style = Stroke(width = 1.6f))
             }
 
             // 2) 线段 / 直线 / 圆
             scene.segments.forEach { seg ->
                 val (start, end) = segmentScreen(seg, ::px, ::py)
                 drawLine(
-                    color = Color(0xFF8FB4E8),
+                    color = palette.shapeStroke,
                     start = start,
                     end = end,
                     strokeWidth = 2f,
@@ -172,7 +174,7 @@ fun GeometryView(
                 val uy = dy / len
                 val ext = (spanX + spanY) * 2f
                 drawLine(
-                    color = Color(0xFF8FB4E8).copy(alpha = 0.85f),
+                    color = palette.shapeStroke.copy(alpha = 0.85f),
                     start = Offset(px(a.first - ux * ext), py(a.second - uy * ext)),
                     end = Offset(px(a.first + ux * ext), py(a.second + uy * ext)),
                     strokeWidth = 1.6f,
@@ -182,7 +184,7 @@ fun GeometryView(
             scene.circles.forEach { c ->
                 val r = c.r * k
                 drawCircle(
-                    color = Color(0xFF8FB4E8),
+                    color = palette.shapeStroke,
                     radius = r,
                     center = Offset(px(c.cx), py(c.cy)),
                     style = Stroke(width = 1.8f),
@@ -202,7 +204,7 @@ fun GeometryView(
                 while (sweep > 180f) sweep -= 360f
                 while (sweep < -180f) sweep += 360f
                 drawArc(
-                    color = Color(0xFFE0B04A),
+                    color = palette.accent,
                     startAngle = startDeg,
                     sweepAngle = sweep,
                     useCenter = false,
@@ -214,7 +216,7 @@ fun GeometryView(
                     val mid = Math.toRadians(((startDeg + endDeg) / 2).toDouble())
                     val lx = px(ang.cx) + (cos(mid) * r * k * 1.45f).toFloat()
                     val ly = py(ang.cy) - (sin(mid) * r * k * 1.45f).toFloat()
-                    drawLabel(measurer, ang.label, lx, ly, labelStyle, Color(0xFFE0B04A))
+                    drawLabel(measurer, ang.label, lx, ly, labelStyle, palette.accent)
                 }
             }
 
@@ -222,10 +224,10 @@ fun GeometryView(
             scene.points.forEach { p ->
                 val cx = px(p.x)
                 val cy = py(p.y)
-                drawCircle(Color(0xFFFF6B6B), radius = 3.4f, center = Offset(cx, cy))
-                drawCircle(Color(0x66FFFFFF), radius = 5.6f, center = Offset(cx, cy), style = Stroke(0.8f))
+                drawCircle(palette.point, radius = 3.4f, center = Offset(cx, cy))
+                drawCircle(palette.pointHalo, radius = 5.6f, center = Offset(cx, cy), style = Stroke(0.8f))
                 if (p.label.isNotBlank()) {
-                    drawLabel(measurer, p.label, cx + 6f, cy - 14f, labelStyle, Color(0xFFDCE4F2))
+                    drawLabel(measurer, p.label, cx + 6f, cy - 14f, labelStyle, palette.ink)
                 }
             }
 
@@ -237,7 +239,7 @@ fun GeometryView(
                     x = px(t.x),
                     y = py(t.y),
                     style = labelStyle,
-                    color = Color(0xFFB9C6DC),
+                    color = palette.inkDim,
                 )
             }
         }
@@ -284,11 +286,12 @@ private fun DrawScope.drawAxes(
     px: (Float) -> Float,
     py: (Float) -> Float,
     k: Float,
+    axis: Color,
 ) {
     val x0 = px(0f)
     val y0 = py(0f)
-    drawLine(Color(0x33FFFFFF), Offset(0f, y0), Offset(size.width, y0), 1f)
-    drawLine(Color(0x33FFFFFF), Offset(x0, 0f), Offset(x0, size.height), 1f)
+    drawLine(axis, Offset(0f, y0), Offset(size.width, y0), 1f)
+    drawLine(axis, Offset(x0, 0f), Offset(x0, size.height), 1f)
     // 刻度只画整数位，且步长随缩放变化，避免密到糊成一条线
     val step = when {
         k > 60 -> 1f
@@ -301,7 +304,7 @@ private fun DrawScope.drawAxes(
     for (i in from..to) {
         val v = i * step
         val x = px(v)
-        drawLine(Color(0x33FFFFFF), Offset(x, y0 - 3f), Offset(x, y0 + 3f), 1f)
+        drawLine(axis, Offset(x, y0 - 3f), Offset(x, y0 + 3f), 1f)
     }
 }
 

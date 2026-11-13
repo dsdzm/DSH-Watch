@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.update.UpdateInstall
+import com.dshwatch.domain.update.UpdateChannel
 import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.components.KeyValueRow
 import com.dshwatch.ui.components.PrimaryButton
@@ -100,6 +101,16 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
                 // 「上次检查」写在版本下面：用户点进来最常见的两个问题就是
                 // 「我是什么版本」和「上次到底查过没有」。
                 KeyValueRow(s.updateLastCheck, lastCheckText(settings.lastUpdateCheckAt))
+                // 通道写在页面上：用户切到测试版之后，过几天会忘记自己收的是哪条线，
+                // 而「为什么我的版本号比别人的高」这个问题只能在这里找到答案
+                KeyValueRow(
+                    s.updateChannel,
+                    if (UpdateChannel.of(settings.updateChannel) == UpdateChannel.BETA) {
+                        s.updateChannelBeta
+                    } else {
+                        s.updateChannelStable
+                    },
+                )
                 (state as? UpdateState.Available)?.let { available ->
                     KeyValueRow(
                         s.updateLatest,

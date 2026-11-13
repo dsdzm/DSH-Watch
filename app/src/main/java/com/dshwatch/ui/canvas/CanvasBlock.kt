@@ -79,17 +79,18 @@ fun CanvasCard(
     expandable: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val palette = rememberCanvasPalette()
     val accent = when (kind) {
-        CanvasKind.MATH -> Color(0xFF8FB4E8)
-        CanvasKind.MINDMAP -> Color(0xFF7FD1AE)
-        CanvasKind.GEOMETRY -> Color(0xFFE0B04A)
+        CanvasKind.MATH -> palette.math
+        CanvasKind.MINDMAP -> palette.mind
+        CanvasKind.GEOMETRY -> palette.geom
     }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(palette.cardWash)
             .padding(8.dp),
     ) {
         Row(
@@ -146,14 +147,18 @@ fun CanvasFullscreen(
     ) {
         // 圆屏和方屏得走两套布局。圆屏上「铺满」等于四个角全被切掉，
         // 右上角那个关闭按钮直接落在圆外 —— 全屏进去就出不来。
+        //
+        // 全屏的底固定是近黑，**不跟主题走**：点开全屏是为了看图，
+        // 浅色主题下把图摊在一张白纸上，细线和小字反而更糊。
+        val fullscreenPalette = darkPalette()
         val circle = com.dshwatch.ui.wear.LocalCircle.current
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xF00B0D12)),
         ) {
-            if (circle != null) RoundFullscreen(circle, kind, source, onClose)
-            else WideFullscreen(kind, source, onClose)
+            if (circle != null) RoundFullscreen(circle, kind, source, onClose, fullscreenPalette)
+            else WideFullscreen(kind, source, onClose, fullscreenPalette)
         }
     }
 }
@@ -179,6 +184,7 @@ private fun RoundFullscreen(
     kind: CanvasKind,
     source: String,
     onClose: () -> Unit,
+    palette: CanvasPalette,
 ) {
     val d = circle.diameter
     Box(Modifier.fillMaxSize()) {
@@ -227,7 +233,7 @@ private fun RoundFullscreen(
             Text(
                 text = "✕",
                 style = MaterialTheme.typography.labelLarge,
-                color = Color(0xFFDCE4F2),
+                color = palette.ink,
             )
         }
     }
@@ -239,6 +245,7 @@ private fun WideFullscreen(
     kind: CanvasKind,
     source: String,
     onClose: () -> Unit,
+    palette: CanvasPalette,
 ) {
     Column(
         modifier = Modifier
@@ -253,12 +260,12 @@ private fun WideFullscreen(
             Text(
                 text = kind.title,
                 style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFF8FB4E8),
+                color = palette.math,
             )
             Text(
                 text = "关闭 ✕",
                 style = MaterialTheme.typography.labelMedium,
-                color = Color(0xFF9AA7BD),
+                color = palette.inkDim,
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color.White.copy(alpha = 0.08f))

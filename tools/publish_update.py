@@ -18,6 +18,7 @@
     python3 tools/publish_update.py --notes "修复 xxx"
     python3 tools/publish_update.py --dry-run       # 只打印将要发生什么
     python3 tools/publish_update.py --force         # 同名 release 已存在时删掉重建
+    python3 tools/publish_update.py --beta          # 发成预发布，只有测试通道能看到
 
 凭证放项目根 `.env`：
 
@@ -178,6 +179,12 @@ def main() -> int:
     ap.add_argument("--notes", action="append", default=[], help="更新说明，可重复")
     ap.add_argument("--dry-run", action="store_true", help="只打印计划，不发请求")
     ap.add_argument("--force", action="store_true", help="同名 release 已存在时删除重建")
+    ap.add_argument(
+        "--beta",
+        action="store_true",
+        help="发成预发布（prerelease）：/releases/latest 不会指向它，"
+             "只有 App 里切到「测试版」通道的用户能看到",
+    )
     args = ap.parse_args()
 
     apk = Path(args.apk)
@@ -192,6 +199,7 @@ def main() -> int:
     print(f"版本    {version_name} ({version_code})")
     print(f"tag     {tag}")
     print(f"资产    {asset_name}   {apk.stat().st_size / 1024 / 1024:.1f} MB")
+    print(f"通道    {'测试版（预发布）' if args.beta else '稳定版'}")
     print(f"说明    {len(notes)} 条")
     for n in notes:
         print(f"        · {n}")
@@ -203,7 +211,10 @@ def main() -> int:
         print("\n[dry-run] 将执行：")
         print(f"  1. POST /repos/<repo>/releases          创建 tag {tag}")
         print(f"  2. POST uploads.github.com/.../assets   上传 {asset_name}")
-        print("  3. GET  /repos/<repo>/releases/latest   回读校验")
+        if args.beta:
+            print(f"  3. GET  /repos/<repo>/releases/tags/{tag}  回读校验（预发布不更新 latest）")
+        else:
+            print("  3. GET  /repos/<repo>/releases/latest   回读校验")
         return 0
 
     env = load_env()
@@ -239,7 +250,7 @@ def main() -> int:
             "name": version_name,
             "body": build_body(notes),
             "draft": False,
-            "prerelease": False,
+            "prerelease": bool(args.beta),
         },
     )
     release_id = release["id"]
@@ -257,16 +268,25 @@ def main() -> int:
     print("\n校验 …")
     for i in range(3):
         try:
-            latest = gh("GET", f"/repos/{repo}/releases/latest", token)
-            names = [a["name"] for a in latest.get("assets", [])]
-            if latest.get("tag_name") == tag and asset_name in names:
+            # 预发布不能拿 /releases/latest 校验：那个接口永远不返回 prerelease，
+            # 拿它对比等于必然失败，还会让人误以为发版没成功。
+            if args.beta:
+                rel = gh("GET", f"/repos/{repo}/releases/tags/{tag}", token)
+            else:
+                rel = gh("GET", f"/repos/{repo}/releases/latest", token)
+            names = [a["name"] for a in rel.get("assets", [])]
+            if rel.get("tag_name") == tag and asset_name in names:
                 digest = next(
-                    (a.get("digest") for a in latest["assets"] if a["name"] == asset_name), None
+                    (a.get("digest") for a in rel["assets"] if a["name"] == asset_name), None
                 )
-                print(f"完成：https://github.com/{repo}/releases/tag/{tag}")
+                if args.beta:
+                    print(f"完成（测试版）：https://github.com/{repo}/releases/tag/{tag}")
+                    print("      稳定通道不会看到它；App 里「更新通道 → 测试版」后才会提示。")
+                else:
+                    print(f"完成：https://github.com/{repo}/releases/tag/{tag}")
                 print(f"      {asset_name}  digest={digest or '（GitHub 尚未生成）'}")
                 return 0
-            print(f"  第 {i + 1} 次：latest={latest.get('tag_name')}，资产 {names}")
+            print(f"  第 {i + 1} 次：tag={rel.get('tag_name')}，资产 {names}")
         except SystemExit:
             raise
         except Exception as e:  # noqa: BLE001

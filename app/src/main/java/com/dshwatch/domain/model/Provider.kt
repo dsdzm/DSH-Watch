@@ -245,6 +245,13 @@ data class AppSettings(
      * 那个入口，而版本落后带来的问题（尤其是崩溃修复）恰恰需要它主动被发现。
      */
     val autoCheckUpdate: Boolean = true,
+    /**
+     * 更新通道：`stable` 稳定版 / `beta` 测试版。
+     *
+     * 存字符串而不是枚举：设置是要能跨版本读写的 JSON，枚举多一个分支时老存档
+     * 会反序列化失败。解析统一走 `UpdateChannel.of()`，认不出的值按稳定版处理。
+     */
+    val updateChannel: String = "stable",
     /** 上次自动检查的时间戳（毫秒），0 表示从没查过。只用来做 24h 节流 */
     val lastUpdateCheckAt: Long = 0,
     val autoScroll: Boolean = true,
@@ -385,6 +392,30 @@ data class AppSettings(
 
     /** 强调色 id：在预设色板之上换主色，不改背景与正文层次 */
     val accentColor: String = "blue",
+
+    /**
+     * 自定义背景图的**文件名**（存在 `files/background/` 下）。空串 = 没有背景图。
+     *
+     * 为什么只存文件名、不存绝对路径：
+     *  - `filesDir` 的绝对路径里带着包名和用户 id，把设置导出到另一台设备上就是错的；
+     *  - SAF 给的 `content://` URI 只在授权期内有效，重启或清理后就打不开 ——
+     *    所以导入时就把图**拷一份**进来，之后只认自己目录里的文件。
+     *
+     * 文件名带时间戳，换图时是新文件：旧文件在写入成功后再删，中途失败也不会
+     * 出现「设置指向一个已经被覆盖了一半的文件」。
+     */
+    val customBackground: String = "",
+
+    /** 背景图上那层遮罩的浓度（0~0.9）。太淡会看不清字，太浓等于没有背景图 */
+    val customBackgroundDim: Float = 0.45f,
+
+    /**
+     * 背景是否虚化。
+     *
+     * 这里的「虚化」不是实时高斯模糊（见 Theme.kt）：解码时按很低的采样率读进来，
+     * 再用双线性放大，观感接近磨砂，成本等于 0。手表上逐帧糊一整屏是不可接受的。
+     */
+    val customBackgroundFrost: Boolean = true,
 
     // ---------------- 屏幕 ----------------
     /** 屏幕边角安全边距（dp）。-1 表示按屏幕尺寸自动估算 */

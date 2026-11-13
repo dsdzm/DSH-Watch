@@ -27,6 +27,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -482,13 +483,31 @@ private fun DrawScope.drawGlassPanel(
              */
             drawRoundRect(Color.Black, cornerRadius = r, alpha = 0.68f * alpha)
             drawRoundRect(Color.White, cornerRadius = r, alpha = body * alpha)
+        } else if (elevated) {
+            /*
+             * 浅色弹窗：**一层真的磨砂白**。
+             *
+             * 这一笔是 v1.22.5 改的。之前的浅色弹窗只叠了 10% 的正文色 ——
+             * 在算数上「文字 / 卡片」的对比度是够的（≈12:1），但那是**假设
+             * 卡片底就是纯白**。实际上卡片 90% 是透明的，背后是滚动中的聊天页：
+             * 一屏字、气泡、图片都在，文字压在这些东西上面，读起来像隔着一层脏玻璃。
+             *
+             * 参考用户给的另一个应用：它的弹窗是「磨砂白卡片 + 压暗的背景」。
+             * 所以这里补上 0.80 的白 —— 透过去只剩 20%，能看出背后是模糊的色块，
+             * 但读不出任何内容。这才是毛玻璃该有的样子：**透，但不可读**。
+             *
+             * 再叠 0.05 的正文色压痕，让卡片不至于白得发飘（白纸感），
+             * 并且和下面那层白遮罩拉开一点层次。
+             */
+            drawRoundRect(Color.White, cornerRadius = r, alpha = 0.80f * alpha)
+            drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.05f * alpha)
         } else {
-            // 浅色：用正文色的极淡版本压下去。不用纯黑 —— 纯黑在白底上发脏
+            // 普通浅色卡片：仍然只压一点正文色。列表卡片要「贴」在背景上，
+            // 做成磨砂白会和背景断开，一整屏变成白色方块
             drawRoundRect(
                 color = bodyTint,
                 cornerRadius = r,
-                // 浅色弹窗 0.06 → 0.10：背后糊掉之后要靠这点压痕把卡片从雾里拎出来
-                alpha = (if (elevated) 0.10f else 0.085f) * alpha,
+                alpha = 0.085f * alpha,
             )
         }
         drawBottomShade(r, shadeBrush, alpha)
@@ -501,6 +520,17 @@ private fun DrawScope.drawGlassPanel(
     // 结果长条胶囊的顶边出现「双线」—— 像描了两遍边，很脏。
     // 真实玻璃只有一条边，亮度的差异全部由它自己承担。
     drawEdge(corner, w, h, alpha, edgeBrush)
+
+    /*
+     * 浅色弹窗再补一道 1dp 的正文色内描边。
+     *
+     * 浅色主题的页面本来就是近白的，卡片 0.80 的白和页面只差 8/255 ——
+     * 高光那条边又是白的，等于没有边界。用户看到的会是一块「没有形状的白」。
+     * 这一道 0.12 的暗线才是「卡片到这里为止」的信号。
+     */
+    if (!dark && elevated) {
+        drawEdge(corner, w, h, alpha * 0.12f, SolidColor(bodyTint))
+    }
 
     // ---- 3) 光 ----
     if (sheenAlpha > 0.01f) {

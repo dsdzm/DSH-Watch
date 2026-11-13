@@ -9,6 +9,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -16,6 +18,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -31,6 +38,7 @@ import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.i18n.stringsFor
+import kotlin.math.roundToInt
 
 /** 当前性能档，供组件决定是否播放动画 / 渲染多少内容 */
 val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.dshwatch.domain.DeviceTier.MID) }
@@ -162,6 +170,17 @@ fun DshWatchTheme(
      */
     appearance: String = com.dshwatch.domain.model.Appearances.M3E,
     /**
+     * 自定义背景图的文件名（见 [CustomBackground]）。空串 = 不用背景图。
+     *
+     * 背景图是**整个 App 的底**，不是某一页的装饰：玻璃主题下卡片透出来的
+     * 就是它，M3E 主题下它从顶栏、空白处露出来。所以画在主题这一层。
+     */
+    customBackground: String = "",
+    /** 背景图上那层遮罩的浓度。太淡看不清字，太浓等于没有图 */
+    customBackgroundDim: Float = 0.45f,
+    /** 背景是否虚化（读得粗 + 放大，见 [CustomBackground]） */
+    customBackgroundFrost: Boolean = true,
+    /**
      * 界面整体缩放，1.0 = 标准。
      *
      * **这是唯一的缩放轴。** v1.15.21 及以前这里还并行一个 `fontScale`：
@@ -199,11 +218,45 @@ fun DshWatchTheme(
     // 他说得对：玻璃是「透」，透出来的就是底下这张纸的颜色。纸被换成黑的，
     // 半透明的白叠上去只剩灰，透明感无从谈起。浅色底上的玻璃才是真玻璃。
     // 所以色板照用户选的预设走，玻璃只决定「卡片怎么画」。
-    val colorScheme = remember(dark, useDynamic, themePreset, accentColor) {
+    val baseScheme = remember(dark, useDynamic, themePreset, accentColor) {
         when {
             useDynamic && dark -> dynamicDarkColorScheme(context)
             useDynamic -> dynamicLightColorScheme(context)
             else -> ThemePresets.scheme(themePreset, accentColor, dark)
+        }
+    }
+
+    /*
+     * 背景图在**主题这一层**解码，而不是每页各读一遍。
+     *
+     * produceState 的初值是 null：首帧先按原来的纯色/色晕画，读到图之后自动重组。
+     * 这样冷启动不会因为「等一张照片」卡住首帧 —— 手表上首帧快慢的感知特别明显。
+     *
+     * key 里带 frost：切换虚化要重新解码（读的采样率不同），不是重新画一遍。
+     */
+    val backdrop by produceState<ImageBitmap?>(null, customBackground, customBackgroundFrost) {
+        value = if (customBackground.isBlank()) {
+            null
+        } else {
+            CustomBackground.load(context, customBackground, customBackgroundFrost)
+        }
+    }
+
+    /*
+     * 有背景图时，把 `background` 换成**透明**。
+     *
+     * 各个页面（WatchScaffold 等）都会铺一层 `colorScheme.background` 当纸。
+     * 那张纸不透明的话，画在它下面的照片一点都露不出来 —— 用户看到的是
+     * 「设了背景但什么都没变」，只会以为功能坏了。
+     *
+     * 透明之后，页面自己的底色让位，照片从下面透上来；卡片仍然是 surface，
+     * 该实的地方照样实。玻璃预设的 background 本来就是透明的，这一改对它没有影响。
+     */
+    val colorScheme = remember(baseScheme, backdrop) {
+        if (backdrop != null && baseScheme.background.alpha > 0.05f) {
+            baseScheme.copy(background = Color.Transparent)
+        } else {
+            baseScheme
         }
     }
 
@@ -289,7 +342,9 @@ fun DshWatchTheme(
             typography = DshTypography,
             shapes = DshShapes,
         ) {
-            if (glass) {
+            // 有背景图时这一层也必须存在 —— M3E 主题下照片得有个地方画
+            val photo = backdrop
+            if (glass || photo != null) {
                 // 玻璃主题的「底」：**用预设自己的底色**，再叠两团极淡的色晕。
                 //
                 // 曾经这里写死 `drawRect(colorScheme.surface)`（近黑），
@@ -304,6 +359,17 @@ fun DshWatchTheme(
                     modifier = Modifier
                         .fillMaxSize()
                         .drawBehind {
+                            /*
+                             * 有照片就只画照片 + 遮罩，画完直接返回。
+                             *
+                             * 不能「画完照片再叠色晕」：那两团色晕是给纯色底准备的
+                             * 环境光，叠在照片上等于给用户的图蒙一层滤镜 ——
+                             * 他要的是自己的图，不是「被 App 染过色的图」。
+                             */
+                            if (photo != null) {
+                                drawBackdropPhoto(photo, dark, customBackgroundDim)
+                                return@drawBehind
+                            }
                             // 底：预设自己的颜色。透明的（玻璃预设）用 surface 兜底 ——
                             // 一个像素都不额外加黑，这正是「不要换背景」的要求
                             drawRect(
@@ -372,3 +438,77 @@ val DshShapes = androidx.compose.material3.Shapes(
     large = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
     extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
 )
+
+/**
+ * 把背景图铺满（等比裁切），再叠一层遮罩。
+ *
+ * ## 为什么是「铺满 + 居中裁」而不是「完整显示」
+ *
+ * 背景图的比例和屏幕几乎不可能一致。完整显示会留出黑边，那两块边在圆屏上
+ * 就是两道弧形缺口，比不放图还难看。裁切最多切掉边缘，主体仍在中间。
+ *
+ * ## 遮罩为什么必须存在
+ *
+ * 照片的明暗是随机的：一张雪景和一张夜景，同一套界面文字在上面必然有一种读不清。
+ * 遮罩把「背景的亮度范围」压到可预期的区间内 —— 深色主题压黑、浅色主题压白，
+ * 浓度由用户调（[customBackgroundDim]）。这也是参考应用的做法：
+ * 毛玻璃卡片下面那层背景，永远是被压过一档的。
+ */
+private fun DrawScope.drawBackdropPhoto(photo: ImageBitmap, dark: Boolean, dim: Float) {
+    val dst = coverRect(photo.width, photo.height, size.width, size.height) ?: return
+    drawImage(
+        image = photo,
+        dstOffset = IntOffset(dst.left, dst.top),
+        dstSize = IntSize(dst.width, dst.height),
+        // Low 就是双线性：虚化路径下正好把 120px 的图放软，锐利路径下也够用
+        filterQuality = FilterQuality.Low,
+    )
+    drawRect(
+        color = if (dark) Color.Black else Color.White,
+        alpha = dim.coerceIn(0f, MAX_BACKDROP_DIM),
+    )
+}
+
+/** 遮罩浓度的上限。1.0 等于把照片完全盖掉，那还不如不放 */
+internal const val MAX_BACKDROP_DIM = 0.9f
+
+/** 目标矩形。抽成纯函数是为了能离线验证「铺满 / 居中 / 不留边」 */
+internal data class CoverRect(val left: Int, val top: Int, val width: Int, val height: Int)
+
+/**
+ * 等比铺满（cover）的计算。
+ *
+ * 两条硬要求：
+ *  1. **两边都必须 ≥ 屏幕**，否则某一侧会露出底色，圆屏上就是一道弧形缺口；
+ *  2. 多出来的部分**均分到两侧**（居中裁），而不是全裁一边 ——
+ *     照片的主体通常在中线附近。
+ *
+ * 返回 null 表示图或画布尺寸非法（解码失败时会是 0），调用方直接跳过绘制。
+ */
+internal fun coverRect(
+    imageWidth: Int,
+    imageHeight: Int,
+    canvasWidth: Float,
+    canvasHeight: Float,
+): CoverRect? {
+    if (imageWidth <= 0 || imageHeight <= 0) return null
+    if (canvasWidth <= 0f || canvasHeight <= 0f) return null
+    val scale = maxOf(canvasWidth / imageWidth, canvasHeight / imageHeight)
+    /*
+     * 用 roundToInt 而不是 toInt。
+     *
+     * `502f / 1000f * 1000` 在 float 里是 501.99997 —— 截断成 501，正好比画布矮 1px。
+     * 那 1px 就是一条贯穿屏幕的底色缝，圆屏上还能看出弧线。
+     * 「最小边刚好等于画布」是最常见的情况（比例一致、或原图就是屏幕尺寸），
+     * 所以这个坑不该靠运气。
+     */
+    val w = (imageWidth * scale).roundToInt().coerceAtLeast(1)
+    val h = (imageHeight * scale).roundToInt().coerceAtLeast(1)
+    // 用负数偏移表达「裁掉多少」：left 为负表示左边被切掉了一部分
+    return CoverRect(
+        left = ((canvasWidth - w) / 2f).roundToInt(),
+        top = ((canvasHeight - h) / 2f).roundToInt(),
+        width = w,
+        height = h,
+    )
+}
