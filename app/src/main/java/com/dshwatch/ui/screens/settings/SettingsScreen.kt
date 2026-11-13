@@ -139,7 +139,8 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
 
     SettingsGroups.PLUGINS -> {
         val on = settings.pluginsResolved(PluginRegistry.defaultEnabled())
-        if (on.isEmpty()) "全部关闭" else "${on.size}/${PluginRegistry.ALL.size} 已开启"
+        val total = PluginRegistry.allFor(settings).size
+        if (on.isEmpty()) "全部关闭" else "${on.size}/$total 已开启"
     }
 
     SettingsGroups.MCP -> {

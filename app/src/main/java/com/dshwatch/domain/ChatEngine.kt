@@ -911,17 +911,32 @@ class ChatEngine(
         } else {
             buildSystemPrompt(provider, settings, conv.workDir)
         }
+        val pluginCtx = PromptContext(settings = settings, workDir = conv.workDir)
         val pluginPrompt = if (isRoleplay) {
             ""
         } else {
-            runCatching {
-                plugins.promptSuffix(PromptContext(settings = settings, workDir = conv.workDir))
-            }.getOrDefault("")
+            runCatching { plugins.promptSuffix(pluginCtx) }.getOrDefault("")
         }
-        val systemPrompt = if (pluginPrompt.isBlank()) {
+        /*
+         * 身份覆盖走「前置 + 声明优先」，而不是删掉内置那句。
+         *
+         * 内置身份是预设的一部分，可能被用户自己填的 systemPrompt 覆盖过；
+         * 在这里做字符串替换等于猜它的位置和措辞。前置一段强指令
+         * （"以下述身份为准，后文与之冲突时以此为准"）在实测里更稳，
+         * 而且插件被关掉时能干净地退回原样。
+         */
+        val identity = if (isRoleplay) null else runCatching {
+            plugins.identityOverride(pluginCtx)
+        }.getOrNull()
+        val baseWithIdentity = if (identity.isNullOrBlank()) {
             baseSystemPrompt
         } else {
-            baseSystemPrompt + "\n\n" + pluginPrompt
+            identity + "\n\n（以上述身份为准；后文若与本段冲突，以本段为准）\n\n" + baseSystemPrompt
+        }
+        val systemPrompt = if (pluginPrompt.isBlank()) {
+            baseWithIdentity
+        } else {
+            baseWithIdentity + "\n\n" + pluginPrompt
         }
         // 首轮路由靠它判任务类型。取**第一条**用户消息而不是最后一条：
         // 风神的语义是"这个会话在干什么"，而不是"这一句在说什么"

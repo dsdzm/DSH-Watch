@@ -15,9 +15,12 @@ import com.dshwatch.core.Logx
  * 而不是丢掉整条链路回到原文。回到原文的代价是这次对话的上下文里
  * 突然多出几倍 token，而用户完全不知道发生了什么。
  */
-class PluginRegistry(private val enabled: Set<String>) {
+class PluginRegistry(
+    private val enabled: Set<String>,
+    all: List<Plugin> = ALL,
+) {
 
-    val active: List<Plugin> = ALL.filter { it.id in enabled }
+    val active: List<Plugin> = all.filter { it.id in enabled }
 
     private val resultPlugins: List<ToolResultPlugin> = active.filterIsInstance<ToolResultPlugin>()
     private val promptPlugins: List<PromptPlugin> = active.filterIsInstance<PromptPlugin>()
@@ -50,6 +53,25 @@ class PluginRegistry(private val enabled: Set<String>) {
                 }
                 .takeIf { it.isNotEmpty() }
         }.joinToString("\n\n")
+    }
+
+    /**
+     * 身份覆盖段。多个插件时取**第一个**非空，而不是拼接。
+     *
+     * 身份是单选题：「你是一位严谨的代码审查员」和「你是一位红队测试员」
+     * 拼在一起只会得到一个人格分裂的模型。第一个插件说了算，行为可预期。
+     */
+    fun identityOverride(ctx: PromptContext): String? {
+        if (promptPlugins.isEmpty()) return null
+        for (plugin in promptPlugins) {
+            val text = runCatching { plugin.identity(ctx)?.trim() }
+                .getOrElse { t ->
+                    Logx.w(TAG, "插件 ${plugin.id} 覆盖身份失败，已跳过", t)
+                    null
+                }
+            if (!text.isNullOrEmpty()) return text
+        }
+        return null
     }
 
     /**
@@ -92,9 +114,32 @@ class PluginRegistry(private val enabled: Set<String>) {
         )
 
         fun from(settings: com.dshwatch.domain.model.AppSettings): PluginRegistry =
-            PluginRegistry(settings.pluginsResolved(defaultEnabled()))
+            PluginRegistry(
+                enabled = settings.pluginsResolved(defaultEnabled()),
+                all = allFor(settings),
+            )
 
         /** 出厂默认开启的集合（设置里的初始值） */
         fun defaultEnabled(): Set<String> = ALL.filter { it.defaultEnabled }.map { it.id }.toSet()
+
+        /**
+         * 当前这台设备上「存在」的全部插件：内置 + 用户清单。
+         *
+         * 声明式插件由 [AppSettings.pluginManifests] 生成，而不是扫描文件系统 ——
+         * 扫描会让 `ChatEngine.send` 多一次磁盘 IO，而且插件列表会在
+         * 「文件被删了但设置里还开着」之间漂移。清单的加载在设置页做，
+         * 加载完写进设置，这里只做纯转换。
+         *
+         * 解析失败的清单**静默跳过**：它已经在校验阶段被挡过一次，
+         * 能走到这里说明是旧版本写的、字段对不上。为一个坏插件让整轮对话
+         * 崩掉，代价远大于收益。
+         */
+        fun allFor(settings: com.dshwatch.domain.model.AppSettings): List<Plugin> {
+            if (settings.pluginManifests.isEmpty()) return ALL
+            val custom = settings.pluginManifests.mapNotNull { manifest ->
+                runCatching { ManifestPromptPlugin(manifest) }.getOrNull()
+            }
+            return ALL + custom
+        }
     }
 }

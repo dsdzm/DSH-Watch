@@ -27,6 +27,17 @@ interface Plugin {
 
     /** 出厂默认是否开启。改写内容类的插件必须默认关 */
     val defaultEnabled: Boolean
+
+    /**
+     * 自带展示名。null 表示走 `AppStrings.pluginTitle(id)`。
+     *
+     * 内置插件的文案必须走 AppStrings（双语不能漏），而声明式插件的名字
+     * 就写在清单里 —— 它是用户自己的东西，没有第二个语言版本可翻。
+     */
+    val displayName: String? get() = null
+
+    /** 自带说明，同上 */
+    val displayDesc: String? get() = null
 }
 
 /** 工具结果变换：拿到的已经是截断后的文本（[ToolResultInput.content]） */
@@ -34,9 +45,19 @@ interface ToolResultPlugin : Plugin {
     suspend fun transform(input: ToolResultInput): String
 }
 
-/** 系统提示追加。返回空串表示不插手 */
+/**
+ * 系统提示干预。两个位置：
+ *
+ * · [identity] 在最前面，决定「我是谁」。返回 null 表示不覆盖。
+ * · [contribute] 在最后面，做尾部锚点。返回空串表示不插手。
+ *
+ * 分开是因为它们的强度不一样：身份段先入为主，尾部锚点对近期指令的
+ * 服从度更高。dsh-purge 的「破甲」靠的就是这两处，只是它打的是二进制补丁。
+ */
 interface PromptPlugin : Plugin {
     fun contribute(ctx: PromptContext): String
+
+    fun identity(ctx: PromptContext): String? = null
 }
 
 /**

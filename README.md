@@ -100,6 +100,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 
 - **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 8 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在手表上没有可用的进程沙箱，未支持。
 - **工具结果插件**：可插拔的后处理钩子，内置 JSON→TOON 压缩（重复键名只写一次，常压掉 30–60%）等。
+- **声明式插件**：把 JSON 清单放进工作空间 `plugins/`，就能替换身份段、追加尾部锚点、按模型切规则集。不跑 Node、不执行脚本 —— 只能改模型看到什么，不能放宽审批。格式见 [docs/plugins](docs/plugins/README.md)。
 - **审批策略**：读写分离，`run_script` 出厂关闭、每次强制确认且无视「总是允许」，工作目录锁在会话目录。
 
 ### 画布

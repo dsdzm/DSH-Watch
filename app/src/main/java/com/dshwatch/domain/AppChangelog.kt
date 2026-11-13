@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.22.0",
+            date = "2026-11-13",
+            highlights = listOf(
+                "新增 声明式插件：把 JSON 清单放进工作空间 plugins/ 目录，就能改系统提示与尾部规则",
+                "支持 按模型匹配与变量插值，同一份清单可以只在 deepseek-* 上生效",
+                "提供 逐份校验：某份清单写错了只跳过它，其余照常加载",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.21.5",
             date = "2026-11-12",
             // 纯修复版：Shizuku provider 的访问权限写错，binder 推不进来
