@@ -65,9 +65,17 @@ internal fun BackgroundDialog(
                 error = "这张图读不出来，换一张试试（HEIF 之外的常见格式都支持）"
                 return@launch
             }
-            // 先写设置再清理旧图：反过来的话，写设置失败会留下「背景为空」的状态
+            /*
+             * 只删「上一张」，不做整目录清理。
+             *
+             * `update {}` 是扔进另一个协程里异步写盘的，这里拿不到完成时机。
+             * 如果此时扫目录删掉「除新文件之外的一切」，万一那次写入失败，
+             * 设置还指着刚被删掉的旧文件 —— 背景直接变空白。
+             * 精确删旧的那一张，最坏情况只是留一个孤儿文件，不影响显示。
+             */
+            val old = settings.customBackground
             update { it.copy(customBackground = name) }
-            CustomBackground.prune(context, name)
+            CustomBackground.delete(context, old)
             note = "已更新。下面的遮罩浓度可以随时再调。"
         }
     }

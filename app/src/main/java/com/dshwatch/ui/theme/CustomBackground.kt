@@ -154,13 +154,5 @@ object CustomBackground {
         runCatching { file(context, name).delete() }
     }
 
-    /** 清掉目录里所有旧背景（切图之后调用，避免攒一堆没人用的照片） */
-    fun prune(context: Context, keep: String) {
-        val files = runCatching { dir(context).listFiles() }.getOrNull() ?: return
-        files.forEach { f ->
-            if (f.isFile && f.name != keep) runCatching { f.delete() }
-        }
-    }
-
     private const val TAG = "CustomBackground"
 }
