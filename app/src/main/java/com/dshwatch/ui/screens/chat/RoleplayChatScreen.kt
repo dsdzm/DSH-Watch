@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.Icon
@@ -170,6 +171,8 @@ fun RoleplayChatScreen(
     WatchScaffold(
         title = card?.displayName ?: if (isWriting) "写作" else "酒馆",
         onBack = { nav.popToRoot() },
+        // 与编程对话页同形态：动作收成一排居中图标，标题降到第二行
+        stackedBar = com.dshwatch.ui.theme.isM3eUi,
         actions = {
             IconTap(Icons.Outlined.Memory, "记忆") {
                 scope.launch {
@@ -482,6 +485,30 @@ private fun RoleplayInputBar(
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
+    /*
+     * M3E：底栏收成一颗居中的圆 FAB，与编程对话页完全一致。
+     *
+     * 下面那条「输入框 + 发送键」是手机聊天的骨架 —— 一条横贯的输入条、
+     * 右边贴一颗发送。手表上没有这种形态：屏幕只有 220dp，横条会同时压住
+     * 左右两个切角，而且提示文字（hint）在表上从来没人读得完。
+     */
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            com.dshwatch.ui.m3e.M3eFab(
+                icon = if (streaming) Icons.Outlined.Stop else Icons.Outlined.Keyboard,
+                contentDescription = if (streaming) "停止" else hint,
+                danger = streaming,
+                onClick = { if (streaming) onStop() else onSend() },
+            )
+        }
+        return
+    }
+
     Row(
         modifier = Modifier
             .padding(horizontal = 12.dp)

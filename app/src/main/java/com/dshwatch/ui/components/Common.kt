@@ -109,10 +109,21 @@ fun WatchScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     bottom: (@Composable () -> Unit)? = null,
     bottomOverlay: Boolean = false,
+    /** 仅供 M3E：动作多到挤不下标题时收成一排居中图标，标题降到第二行 */
+    stackedBar: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (com.dshwatch.ui.theme.isM3eUi) {
-        M3eScaffold(title, onBack, subtitle, actions, bottom, bottomOverlay, content)
+        M3eScaffold(
+            title = title,
+            onBack = onBack,
+            subtitle = subtitle,
+            actions = actions,
+            bottom = bottom,
+            bottomOverlay = bottomOverlay,
+            stackedBar = stackedBar,
+            content = content,
+        )
         return
     }
 

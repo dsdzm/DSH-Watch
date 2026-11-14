@@ -23,6 +23,26 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.0",
+            date = "2026-11-14",
+            highlights = listOf(
+                "新增 用 SSH 连电脑上的 DSH：填主机、用户名、密码，手表自动拉起服务并转发端口",
+                "新增 手机扫码配对 DSH Remote，不用在表上打字登录",
+                "新增 连上之后聊天走真实会话流，电脑端的审批会同步到手表上，可选「允许一次」或「拒绝」",
+                "新增 两套界面并列：设置 → 外观 → 界面体系，可在「经典」与 Wear M3E 之间切换",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.23.0-beta.6",
+            date = "2026-11-14",
+            highlights = listOf(
+                "调整 M3E 对话页改成手表布局：顶部一排居中图标、底部一颗 52dp 圆按钮，不再是「左标题 + 横贯输入框」",
+                "调整 M3E 顶栏标题居中、返回键去掉灰色圆底，只留 26dp 图标",
+                "调整 M3E 对话框去掉重复的关闭按钮，一屏只留一个动作",
+                "调整 M3E 对话框里的选项带选中标记（染色底 + 行尾勾）",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.0-beta.5",
             date = "2026-11-14",
             highlights = listOf(

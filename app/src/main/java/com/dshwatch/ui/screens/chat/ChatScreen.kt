@@ -146,6 +146,7 @@ fun ChatScreen(
     val perf = LocalPerf.current
     val profile = LocalDeviceProfile.current
     val round = profile.isRound
+    val m3e = com.dshwatch.ui.theme.isM3eUi
     /*
      * 圆屏的内边距由骨架统一给。
      *
@@ -294,22 +295,39 @@ fun ChatScreen(
     }
 
     WatchScaffold(
-        title = conversation?.displayTitle ?: s.appName,
+        /*
+         * 空会话（还没发过消息）时不显示标题：空状态自己已经说了
+         * 「开始一段 vibe coding」，再加一行「新对话」是同义重复，
+         * 而手表一屏只有 200dp 左右的内容高度。
+         */
+        title = if (m3e && messages.isEmpty()) "" else conversation?.displayTitle ?: s.appName,
         // 对话页是根：没有返回，靠右滑去设置
         onBack = null,
+        /*
+         * M3E 的对话页顶栏收成一排居中图标 + 下方一行标题。
+         *
+         * 手机版这里是「左标题 + 右上角四颗小图标」，那是 TopAppBar 的排布。
+         * 手表上 220dp 的宽度不够同时放标题和四颗动作，硬挤的结果就是
+         * 标题只剩三四个字、图标挤成一条细线 —— 读起来就是「手机界面缩小版」。
+         */
+        stackedBar = m3e,
         actions = {
             /*
              * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
              *
-             * 圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap —— 圆屏顶栏那一行
-             * 的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
+             * 经典界面：圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap ——
+             * 圆屏顶栏那一行的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
+             *
+             * M3E 界面：两者都分派到 M3eIconTap（44dp 命中区 + 26dp 图标），
+             * 而 M3E 的顶栏是 stackedBar —— 图标独占一行居中，标题在它下面，
+             * 所以 4×44=176dp 不会和标题抢宽度。
              *
              * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
              * 只有图标和标题，不和内容争地盘。
              */
             val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
                 { icon, desc, onClick ->
-                    if (round) {
+                    if (round && !m3e) {
                         CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
                     } else {
                         IconTap(icon = icon, contentDescription = desc, onClick = onClick)
@@ -326,8 +344,14 @@ fun ChatScreen(
             }
             tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
-        // 圆屏的底栏是 46dp 圆 FAB，浮在内容上，不占竖向空间
-        bottomOverlay = round,
+        /*
+         * 底栏是浮层。
+         *
+         * 经典界面只有圆屏用浮层（46dp 圆 FAB）；方屏是一条横贯输入框，必须独占一行。
+         * M3E 两边都是那颗 52dp 的圆 FAB，没有「整条输入框」这种形态，
+         * 所以方屏也让它浮起来，把那一行的 52dp 高度还给正文。
+         */
+        bottomOverlay = round || m3e,
         bottom = {
             ChatBottomBar(
                 settings = settings,
@@ -382,24 +406,30 @@ fun ChatScreen(
              * 圆屏空状态就是原来这一套（吉祥物 + 一句提示 + B站入口），
              * 但内容区只有 221×227dp：吉祥物 112 + 两行说明 + 两颗胶囊会超。
              * 给圆屏加一层纵向滚动兜底 —— 不改变外观，只在装不下时能翻。
+             *
+             * M3E：吉祥物缩到 88dp、整块在内容区里**垂直居中**。
+             * 手机的空状态是「一张大图贴顶 + 底下一个大按钮」，因为手机屏幕高、
+             * 上下都能留白；手表一屏只有 300dp，贴顶排会让下半屏整片空着，
+             * 看起来像内容没加载出来。居中排则是一个完整的「这一屏就是这个」。
              */
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .padding(horizontal = sidePad, vertical = safePad)
                     .then(
-                        if (round) Modifier.wearVerticalScroll(rememberScrollState()) else Modifier
+                        if (round || m3e) Modifier.wearVerticalScroll(rememberScrollState()) else Modifier
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = if (m3e) Arrangement.Center else Arrangement.Top,
             ) {
                 if (settings.showMascot) {
                     Image(
                         painter = painterResource(R.drawable.mascot),
                         contentDescription = null,
-                        modifier = Modifier.size(112.dp),
+                        modifier = Modifier.size(if (m3e) 88.dp else 112.dp),
                         alpha = 0.92f,
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(if (m3e) 8.dp else 10.dp))
                 }
                 EmptyState(
                     title = if (codingScene) s.chatEmptyTitle else s.roleplayEmptyTitle,
@@ -457,7 +487,13 @@ fun ChatScreen(
                  */
                 contentPadding = PaddingValues(
                     top = 2.dp,
-                    bottom = if (round) 40.dp else 2.dp,
+                    // M3E 的 FAB 是 52dp 浮层，比经典的 46dp 高一档，留 60dp 才不会压住
+                    // 最后一条消息底部那排「复制 / 重新生成 / 删除」。
+                    bottom = when {
+                        m3e -> 62.dp
+                        round -> 40.dp
+                        else -> 2.dp
+                    },
                 ),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -1708,35 +1744,45 @@ private fun ChatBottomBar(
     val sendSrc = remember { MutableInteractionSource() }
 
     /*
-     * 圆屏底栏 = 一个圆 FAB。
+     * 底栏 = 一个圆 FAB（M3E 全机型 / 经典圆屏）。
      *
      * 横贯的底栏在圆屏上根本不成立：底栏下沿那一行的弦宽只有 70~100dp，
      * 而底栏要做 190dp 宽 —— 两端必然被圆啃掉，看起来就是「输入框被斜着切了」。
      * 1.15.7 的修补（左右各收 10dp）治不了本，因为问题出在**高度方向**：
      * 越往下弦宽越小，收左右完全没用。
      *
-     * 收成一个 46dp 的圆，在任何一行都放得下。代价是少了「一句话预览」，
+     * 收成一个圆，在任何一行都放得下。代价是少了「一句话预览」，
      * 但手表上输入框本来就只是「点一下进输入页」的跳板，预览没有价值。
+     *
+     * ## M3E 为什么方屏也这样
+     *
+     * 上一版只在圆屏走这条分支，方屏落到了下面那个「长条输入框 + 圆角发送键」——
+     * 那正是手机聊天界面的骨架：一条 190dp 宽的输入框、右边贴一颗发送键。
+     * 手表上没有任何一个原生界面长这样，它一眼就会被读成「手机界面缩了水」。
+     *
+     * M3E 的答案是把「进入输入」收成**一颗居中的 52dp 圆按钮**：
+     * 拇指够得到、表冠旋转不误触、也不会横着把屏幕切成两半。
      */
-    if (round) {
-        if (com.dshwatch.ui.theme.isM3eUi) {
-            // M3E：底部是一颗 52dp 的填充图标按钮。比经典的 46dp 略大 ——
-            // Expressive 的触摸目标就是 48dp 起步，46dp 会让它的涟漪看起来"贴着边"。
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                com.dshwatch.ui.m3e.M3eFab(
-                    icon = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
-                    contentDescription = if (streaming) s.stop else s.inputHint,
-                    danger = streaming,
-                    onClick = { if (streaming) onStop() else onSend() },
-                )
-            }
-            return
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        // 52dp 的填充图标按钮。比经典的 46dp 略大 ——
+        // Expressive 的触摸目标就是 48dp 起步，46dp 会让它的涟漪看起来"贴着边"。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            com.dshwatch.ui.m3e.M3eFab(
+                icon = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
+                contentDescription = if (streaming) s.stop else s.inputHint,
+                danger = streaming,
+                onClick = { if (streaming) onStop() else onSend() },
+            )
         }
+        return
+    }
+
+    if (round) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()

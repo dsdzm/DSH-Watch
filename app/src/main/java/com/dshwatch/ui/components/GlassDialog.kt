@@ -348,6 +348,11 @@ fun GlassDialogRow(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // M3E：选中态要有明确的视觉标记，不能只靠标题变色
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        com.dshwatch.ui.m3e.M3eDialogRow(title, subtitle, selected, enabled, onClick)
+        return
+    }
     val glass = LocalGlass.current
     // 选中行自带玻璃反馈，未选中行走 tap() 的反馈 —— 共享按压源，
     // 保证「按下的那一行」形变与亮起是同一个时刻

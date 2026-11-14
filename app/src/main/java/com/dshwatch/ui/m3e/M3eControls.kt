@@ -2,6 +2,7 @@ package com.dshwatch.ui.m3e
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -527,6 +528,17 @@ fun M3eEmptyState(title: String, hint: String? = null, modifier: Modifier = Modi
  * [buttons] 整块塞进 `confirmButton` 槽 —— 那个槽只是一块 Composable 区域，
  * 不强制只有一个按钮。这样调用方仍然可以自由排布「取消 / 确定」，
  * 而外框、遮罩、动画都由 M3E 组件负责。
+ *
+ * ## 为什么显式把 `dismissButton` 置空
+ *
+ * Wear 的 `AlertDialog` **默认带一颗 × 图标按钮**（`AlertDialogDefaults.DismissButton`），
+ * 即使调用方没传。于是「切换模式」这类只有一个「取消」的弹窗会同时出现
+ * **左下角一颗 ×、下面一行「取消」** —— 两个按钮干的是同一件事，
+ * 而手表一屏本来就只够放一个动作。
+ *
+ * 关掉它的正确姿势不是「调用方别传取消」，而是这里显式给一个空的
+ * `dismissButton`：关闭依然有三条路（下滑、按返回、点遮罩），
+ * 只是不再多画一颗重复的按钮。
  */
 @Composable
 fun M3eDialog(
@@ -540,6 +552,8 @@ fun M3eDialog(
         visible = true,
         onDismissRequest = onDismissRequest,
         confirmButton = { buttons() },
+        // 见上：默认那颗 × 与调用方的「取消」重复，这里不要
+        dismissButton = {},
         title = {
             if (title != null) {
                 Text(
@@ -596,6 +610,8 @@ fun M3eConfirmDialog(
     AlertDialog(
         visible = true,
         onDismissRequest = onDismiss,
+        // 同上：默认那颗 × 与「下滑取消」的提示重复，这里不画
+        dismissButton = {},
         confirmButton = {
             Button(
                 onClick = onConfirm,
@@ -949,4 +965,69 @@ fun M3eRadioRow(
             }
         },
     )
+}
+
+/**
+ * 对话框里的一行选项（紧凑形态）。
+ *
+ * ## 为什么不用 [RadioButton]
+ *
+ * Wear 的 `RadioButton` 每行 56~64dp：它要留出按下形变的空间，还要把
+ * 主标题和副标题分开排。放进 `AlertDialog` 的正文槽（上限 190dp）时，
+ * 三个选项就已经 170dp 打底 —— 标题和底部按钮会把内容顶出圆周。
+ *
+ * 这里保留同样的信息密度（标题 + 一行说明，40dp 一行），但把「选中」
+ * 表达成**染色底 + 行尾勾**。手表上一眼能看出选了哪个，代价是 0dp 高度。
+ */
+@Composable
+fun M3eDialogRow(
+    title: String,
+    subtitle: String? = null,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .then(
+                if (selected) {
+                    Modifier.background(W3.colorScheme.primaryContainer.copy(alpha = 0.45f))
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = M3.typography.bodyMedium,
+                color = when {
+                    !enabled -> W3.colorScheme.onSurface.copy(alpha = 0.42f)
+                    selected -> W3.colorScheme.primary
+                    else -> W3.colorScheme.onSurface
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = M3.typography.labelSmall,
+                    color = W3.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (selected) {
+            Spacer(Modifier.width(6.dp))
+            M3eCheckMark(visible = true)
+        }
+    }
 }
