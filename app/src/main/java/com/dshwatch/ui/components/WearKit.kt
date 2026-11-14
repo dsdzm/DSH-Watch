@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.ui.theme.LocalGlass
+import com.dshwatch.ui.m3e.M3eCardRow
 import com.dshwatch.ui.theme.WatchDimens
 
 /**
@@ -141,6 +142,11 @@ fun WearCardRow(
     trailing: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eCardRow(icon, title, modifier, subtitle, trailing, onClick)
+        return
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()

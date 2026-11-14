@@ -143,6 +143,10 @@ class SettingsRepository(
         val appearance = com.dshwatch.domain.model.Appearances.of(out.appearance)
         if (appearance != out.appearance) out = out.copy(appearance = appearance)
 
+        // 归一化界面体系：未知取值一律落回经典（默认值，也是老用户升级后的样子）
+        val uiStyle = com.dshwatch.domain.model.UiStyles.of(out.uiStyle)
+        if (uiStyle != out.uiStyle) out = out.copy(uiStyle = uiStyle)
+
         /*
          * v1.15.22：字号并入界面大小。
          *

@@ -51,6 +51,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.domain.model.TokenUsage
+import com.dshwatch.ui.m3e.M3eScaffold
+import com.dshwatch.ui.m3e.M3eSettingCard
+import com.dshwatch.ui.m3e.M3eSettingRow
+import com.dshwatch.ui.m3e.M3eSwitchRow
+import com.dshwatch.ui.m3e.M3eSegmentedRow
+import com.dshwatch.ui.m3e.M3eStepperRow
+import com.dshwatch.ui.m3e.M3eChip
+import com.dshwatch.ui.m3e.M3ePrimaryButton
+import com.dshwatch.ui.m3e.M3eGhostButton
+import com.dshwatch.ui.m3e.M3eEmptyState
+import com.dshwatch.ui.m3e.M3eConfirmDialog
+import com.dshwatch.ui.m3e.M3eSlider
+import com.dshwatch.ui.m3e.M3eSectionHeader
+import com.dshwatch.ui.m3e.M3eIconTap
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.theme.LocalDeviceProfile
 import com.dshwatch.ui.theme.LocalGlass
@@ -97,6 +111,11 @@ fun WatchScaffold(
     bottomOverlay: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eScaffold(title, onBack, subtitle, actions, bottom, bottomOverlay, content)
+        return
+    }
+
     /*
      * 圆屏走另一套骨架。
      *
@@ -188,6 +207,11 @@ fun IconTap(
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eIconTap(icon, contentDescription, enabled, onClick)
+        return
+    }
+
     Box(
         modifier = Modifier
             .size(WatchDimens.iconButton)
@@ -259,6 +283,11 @@ fun GlassCircleButton(
 
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSectionHeader(text, modifier)
+        return
+    }
+
     Text(
         text = text,
         // 12sp + 半粗：小屏上不靠字重加粗，标题和正文会长得一样
@@ -276,6 +305,11 @@ fun SettingCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSettingCard(modifier, content)
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -301,6 +335,11 @@ fun SettingPill(
     trailing: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSettingRow(title, subtitle, trailing, false, onClick)
+        return
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -351,6 +390,11 @@ fun SettingRow(
     showDivider: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSettingRow(title, subtitle, trailing, showDivider, onClick)
+        return
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -401,6 +445,11 @@ fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSwitchRow(title, subtitle, checked, onCheckedChange)
+        return
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -466,6 +515,11 @@ fun SegmentedRow(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSegmentedRow(options, selectedIndex, onSelect)
+        return
+    }
+
     val glass = LocalGlass.current
     Row(
         modifier = Modifier
@@ -545,6 +599,11 @@ fun StepperRow(
     onIncrease: (() -> Unit)? = null,
     subtitle: String? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eStepperRow(title, value, onDecrease, onIncrease, subtitle)
+        return
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -627,6 +686,11 @@ fun Chip(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eChip(text, selected, onClick)
+        return
+    }
+
     Box(
         modifier = Modifier
             .height(WatchDimens.chipHeight)
@@ -659,6 +723,11 @@ fun PrimaryButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3ePrimaryButton(text, modifier, icon, enabled, onClick)
+        return
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -709,6 +778,11 @@ fun GhostButton(
     danger: Boolean = false,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eGhostButton(text, modifier, danger, onClick)
+        return
+    }
+
     val tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val glass = LocalGlass.current
     val src = remember { MutableInteractionSource() }
@@ -741,6 +815,11 @@ fun GhostButton(
  */
 @Composable
 fun EmptyState(title: String, hint: String? = null, modifier: Modifier = Modifier) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eEmptyState(title, hint, modifier)
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -773,6 +852,11 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eConfirmDialog(title, text, confirmText, destructive, onConfirm, onDismiss)
+        return
+    }
+
     val s = LocalStrings.current
     GlassDialog(
         onDismissRequest = onDismiss,
@@ -943,6 +1027,11 @@ fun WatchSlider(
     sample: String? = null,
     sampleStyle: androidx.compose.ui.text.TextStyle? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eSlider(value, onChange, valueRange, label, modifier, steps, valueText, enabled)
+        return
+    }
+
     val span = (valueRange.endInclusive - valueRange.start).takeIf { it > 0f } ?: 1f
     fun snap(raw: Float): Float {
         val v = raw.coerceIn(valueRange.start, valueRange.endInclusive)

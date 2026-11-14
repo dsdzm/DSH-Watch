@@ -49,6 +49,7 @@ import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.components.GhostButton
 import com.dshwatch.ui.components.PageDots
 import com.dshwatch.ui.components.PrimaryButton
+import com.dshwatch.ui.components.SegmentedRow
 import com.dshwatch.ui.components.SwitchRow
 import com.dshwatch.ui.components.WatchSlider
 import com.dshwatch.ui.components.tap
@@ -223,6 +224,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 else -> ThemeStep(
                     settings = settings,
                     dark = dark,
+                    onPickUiStyle = { id -> update { it.copy(uiStyle = id) } },
                     onPickUiScale = { v -> update { it.copy(uiScale = v, uiScaleAuto = false) } },
                     onToggleUiScaleAuto = { v ->
                         update {
@@ -566,6 +568,7 @@ private fun LayoutThumb(layout: String, tint: Color) {
 private fun ThemeStep(
     settings: AppSettings,
     dark: Boolean,
+    onPickUiStyle: (String) -> Unit,
     onPickAppearance: (String) -> Unit,
     onPickPreset: (String) -> Unit,
     onPickAccent: (String) -> Unit,
@@ -600,6 +603,40 @@ private fun ThemeStep(
         onCheckedChange = onToggleUiScaleAuto,
     )
     Spacer(Modifier.height(6.dp))
+
+    /*
+     * 界面体系：在材质之前。
+     *
+     * 这是唯一一个「决定页面长什么样」的开关 —— 骨架、卡片、按钮、开关全换。
+     * 放在引导页里而不是只藏在设置深处，是因为绝大多数人不会去翻「外观」，
+     * 而这一项的效果比换颜色明显得多。
+     */
+    Text(
+        text = "界面体系",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Spacer(Modifier.height(3.dp))
+    SegmentedRow(
+        options = listOf("经典", "M3E"),
+        selectedIndex = if (com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle)) 1 else 0,
+        onSelect = { index ->
+            onPickUiStyle(
+                if (index == 1) {
+                    com.dshwatch.domain.model.UiStyles.M3E
+                } else {
+                    com.dshwatch.domain.model.UiStyles.CLASSIC
+                },
+            )
+        },
+    )
+    Text(
+        text = "经典：自绘骨架，每屏多放一行。M3E：Wear 原生组件，观感更接近系统。",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(top = 2.dp),
+    )
+    Spacer(Modifier.height(8.dp))
 
     // ---- 第一步：先选材质，再选颜色 ----
     //

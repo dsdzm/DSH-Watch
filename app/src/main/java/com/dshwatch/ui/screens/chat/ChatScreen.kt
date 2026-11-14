@@ -828,6 +828,15 @@ private fun BubbleScaffold(
      * 透明色恒为 0，于是浅色模式下这条判断永远是「深色」，气泡就一直用深底白字，
      * 和同一屏里深色的正文对不上。明暗是主题的属性，`LocalDarkTheme` 直接给。
      */
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        com.dshwatch.ui.m3e.M3eBubble(
+            isUser = isUser,
+            label = label,
+            headerTrailing = headerTrailing,
+            content = content,
+        )
+        return
+    }
     val light = !LocalDarkTheme.current
     val glass = LocalGlass.current
     val bubbleColor = when {
@@ -1710,6 +1719,24 @@ private fun ChatBottomBar(
      * 但手表上输入框本来就只是「点一下进输入页」的跳板，预览没有价值。
      */
     if (round) {
+        if (com.dshwatch.ui.theme.isM3eUi) {
+            // M3E：底部是一颗 52dp 的填充图标按钮。比经典的 46dp 略大 ——
+            // Expressive 的触摸目标就是 48dp 起步，46dp 会让它的涟漪看起来"贴着边"。
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                com.dshwatch.ui.m3e.M3eFab(
+                    icon = if (streaming) Icons.Filled.Stop else Icons.Outlined.Keyboard,
+                    contentDescription = if (streaming) s.stop else s.inputHint,
+                    danger = streaming,
+                    onClick = { if (streaming) onStop() else onSend() },
+                )
+            }
+            return
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()

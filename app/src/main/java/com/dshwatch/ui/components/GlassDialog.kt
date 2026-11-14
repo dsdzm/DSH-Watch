@@ -101,6 +101,16 @@ fun GlassDialog(
      */
     shadow: Boolean = false,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        com.dshwatch.ui.m3e.M3eDialog(
+            onDismissRequest = onDismissRequest,
+            title = title,
+            maxContentHeight = maxContentHeight,
+            content = content,
+            buttons = buttons,
+        )
+        return
+    }
     val glass = LocalGlass.current
     // 同上：透明背景不能反推明暗，问主题要
     val dark = LocalDarkTheme.current

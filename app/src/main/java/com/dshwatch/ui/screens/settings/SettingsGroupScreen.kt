@@ -355,6 +355,7 @@ private fun AppearanceGroup(
 ) {
     var editingPreset by remember { mutableStateOf(false) }
     var editingAppearance by remember { mutableStateOf(false) }
+    var editingUiStyle by remember { mutableStateOf(false) }
     var editingAccent by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
     var editingBackground by remember { mutableStateOf(false) }
@@ -398,6 +399,24 @@ private fun AppearanceGroup(
             },
         )
         Spacer(Modifier.height(2.dp))
+        /*
+         * 界面体系排在所有外观项之前。
+         *
+         * 它是「用哪一套组件搭页面」——骨架、卡片、按钮、开关全换。
+         * 材质和配色是在这套骨架**之上**调的，所以顺序必须在前：
+         * 先选界面，再选材质，用户不会觉得「调完颜色界面又变了」。
+         */
+        SettingRow(
+            title = "界面体系",
+            subtitle = if (com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle)) {
+                "M3E · Wear Material 3 Expressive 原生组件"
+            } else {
+                "经典 · 自绘圆屏骨架，每屏多放一行"
+            },
+            trailing = if (com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle)) "M3E ›" else "经典 ›",
+            showDivider = true,
+            onClick = { editingUiStyle = true },
+        )
         // 外观风格排在配色之前：先定材质（纯色 / 玻璃），再在它上面选颜色。
         // 反过来会出现「挑完樱花，再问要不要玻璃」，像是把刚选的颜色弄丢了。
         SettingRow(
@@ -632,6 +651,33 @@ private fun AppearanceGroup(
             subtitle = s.rerunOnboardingHint,
             trailing = "↻",
             onClick = { update { it.copy(onboardingDone = false) } },
+        )
+    }
+
+    if (editingUiStyle) {
+        GlassDialog(
+            onDismissRequest = { editingUiStyle = false },
+            title = "界面体系",
+            maxContentHeight = 220,
+            content = {
+                PickRow(
+                    title = "经典 · 自绘圆屏骨架",
+                    selected = !com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle),
+                    onClick = {
+                        update { it.copy(uiStyle = com.dshwatch.domain.model.UiStyles.CLASSIC) }
+                        editingUiStyle = false
+                    },
+                )
+                PickRow(
+                    title = "M3E · Wear Material 3 Expressive",
+                    selected = com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle),
+                    onClick = {
+                        update { it.copy(uiStyle = com.dshwatch.domain.model.UiStyles.M3E) }
+                        editingUiStyle = false
+                    },
+                )
+            },
+            buttons = { GlassDialogButton(s.close, onClick = { editingUiStyle = false }) },
         )
     }
 
