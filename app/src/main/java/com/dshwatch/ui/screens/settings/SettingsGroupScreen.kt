@@ -1292,6 +1292,13 @@ private fun ConnectionGroup(
             onClick = { nav.push(Screen.Update) },
         )
         SettingRow(
+            title = s.remoteTitle,
+            subtitle = s.entryRemoteDesc,
+            trailing = "›",
+            showDivider = true,
+            onClick = { nav.push(Screen.Remote) },
+        )
+        SettingRow(
             title = s.pairTitle,
             subtitle = s.entryPairDesc,
             trailing = "›",

@@ -15,6 +15,9 @@ sealed interface Screen {
     data class ProviderEdit(val providerId: String?) : Screen
     data object Usage : Screen
     data object Pair : Screen
+
+    /** 手机扫码配对（DSH Remote） */
+    data object Remote : Screen
     data object About : Screen
 
     /** 检查更新：版本对比、更新说明、下载与安装 */
@@ -160,6 +163,7 @@ class WatchNavigator internal constructor(
             Screen.Providers -> "providers"
             Screen.Usage -> "usage"
             Screen.Pair -> "pair"
+            Screen.Remote -> "remote"
             Screen.About -> "about"
             Screen.Update -> "update"
             Screen.Help -> "help"
@@ -197,6 +201,7 @@ class WatchNavigator internal constructor(
                 "providers" -> Screen.Providers
                 "usage" -> Screen.Usage
                 "pair" -> Screen.Pair
+                "remote" -> Screen.Remote
                 "about" -> Screen.About
                 "update" -> Screen.Update
                 "help" -> Screen.Help

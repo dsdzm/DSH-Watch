@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>连接手表</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --dim: #6b7280;
+    --line: #e3e6ec;
+    --brand: #3d6bd6;
+    --brand-ink: #ffffff;
+    --ok: #12805c;
+    --bad: #b4232c;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1014;
+      --card: #171a20;
+      --ink: #e8eaf0;
+      --dim: #9aa3b2;
+      --line: #262b34;
+      --brand: #6f93f0;
+      --brand-ink: #0d1220;
+      --ok: #4ecfa2;
+      --bad: #ff8b93;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 20px 18px 32px;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    max-width: 520px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 6px 0 4px; letter-spacing: -.01em; }
+  p.sub { margin: 0 0 18px; color: var(--dim); font-size: 14px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 16px; padding: 18px; box-shadow: var(--shadow);
+    margin-bottom: 14px;
+  }
+  button, .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; min-height: 50px; padding: 14px 16px;
+    border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink);
+    font-size: 16px; font-weight: 600; text-decoration: none;
+    cursor: pointer; transition: transform .06s ease, opacity .15s ease;
+  }
+  button:active, .btn:active { transform: scale(.985); }
+  button.primary { background: var(--brand); border-color: transparent; color: var(--brand-ink); }
+  button.ghost { background: transparent; }
+  button[disabled] { opacity: .45; cursor: default; }
+  .stack > * + * { margin-top: 10px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 6px; }
+  input {
+    width: 100%; min-height: 48px; padding: 12px 14px;
+    border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font-size: 16px;
+  }
+  input:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .status { display: flex; align-items: center; gap: 12px; }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--brand);
+    flex: none; animation: pulse 1.4s ease-in-out infinite;
+  }
+  .dot.ok { background: var(--ok); animation: none; }
+  .dot.bad { background: var(--bad); animation: none; }
+  @keyframes pulse { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+  .status-text { font-size: 15px; }
+  .status-text b { display: block; font-weight: 600; }
+  .status-text small { color: var(--dim); font-size: 13px; }
+  canvas { display: block; margin: 16px auto 8px; border-radius: 12px; background: #fff; padding: 10px; }
+  .hint { color: var(--dim); font-size: 13px; text-align: center; margin: 6px 0 0; }
+  .err { color: var(--bad); font-size: 14px; margin: 10px 0 0; }
+  .foot { color: var(--dim); font-size: 12px; text-align: center; margin-top: 22px; line-height: 1.6; }
+  .sep { display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 13px; margin: 16px 0; }
+  .sep::before, .sep::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>连接手表</h1>
+<p class="sub">在这台手机上完成登录，手表会自己记住凭据。</p>
+
+<div class="card">
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <div class="status-text">
+      <b id="title">正在连接手表…</b>
+      <small id="detail"></small>
+    </div>
+  </div>
+  <p class="err hide" id="err"></p>
+</div>
+
+<!-- 服务器地址 -->
+<div id="serverStep" class="card hide">
+  <p class="sub" style="margin-bottom:4px">先填一下 DSH Remote 服务器的地址。</p>
+  <label for="serverFirst">服务器地址</label>
+  <input id="serverFirst" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
+         spellcheck="false" placeholder="https://remote.example.com">
+  <div class="stack" style="margin-top:16px">
+    <button class="primary" id="saveServer">下一步</button>
+  </div>
+  <p class="hint" id="serverHint" style="text-align:left;margin-top:10px"></p>
+</div>
+
+<!-- 选择登录方式 -->
+<div id="choose" class="card hide">
+  <p class="sub" style="margin-bottom:14px">用哪个账号登录 DSH Remote？</p>
+  <div class="stack" id="providers"></div>
+  <div class="sep">或者</div>
+  <button class="ghost" id="showManual">手动填写令牌</button>
+</div>
+
+<!-- 授权中 -->
+<div id="authorize" class="card hide">
+  <p class="sub" style="margin-bottom:14px">点下面的按钮，在浏览器里完成授权，然后回到这个页面。</p>
+  <a class="btn primary" id="actionLink" target="_blank" rel="noopener noreferrer">打开授权页</a>
+  <div id="qrWrap" class="hide">
+    <canvas id="qr" width="260" height="260"></canvas>
+    <p class="hint">或用另一台设备扫描上面这个码</p>
+  </div>
+</div>
+
+<!-- 手动输入 -->
+<div id="manual" class="card hide">
+  <label for="server">服务器地址</label>
+  <input id="server" type="url" inputmode="url" autocapitalize="off" autocorrect="off"
+         spellcheck="false" placeholder="https://remote.example.com">
+  <div class="row" style="margin-top:14px">
+    <button class="ghost" id="tabToken" style="border-color:var(--brand)">用令牌</button>
+    <button class="ghost" id="tabPassword">用账号密码</button>
+  </div>
+  <div id="tokenBox">
+    <label for="token">设备令牌</label>
+    <input id="token" type="password" autocomplete="off" placeholder="在 DSH Remote 网页版的设备页创建">
+  </div>
+  <div id="passwordBox" class="hide">
+    <label for="email">邮箱</label>
+    <input id="email" type="email" inputmode="email" autocapitalize="off" placeholder="you@example.com">
+    <label for="password">密码</label>
+    <input id="password" type="password" autocomplete="current-password">
+  </div>
+  <div class="stack" style="margin-top:16px">
+    <button class="primary" id="submitManual">提交</button>
+    <button class="ghost" id="backFromManual">返回</button>
+  </div>
+</div>
+
+<!-- 完成 -->
+<div id="done" class="card hide">
+  <div class="status">
+    <span class="dot ok"></span>
+    <div class="status-text">
+      <b>登录成功</b>
+      <small id="doneDetail">可以关掉这个页面了。</small>
+    </div>
+  </div>
+  <div class="stack" style="margin-top:16px" id="hostList"></div>
+</div>
+
+<p class="foot">页面由手表直接提供，凭据不经过任何第三方。<br>关掉页面不会有影响，手表已经记住了。</p>
+
+<script>
+(function () {
+  var K = new URLSearchParams(location.search).get('k') || '';
+  var api = function (path) { return path + (path.indexOf('?') < 0 ? '?' : '&') + 'k=' + encodeURIComponent(K); };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var state = null;
+  var mode = 'token';
+
+  function post(path, body) {
+    return fetch(api(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); });
+  }
+
+  function show(id, on) {
+    var el = $(id);
+    if (on) el.classList.remove('hide'); else el.classList.add('hide');
+  }
+
+  function drawQr(rows) {
+    var canvas = $('qr');
+    var ctx = canvas.getContext('2d');
+    var n = rows.length;
+    var quiet = 4;
+    var total = n + quiet * 2;
+    var scale = Math.floor(canvas.width / total);
+    var size = scale * total;
+    canvas.width = size;
+    canvas.height = size;
+    canvas.style.width = '260px';
+    canvas.style.height = '260px';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#000000';
+    for (var y = 0; y < n; y++) {
+      var row = rows[y];
+      for (var x = 0; x < n; x++) {
+        if (row.charAt(x) === '1') {
+          ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+        }
+      }
+    }
+  }
+
+  function render(s) {
+    state = s;
+    $('dot').className = 'dot' + (s.phase === 'DONE' ? ' ok' : (s.phase === 'FAILED' || s.phase === 'CLOSED' ? ' bad' : ''));
+    $('title').textContent = s.title || '';
+    $('detail').textContent = s.detail || '';
+    if (s.error) { $('err').textContent = s.error; show('err', true); }
+    else { show('err', false); }
+
+    show('serverStep', s.phase === 'NEED_SERVER');
+    show('choose', s.phase === 'CHOOSING');
+    show('authorize', s.phase === 'AUTHORIZING');
+    show('done', s.phase === 'DONE');
+
+    if (s.server && !$('server').value) { $('server').value = s.server; $('serverFirst').value = s.server; }
+
+    if (s.phase === 'CHOOSING') {
+      var box = $('providers');
+      if (box.dataset.built !== String((s.providers || []).length)) {
+        box.innerHTML = '';
+        (s.providers || []).forEach(function (p) {
+          var b = document.createElement('button');
+          b.className = 'primary';
+          b.textContent = '使用 ' + p.name + ' 登录';
+          b.onclick = function () {
+            b.disabled = true;
+            b.textContent = '正在打开…';
+            post('/api/submit', { kind: 'start', provider: p.id }).then(function (r) {
+              if (!r.ok) { b.disabled = false; b.textContent = '使用 ' + p.name + ' 登录'; }
+            });
+          };
+          box.appendChild(b);
+        });
+        box.dataset.built = String((s.providers || []).length);
+      }
+    }
+
+    if (s.phase === 'AUTHORIZING') {
+      if (s.actionUrl) {
+        $('actionLink').href = s.actionUrl;
+        $('actionLink').textContent = '打开 ' + (s.provider || '授权') + ' 授权页';
+      }
+      if (s.matrix && s.matrix.length) {
+        show('qrWrap', true);
+        var key = s.matrix.join('').length + ':' + s.matrix[0].length;
+        if ($('qr').dataset.key !== key) {
+          drawQr(s.matrix);
+          $('qr').dataset.key = key;
+        }
+      } else {
+        show('qrWrap', false);
+      }
+    }
+
+    if (s.phase === 'DONE') {
+      $('doneDetail').textContent = s.detail || '可以关掉这个页面了。';
+      var list = $('hostList');
+      if (list.dataset.built !== String((s.hosts || []).length)) {
+        list.innerHTML = '';
+        (s.hosts || []).forEach(function (h) {
+          var d = document.createElement('div');
+          d.className = 'status';
+          d.style.padding = '12px 14px';
+          d.style.border = '1px solid var(--line)';
+          d.style.borderRadius = '12px';
+          d.innerHTML = '<span class="dot ok"></span><div class="status-text"><b>' +
+            h.name.replace(/[<>&]/g, '') + '</b><small>电脑</small></div>';
+          list.appendChild(d);
+        });
+        list.dataset.built = String((s.hosts || []).length);
+      }
+    }
+  }
+
+  function poll() {
+    fetch(api('/api/state'), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (s) { render(s); if (s.phase !== 'DONE' && s.phase !== 'CLOSED') setTimeout(poll, 1200); })
+      .catch(function () { setTimeout(poll, 2500); });
+  }
+
+  $('saveServer').onclick = function () {
+    var server = $('serverFirst').value.trim();
+    if (!server) { $('serverFirst').focus(); return; }
+    $('saveServer').disabled = true;
+    post('/api/submit', { kind: 'server', server: server }).then(function (r) {
+      $('saveServer').disabled = false;
+      if (!r.ok) { $('serverHint').textContent = r.error || '地址不对'; }
+    }).catch(function () { $('saveServer').disabled = false; });
+  };
+
+  $('showManual').onclick = function () { show('manual', true); show('choose', false); };
+  $('backFromManual').onclick = function () { show('manual', false); show('choose', true); };
+  $('tabToken').onclick = function () {
+    mode = 'token'; $('tokenBox').classList.remove('hide'); $('passwordBox').classList.add('hide');
+    $('tabToken').style.borderColor = 'var(--brand)'; $('tabPassword').style.borderColor = 'var(--line)';
+  };
+  $('tabPassword').onclick = function () {
+    mode = 'password'; $('passwordBox').classList.remove('hide'); $('tokenBox').classList.add('hide');
+    $('tabPassword').style.borderColor = 'var(--brand)'; $('tabToken').style.borderColor = 'var(--line)';
+  };
+
+  $('submitManual').onclick = function () {
+    var server = $('server').value.trim();
+    if (!server) { $('server').focus(); return; }
+    var body;
+    if (mode === 'token') {
+      var token = $('token').value.trim();
+      if (token.length < 16) { $('token').focus(); return; }
+      body = { kind: 'token', server: server, token: token };
+    } else {
+      var email = $('email').value.trim();
+      var password = $('password').value;
+      if (!email || password.length < 6) { $('email').focus(); return; }
+      body = { kind: 'password', server: server, email: email, password: password };
+    }
+    $('submitManual').disabled = true;
+    post('/api/submit', body).then(function (r) {
+      $('submitManual').disabled = false;
+      if (!r.ok) { $('err').textContent = r.error || '提交失败'; show('err', true); }
+    }).catch(function () { $('submitManual').disabled = false; });
+  };
+
+  if (!K) {
+    render({ phase: 'FAILED', title: '缺少配对口令', detail: '请用手机扫描手表上的二维码重新打开', error: null });
+    return;
+  }
+  poll();
+})();
+</script>
+</body>
+</html>
