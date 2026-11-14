@@ -32,6 +32,7 @@ class NoiseIk private constructor(
     private val localStatic: ByteArray,
     private val remoteStatic: ByteArray,
     private val ephemeralSeed: ByteArray?,
+    prologue: ByteArray,
 ) {
 
     enum class Role { INITIATOR, RESPONDER }
@@ -107,11 +108,18 @@ class NoiseIk private constructor(
         return payload
     }
 
+    // 传输消息不带关联数据：Noise 只在握手阶段用 h 作为 AD
     fun encrypt(plaintext: ByteArray): ByteArray =
-        checkNotNull(send) { "握手还没完成" }.encrypt(plaintext)
+        checkNotNull(send) { "握手还没完成" }.encrypt(EMPTY_AD, plaintext)
 
     fun decrypt(ciphertext: ByteArray): ByteArray =
-        checkNotNull(receive) { "握手还没完成" }.decrypt(ciphertext)
+        checkNotNull(receive) { "握手还没完成" }.decrypt(EMPTY_AD, ciphertext)
+
+    /** 下一条要发送的 nonce。Relay 帧要带上它，服务端按同一个计数器校验顺序 */
+    val sendingNonce: Long get() = send?.nonce ?: 0L
+
+    /** 期望收到的下一个 nonce。对不上就是重放、丢帧或乱序 */
+    val receivingNonce: Long get() = receive?.nonce ?: 0L
 
     /** 用于把对端身份固定下来之后做比对提示 */
     fun remoteStaticFingerprint(): String = fingerprintOf(remoteStatic)
@@ -131,13 +139,14 @@ class NoiseIk private constructor(
     // -------------------------------------------------------------- 内部件
 
     private class CipherState(private val key: ByteArray?) {
-        private var nonce = 0L
+        var nonce = 0L
+            private set
 
-        fun encrypt(plaintext: ByteArray): ByteArray {
+        fun encrypt(ad: ByteArray, plaintext: ByteArray): ByteArray {
             val k = key ?: return plaintext.copyOf()
             check(nonce < MAX_NONCE) { "nonce 用尽" }
             val cipher = ChaCha20Poly1305()
-            cipher.init(true, AEADParameters(KeyParameter(k), 128, nonceBytes(nonce), ByteArray(0)))
+            cipher.init(true, AEADParameters(KeyParameter(k), 128, nonceBytes(nonce), ad))
             val out = ByteArray(cipher.getOutputSize(plaintext.size))
             var len = cipher.processBytes(plaintext, 0, plaintext.size, out, 0)
             len += cipher.doFinal(out, len)
@@ -145,12 +154,12 @@ class NoiseIk private constructor(
             return out.copyOf(len)
         }
 
-        fun decrypt(ciphertext: ByteArray): ByteArray {
+        fun decrypt(ad: ByteArray, ciphertext: ByteArray): ByteArray {
             val k = key ?: return ciphertext.copyOf()
             require(ciphertext.size >= 16) { "密文比 tag 还短" }
             check(nonce < MAX_NONCE) { "nonce 用尽" }
             val cipher = ChaCha20Poly1305()
-            cipher.init(false, AEADParameters(KeyParameter(k), 128, nonceBytes(nonce), ByteArray(0)))
+            cipher.init(false, AEADParameters(KeyParameter(k), 128, nonceBytes(nonce), ad))
             return try {
                 val out = ByteArray(cipher.getOutputSize(ciphertext.size))
                 var len = cipher.processBytes(ciphertext, 0, ciphertext.size, out, 0)
@@ -193,14 +202,20 @@ class NoiseIk private constructor(
             cipher = CipherState(k)
         }
 
+        /**
+         * Noise §5.2：密文的关联数据是**当前的 h**，不是空。
+         *
+         * 这一条写错，握手在字节层面看起来完全正常，但和任何按协议实现的
+         * 对端都对不上 —— 连 prologue 不一致这种本该失败的情况都会"成功"。
+         */
         fun encryptAndHash(plaintext: ByteArray): ByteArray {
-            val ct = cipher?.encrypt(plaintext) ?: plaintext.copyOf()
+            val ct = cipher?.encrypt(h, plaintext) ?: plaintext.copyOf()
             h = sha256(h + ct)
             return ct
         }
 
         fun decryptAndHash(ciphertext: ByteArray): ByteArray {
-            val pt = cipher?.decrypt(ciphertext) ?: ciphertext.copyOf()
+            val pt = cipher?.decrypt(h, ciphertext) ?: ciphertext.copyOf()
             h = sha256(h + ciphertext)
             return pt
         }
@@ -215,24 +230,27 @@ class NoiseIk private constructor(
         val prologue: ByteArray = ByteArray(0)
 
         private const val MAX_NONCE = 0x3FFFFFFFFFFFFFFFL
+        private val EMPTY_AD = ByteArray(0)
         private val random = SecureRandom()
 
         fun initiator(
             localPrivate: ByteArray,
             remotePublic: ByteArray,
             ephemeralSeed: ByteArray? = null,
+            prologue: ByteArray = ByteArray(0),
         ): NoiseIk {
             require(localPrivate.size == 32 && remotePublic.size == 32) { "密钥必须是 32 字节" }
-            return NoiseIk(Role.INITIATOR, localPrivate, remotePublic, ephemeralSeed)
+            return NoiseIk(Role.INITIATOR, localPrivate, remotePublic, ephemeralSeed, prologue)
         }
 
         fun responder(
             localPrivate: ByteArray,
             remotePublic: ByteArray,
             ephemeralSeed: ByteArray? = null,
+            prologue: ByteArray = ByteArray(0),
         ): NoiseIk {
             require(localPrivate.size == 32 && remotePublic.size == 32) { "密钥必须是 32 字节" }
-            return NoiseIk(Role.RESPONDER, localPrivate, remotePublic, ephemeralSeed)
+            return NoiseIk(Role.RESPONDER, localPrivate, remotePublic, ephemeralSeed, prologue)
         }
 
         fun newPrivateKey(): ByteArray = ByteArray(32).also { X25519.generatePrivateKey(random, it) }

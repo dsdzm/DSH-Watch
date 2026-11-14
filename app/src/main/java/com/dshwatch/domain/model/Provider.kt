@@ -81,6 +81,8 @@ data class Provider(
     val remoteDeviceId: String = "",
     /** 要连的那台电脑（Host）的设备 id */
     val remoteHostId: String = "",
+    /** 那台电脑在服务端的名字，只用于界面显示 */
+    val remoteHostName: String = "",
     /** 那台电脑的身份公钥，握手时用来确认对面确实是它 */
     val remoteHostKey: String = "",
 

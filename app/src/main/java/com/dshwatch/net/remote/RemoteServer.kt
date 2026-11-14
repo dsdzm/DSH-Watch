@@ -127,6 +127,8 @@ class RemoteServer(
                 name = obj.str("name") ?: "电脑",
                 platform = obj.str("platform") ?: "",
                 online = obj["online"]?.let { (it as? JsonPrimitive)?.content == "true" },
+                // 握手时要把身份公钥钉死；没有它就等于没有 pinning
+                identityKey = obj.str("identityKey") ?: "",
             )
         }
     }
@@ -286,10 +288,17 @@ data class RemoteHost(
     val name: String,
     val platform: String,
     val online: Boolean?,
+    val identityKey: String = "",
 )
 
 sealed class RemoteError(message: String) : Exception(message) {
     class InvalidUrl(message: String) : RemoteError(message)
+
+    /** 服务端业务失败。`code` 是对端给的（METHOD_NOT_ALLOWED / RATE_LIMITED…） */
+    class Remote(val errorCode: String, message: String) : RemoteError(message)
+
+    /** 本地判断连接已经不可用：还没连上、或已经断开 */
+    class Closed(message: String) : RemoteError(message)
     /** 401/403：账号令牌失效、设备被移除，或刷新令牌被吊销 */
     class Unauthorized : RemoteError("登录已失效，请重新扫码")
     class Http(val code: Int, val body: String) : RemoteError("服务器返回 HTTP $code：$body")

@@ -23,6 +23,16 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.0-beta.4",
+            date = "2026-11-14",
+            highlights = listOf(
+                "新增 会话流走 Noise 隧道：Remote 连接之后可以直接聊天，不用再开 SSH",
+                "新增 电脑上的审批会在手表上弹出，可选「允许一次」或「拒绝」",
+                "修复 Noise 握手的关联数据用错，此前和真实服务器握手必然失败",
+                "修复 一元调用的请求 id 与等待方不一致，表现为调用超时",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.0-beta.3",
             date = "2026-11-14",
             highlights = listOf(
