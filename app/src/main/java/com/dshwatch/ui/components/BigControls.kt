@@ -121,6 +121,16 @@ fun WatchGhostButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        com.dshwatch.ui.m3e.M3eGhostButton(
+            text = text,
+            modifier = modifier,
+            icon = icon,
+            enabled = enabled,
+            onClick = onClick,
+        )
+        return
+    }
     val glass = LocalGlass.current
     val src = remember { MutableInteractionSource() }
     Row(

@@ -23,13 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
-            version = "1.24.0-beta.1",
+            version = "1.23.0-beta.5",
             date = "2026-11-14",
             highlights = listOf(
                 "新增 两套界面并列：设置 → 外观 → 界面体系，可在「经典」与「M3E」之间切换",
                 "新增 M3E 界面整套换成 Wear Material 3 Expressive 组件：骨架、卡片、按钮、开关、对话框、列表",
+                "调整 按钮改回手表尺寸：52dp 高、20sp 标签、26dp 图标（之前是手机尺寸）",
+                "调整 对话框只留一个动作，取消靠下滑或返回键",
                 "新增 引导页最后一屏可以直接选界面体系",
-                "说明 经典界面每屏多放一行，M3E 更接近 Wear 系统应用；两者随时可切",
             ),
         ),
         ChangelogEntry(

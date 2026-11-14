@@ -779,7 +779,7 @@ fun GhostButton(
     onClick: () -> Unit,
 ) {
     if (com.dshwatch.ui.theme.isM3eUi) {
-        M3eGhostButton(text, modifier, danger, onClick)
+        M3eGhostButton(text = text, modifier = modifier, danger = danger, onClick = onClick)
         return
     }
 

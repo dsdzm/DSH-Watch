@@ -412,8 +412,19 @@ fun GlassDialogRow(
 fun GlassDialogButton(
     label: String,
     primary: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    // M3E：对话框里的动作是整宽的按钮，不是贴着右下角的小文字
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        com.dshwatch.ui.m3e.M3eDialogAction(
+            label = label,
+            primary = primary,
+            enabled = enabled,
+            onClick = onClick,
+        )
+        return
+    }
     val glass = LocalGlass.current
     val color = if (primary) {
         MaterialTheme.colorScheme.primary

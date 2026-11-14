@@ -1,6 +1,8 @@
 package com.dshwatch.ui.m3e
 
 import androidx.compose.material3.darkColorScheme
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.Typography as WearTypography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import com.dshwatch.domain.model.UiStyles
@@ -90,5 +92,25 @@ class M3eThemeTest {
         assertThat(dim.alpha).isEqualTo(1f)
         assertThat(dim).isNotEqualTo(Color.Black)
         assertThat(dim.blue).isGreaterThan(dim.red)
+    }
+
+    @Test
+    fun `按钮尺寸仍然是规范值`() {
+        /*
+         * 这条测试看着像在抄文档，其实是**升级哨兵**。
+         *
+         * M3eControls 里所有按钮都写死 `ButtonDefaults.Height` / `IconSize`，
+         * 一旦 Wear Compose 改版把 52 改成 56、26 改成 24，界面上不会报错，
+         * 只会「莫名变挤」或「图标显得小」—— 那种问题极难反查。
+         * 这里把当前依赖的三个数钉住：库一升级，测试先红。
+         *
+         * 20sp 是按钮标签的字号（labelLarge），不是正文：手表上的按钮字
+         * 必须比手机上大一号，用 14sp 会让整屏看起来像缩略图。
+         */
+        assertThat(ButtonDefaults.Height.value).isEqualTo(52f)
+        assertThat(ButtonDefaults.IconSize.value).isEqualTo(26f)
+        assertThat(ButtonDefaults.CompactButtonHeight.value).isEqualTo(48f)
+        assertThat(WearTypography().labelLarge?.fontSize?.value).isEqualTo(20f)
+        assertThat(WearTypography().labelMedium?.fontSize?.value).isEqualTo(15f)
     }
 }

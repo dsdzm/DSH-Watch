@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.AlertDialog
 import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.ButtonGroup
 import androidx.wear.compose.material3.Card
 import androidx.wear.compose.material3.FilledTonalButton
@@ -67,17 +69,13 @@ fun M3eCardRow(
     trailing: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    Card(
-        onClick = onClick ?: {},
-        modifier = modifier.fillMaxWidth(),
-        enabled = onClick != null,
-        contentPadding = PaddingValues(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-    ) {
+    val body: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                // 24dp 是 Wear 列表项里图标的标准尺寸，20dp 会显得比文字轻
+                modifier = Modifier.size(24.dp),
                 tint = W3.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(12.dp))
@@ -110,10 +108,28 @@ fun M3eCardRow(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = W3.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+
+    if (onClick != null) {
+        Card(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        ) { body() }
+    } else {
+        // 同 [M3eSettingRow]：不可点 ≠ 不可用，别压低整块内容的透明度
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(26.dp))
+                .background(W3.colorScheme.surfaceContainer),
+        ) {
+            Box(Modifier.padding(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) { body() }
         }
     }
 }
@@ -158,7 +174,7 @@ fun M3eSettingRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
+                .heightIn(min = 48.dp)
                 .padding(horizontal = 14.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -266,6 +282,8 @@ fun M3eSegmentedRow(
     if (options.isEmpty()) return
     ButtonGroup(
         Modifier.fillMaxWidth(),
+        // 组内间距 4dp：Expressive 的按钮组靠"挨得近"成为一个整体，
+        // 拉开到 8dp 以上就变成三颗独立按钮了
         4.dp,
         0.dp,
         PaddingValues(0.dp),
@@ -276,37 +294,42 @@ fun M3eSegmentedRow(
             // InteractionSource 必须 remember：它承载"按住了"的状态，
             // 每次重组新建一个的话，形变动画会在手指还没抬起来时被重置
             val source = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            /*
+             * 高度给到 48dp 而不是默认 52dp。
+             *
+             * 52dp 是单个按钮的高度；一组横排按钮并排时，视觉重心会往下压，
+             * 52 在圆屏上会把下面的内容挤走。48dp 仍然是规范里触摸目标的下限，
+             * 所以"变小"只发生在视觉上，命中率没变。
+             */
             val itemModifier = Modifier
                 .weight(1f)
+                .height(48.dp)
                 .animateWidth(source)
+            // 标签用 labelMedium（15sp）而不是按钮的 labelLarge（20sp）：
+            // 一组里要放 2–3 项，20sp 在三分之一屏宽里会直接省略成「…」
+            val itemLabel: @Composable RowScope.() -> Unit = {
+                Text(
+                    text = label,
+                    style = W3.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
             if (selected) {
                 Button(
                     onClick = { onSelect(index) },
                     modifier = itemModifier,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        text = label,
-                        style = M3.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    label = itemLabel,
+                )
             } else {
                 FilledTonalButton(
                     onClick = { onSelect(index) },
                     modifier = itemModifier,
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        text = label,
-                        style = M3.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                    label = itemLabel,
+                )
             }
         }
     }
@@ -319,31 +342,66 @@ fun M3eChip(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
 ) {
-    val label: @Composable () -> Unit = {
-        Text(
-            text = text,
-            style = M3.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    /*
+     * 32dp —— 这是 Wear 上 chip 的高度（按钮 52、chip 32）。
+     *
+     * 标签用 labelSmall（13sp）：chip 是"分类标记"，不是动作，
+     * 尺寸跟正文拉开才有层次。触摸区由 Compose 的最小交互尺寸兜住，
+     * 视觉上小、点起来仍然是 48dp。
+     */
     if (selected) {
         FilledTonalButton(
             onClick = onClick ?: {},
             enabled = onClick != null,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-        ) { label() }
+            modifier = Modifier.height(32.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            label = {
+                Text(
+                    text = text,
+                    style = W3.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
     } else {
         OutlinedButton(
             onClick = onClick ?: {},
             enabled = onClick != null,
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.height(32.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
             border = BorderStroke(1.dp, W3.colorScheme.outlineVariant),
-        ) { label() }
+            label = {
+                Text(
+                    text = text,
+                    style = W3.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+        )
     }
 }
 
-/** 主按钮：实心、整宽 */
+/**
+ * 主按钮。
+ *
+ * ## 尺寸是查出来的，不是估的
+ *
+ * Wear M3 的按钮高度就是 [ButtonDefaults.Height]（52dp），标签是
+ * `labelLarge`（20sp），图标 26dp。这三个数决定了「这看起来像不像手表」：
+ *
+ * - **52dp** 是戴着手套、手指有点湿时也点得中的高度；手机上 40dp 的那套搬过来
+ *   会显得又矮又挤。
+ * - **20sp** 的标签不是"字号偏大"，而是手表上的正文尺寸：屏幕离眼睛近，
+ *   字必须比手机上大。用 14sp 会让整屏幕看起来像缩略图。
+ * - **26dp 图标**同理，18dp 在 52dp 的按钮里会显得孤零零。
+ *
+ * ## 为什么用 icon / label 两个槽，而不是自己拼 Row
+ *
+ * 组件内部会算「图标占左边多少、标签在剩下的空间里居中」。
+ * 自己拼 Row 只能做到「图标 + 左对齐文字」，那正是手机按钮的样子。
+ */
 @Composable
 fun M3ePrimaryButton(
     text: String,
@@ -354,54 +412,80 @@ fun M3ePrimaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(ButtonDefaults.Height),
         enabled = enabled,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
+        icon = {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(ButtonDefaults.IconSize),
+                )
+            }
+        },
+        label = {
+            Text(
+                text = text,
+                style = W3.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(
-            text = text,
-            style = M3.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+        },
+    )
 }
 
-/** 次级按钮：描边 */
+/**
+ * 次级按钮：描边、同样 52dp。
+ *
+ * 和主按钮**同样的高度**是刻意的。手表上「次要」不等于「更小」——
+ * 它仍然必须点得中，只是视觉权重低一档（描边 vs 实心）。
+ * 手机上那个「主按钮大、次按钮小」的层级，搬到手表上就变成了
+ * 「次按钮点不到」。
+ */
 @Composable
 fun M3eGhostButton(
     text: String,
     modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    enabled: Boolean = true,
     danger: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val border = if (danger) {
-        BorderStroke(1.dp, W3.colorScheme.error)
-    } else {
-        BorderStroke(1.dp, W3.colorScheme.outlineVariant)
-    }
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        border = border,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-    ) {
-        Text(
-            text = text,
-            style = M3.typography.titleSmall,
-            color = if (danger) W3.colorScheme.error else W3.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+        modifier = modifier
+            .fillMaxWidth()
+            .height(ButtonDefaults.Height),
+        enabled = enabled,
+        border = BorderStroke(
+            1.dp,
+            if (danger) W3.colorScheme.error else W3.colorScheme.outlineVariant,
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = if (danger) W3.colorScheme.error else W3.colorScheme.onSurface,
+        ),
+        icon = {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(ButtonDefaults.IconSize),
+                )
+            }
+        },
+        label = {
+            Text(
+                text = text,
+                style = W3.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        },
+    )
 }
 
 /** 空态 */
@@ -457,7 +541,12 @@ fun M3eDialog(
         confirmButton = { buttons() },
         title = {
             if (title != null) {
-                Text(text = title, style = M3.typography.titleSmall)
+                Text(
+                    text = title,
+                    style = W3.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
         text = {
@@ -481,7 +570,18 @@ fun M3eDialog(
     )
 }
 
-/** 二次确认 */
+/**
+ * 二次确认。
+ *
+ * ## 只有一个按钮，这是规范不是偷懒
+ *
+ * Wear 的对话框里**没有「取消」按钮**：关掉它的方式是下滑，或者按表冠/返回。
+ * 手机上的「取消 / 确定」并排是双指操作留下的习惯，在 1.5 英寸的屏幕上
+ * 两颗并排按钮各自只有 60dp 宽，命中率会掉一半。
+ *
+ * 所以这里只画确认那一个（52dp、整宽），并在正文下面补一句「下滑取消」——
+ * 提示比多画一个按钮便宜，也比用户以为退不出去好。
+ */
 @Composable
 fun M3eConfirmDialog(
     title: String,
@@ -496,15 +596,58 @@ fun M3eConfirmDialog(
         visible = true,
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(confirmText ?: if (destructive) s.delete else s.ok)
+            Button(
+                onClick = onConfirm,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ButtonDefaults.Height),
+                colors = if (destructive) {
+                    // 破坏性动作用 errorContainer 而不是纯 error：
+                    // 纯红实心在 OLED 表上整块发光，反而看不清字
+                    ButtonDefaults.buttonColors(
+                        containerColor = W3.colorScheme.errorContainer,
+                        contentColor = W3.colorScheme.onErrorContainer,
+                    )
+                } else {
+                    ButtonDefaults.buttonColors()
+                },
+                label = {
+                    Text(
+                        text = confirmText ?: if (destructive) s.delete else s.ok,
+                        style = W3.typography.labelLarge,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                },
+            )
+        },
+        title = {
+            Text(
+                text = title,
+                style = W3.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = text,
+                    style = W3.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "下滑取消",
+                    style = W3.typography.labelSmall,
+                    color = W3.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
             }
         },
-        title = { Text(text = title, style = M3.typography.titleSmall) },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
-        },
-        text = { Text(text = text, style = M3.typography.bodySmall) },
     )
 }
 
@@ -724,5 +867,42 @@ fun M3eBubble(
                 Column(content = content)
             }
         }
+    }
+}
+
+/**
+ * 对话框底部的一个动作。
+ *
+ * 对应经典界面的 `GlassDialogButton`。区别在高度：那边是 34dp 的胶囊，
+ * 这边 52/48dp —— 对话框是"必须点准"的场景，尤其是确认删除。
+ *
+ * [primary] 为 true 用实心主色，否则用 Wear 的 [TextButton]：
+ * 它是"只剩文字"的按钮，仍然整宽、仍然 48dp 高，不是手机上那个
+ * 挤在右下角的小文字链接。
+ */
+@Composable
+fun M3eDialogAction(
+    label: String,
+    primary: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    if (primary) {
+        M3ePrimaryButton(text = label, enabled = enabled, onClick = onClick)
+        return
+    }
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ButtonDefaults.CompactButtonHeight),
+    ) {
+        Text(
+            text = label,
+            style = W3.typography.labelLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

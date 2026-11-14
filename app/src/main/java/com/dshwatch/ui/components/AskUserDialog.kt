@@ -95,10 +95,11 @@ fun AskUserDialog(
             // 而不是让任务停在这里。所以措辞上也要区分开。
             GlassDialogButton(s.agentAskSkip, onClick = onSkip)
             if (question.allowFreeText) {
-                TextButton(
+                GlassDialogButton(
+                    s.agentAskSubmit,
+                    primary = true,
                     enabled = text.isNotBlank(),
-                    onClick = { submit(text) },
-                ) { Text(s.agentAskSubmit) }
+                ) { submit(text) }
             }
         },
     )
