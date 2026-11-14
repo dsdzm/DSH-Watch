@@ -120,7 +120,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 | 模式 | 说明 |
 |---|---|
 | **直连 API** | 任意 OpenAI 兼容服务：官方接口、中转站、本地 Ollama。Key 存 Android Keystore |
-| **DSH 服务器** | 复用 `dsh-workspace` 配对流程，10 分钟一次性配对码换设备令牌 |
+| **DSH 服务器** | 手表用 SSH 连上你的电脑，在那边启动 `dsh web` 并把端口转发回来 |
 
 另外内置两家免费通道（Agnes、智谱 GLM）。内置项的地址与 Key 在界面中不可见、不可改，
 模型名单锁定为免费档，避免误用计费模型。
@@ -162,12 +162,25 @@ adb install -r DSH-Watch-v1.21.0.apk
 
 ### 方式 B：连接电脑上的 DSH
 
-电脑端在 DSH WebUI 里启用 `dsh-workspace` 插件 → 添加授权根目录 → 打开远程访问 →
-创建配对，拿到 10 分钟有效的一次性配对码。手表端进 **设置 → 配对 DSH 服务器**，
-填地址、配对码、设备名即可。
+先在电脑上开 SSH（macOS：系统设置 → 通用 → 共享 → 远程登录；Ubuntu：`apt install openssh-server`），
+并确认电脑上装了 DSH（`dsh --version`）。
 
-> 协议适配集中在 `net/backend/DshServerBackend.kt` 的 `Endpoints` 与 `net/model/Wire.kt`，
-> 版本字段对不上时只改这两处。
+手表端进 **设置 → 连接电脑（SSH）**（或新建供应商时选 **DSH 服务器**），填：
+
+| 字段 | 说明 |
+|---|---|
+| 电脑地址 | 局域网 IP；也可以直接粘 `ssh me@192.168.1.5 -p 2222` 整行，会自动拆开 |
+| 端口 | 默认 22 |
+| 用户名 / 密码 | 电脑上的登录账号 |
+
+点「连接电脑」，它依次做四件事并逐条显示：SSH 登录 → 在远端 `dsh web --host 127.0.0.1 --port 0 --no-open`
+→ 把本地端口转发到那个回环端口 → 用启动令牌换 cookie。
+
+> 聊天走 `/api/remote.mux` 的 `session/follow`，不是 REST，也不是 SSE。
+> 协议细节集中在 `net/dshweb/`（连接、mux）与 `net/ssh/`（隧道、远端启动）。
+>
+> 支持直连 `dsh web` 地址，但需要把整行 `dsh web: http://…/?token=…` 粘进来；
+> 手表上打字很痛苦，SSH 才是推荐路径。
 
 首次启动会走一遍 6 页新手引导：什么是 API Key、上下文窗口怎么设、温度影响什么。
 
