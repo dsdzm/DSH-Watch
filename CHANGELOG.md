@@ -6,6 +6,38 @@
 
 ---
 
+## [未发布]
+
+（改动先攒在这里。发版时把这一段改成 `## [x.y.z] — 日期（versionCode N）`，
+并往 `AppChangelog.kt` 补一条。发版节奏见 `CONTRIBUTING.md`。）
+
+### 修复：连接电脑端 DSH 一直连不上
+
+用户反馈「填了地址和配对码，永远连不上」。根因不是网络，是**协议整个错了**：
+旧实现把请求打在 `POST /api/v1/devices/pair` 上，那是照着「远程访问插件」想象的接口，
+`dsh web` 上根本不存在 —— 所以地址填得再对，也只会得到 404 或解析失败。
+
+对照 dshgo 的实现重写了这一层：
+
+- `dsh web` 启动后打印 `dsh web: http://<ip>:3080/?token=…`；
+- 客户端 `GET /?token=…`（**不跟随**重定向），从 302 的 `Set-Cookie` 里取
+  `dsh-auth-<base64url(sha256(authority))>`；
+- 之后所有请求带这枚 cookie，`POST /api/<endpoint>` 的线格式是
+  `{"type":"client-request","rpcId","method","payload":{"args"}}`，
+  响应 `{"type":"server-response","result":{"ok":…}}`。
+- 注意业务失败也是 **HTTP 200**（`ok:false`），只有载体拒绝才用状态码。
+
+连接页从「地址 + 配对码」改成「粘贴启动地址」，并把链路拆成四步显示：
+地址 / 登录 / 服务可达 / 会话列表。四步失败的原因完全不同（地址错要重抄、
+cookie 失效要去电脑上重启、网络不通要查 Wi-Fi），混成一句「配对失败」等于没说。
+
+`authority` 的算法按服务端来：默认端口不进 authority、IPv6 加方括号。
+cookie 名算错会带不上 cookie，而 401 看起来和「密码错了」一模一样。
+
+已知边界：**会话收发还没接**。聊天走的是另一套多路复用协议
+（`/api/remote.mux` + `session/follow` 的事件流），与连接不是一回事，
+下一步单独做。
+
 ## [1.23.0-beta.1] — 2026-11-13（versionCode 75）
 
 > 预发布：稳定通道看不到这一版。设置 → 更新通道 → 测试版 才会提示。

@@ -37,9 +37,15 @@ import java.io.IOException
  *  因此本文件把所有路径集中在 [Endpoints]、所有字段名集中在 net/model/Wire.kt 的
  *  `Dsh*` 数据结构里。如果你的服务端版本对不上，只改这两个地方即可，不用动 UI 和业务逻辑。
  *
+ * ⚠️ **下面这段是旧版假设，未在真实 `dsh web` 上验证过。**
+ *
+ * 已确认的实际情况（见 net/dshweb/）：`dsh web` 用启动令牌换 cookie 来鉴权，
+ * 会话收发走 `/api/remote.mux` 的多路复用事件流，不存在 `POST /api/v1/devices/pair`。
+ * 连接层已经按真实协议重写；本文件里的会话/消息端点还没有对上去，
+ * 在接好之前，任何走到这里的请求都会以 404 失败 —— 那是预期行为，不是网络问题。
+ *
  * 协议假设：
- *  1) POST {PAIR}      body {code, device_name}      -> {token, expires_at, scopes}
- *  2) POST {SESSIONS}  body {title?}                 -> {id, ...}
+ *  1) POST {SESSIONS}  body {title?}                 -> {id, ...}
  *  3) POST {SESSIONS}/{id}/messages  body {content, model, stream:true, permission}
  *       -> SSE，事件形如 {"type":"delta","delta":"..."} / {"type":"usage","usage":{...}} / {"type":"done"}
  *  4) GET  {MODELS}    -> OpenAI 风格 {"data":[{"id":"..."}]}
@@ -52,7 +58,6 @@ class DshServerBackend(private val json: Json) : ChatBackend {
 
     object Endpoints {
         const val HEALTH = "/api/v1/health"
-        const val PAIR = "/api/v1/devices/pair"
         const val SESSIONS = "/api/v1/sessions"
         const val MODELS = "/api/v1/models"
         const val USAGE = "/api/v1/usage"
@@ -68,33 +73,6 @@ class DshServerBackend(private val json: Json) : ChatBackend {
     }
 
     // ---------------- 配对 ----------------
-
-    /** 用一次性配对码换取设备令牌 */
-    suspend fun pair(
-        baseUrl: String,
-        code: String,
-        deviceName: String,
-    ): DshPairResponse = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        val url = url(baseUrl, Endpoints.PAIR)
-        val payload = json.encodeToString(
-            DshPairRequest.serializer(),
-            DshPairRequest(code = code.trim(), deviceName = deviceName.ifBlank { "DSH Watch" })
-        )
-        val req = Request.Builder()
-            .url(url)
-            .post(payload.toRequestBody(Http.JSON_MEDIA))
-            .build()
-        Http.client.newCall(req).execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw DshError.Http(resp.code, text)
-            val parsed = runCatching { json.decodeFromString(DshPairResponse.serializer(), text) }
-                .getOrElse { throw DshError.Parse("配对响应无法解析：${text.take(200)}") }
-            if (parsed.token.isBlank()) {
-                throw DshError.Server(parsed.error ?: "服务端未返回设备令牌")
-            }
-            parsed
-        }
-    }
 
     suspend fun listRemoteSessions(
         provider: Provider,
