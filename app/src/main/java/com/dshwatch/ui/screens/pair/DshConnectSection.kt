@@ -55,7 +55,8 @@ fun DshConnectSection(
     var failed by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
 
-    val linked = remember(container.dshLink) { container.dshLink.connected }
+    // 不能 remember 一次就算完：断开之后按钮还写着「断开连接」，用户点了没反应
+    var linked by remember { mutableStateOf(container.dshLink.connected) }
 
     fun connect() {
         scope.launch {
@@ -81,6 +82,7 @@ fun DshConnectSection(
             }.onSuccess { link ->
                 // 首次连接把指纹记下来，之后每次比对 —— 变了就说明可能有人插在中间
                 onDraftChange(draft.copy(sshFingerprint = link.fingerprint))
+                linked = true
                 val sessions = runCatching { container.dshLink.listSessions().size }.getOrDefault(-1)
                 result = if (sessions >= 0) {
                     "已连接 · 远端端口 ${link.remotePort} · ${sessions} 个会话"
@@ -191,6 +193,7 @@ fun DshConnectSection(
             modifier = Modifier.fillMaxWidth(),
             onClick = {
                 container.dshLink.close()
+                linked = false
                 result = "已断开"
                 failed = false
             },
