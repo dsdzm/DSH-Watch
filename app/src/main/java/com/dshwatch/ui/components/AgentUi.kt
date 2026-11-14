@@ -582,3 +582,44 @@ fun AgentModeDialog(
         buttons = { GlassDialogButton(s.done, primary = true, onClick = onDismiss) },
     )
 }
+
+/**
+ * 电脑上的审批。
+ *
+ * 与本地 agent 的 [ToolApprovalDialog] 分开：远端协议的决策只有
+ * `allowed-once` / `rejected` 两种，没有"总是允许"，也没有"本会话允许"。
+ * 把三个按钮画出来，其中两个点了会失败，比少一个按钮更糟。
+ */
+@Composable
+fun RemoteApprovalDialog(
+    pending: com.dshwatch.net.remote.DshApproval,
+    onDecision: (allow: Boolean) -> Unit,
+) {
+    GlassDialog(
+        onDismissRequest = { onDecision(false) },
+        title = pending.toolName,
+        maxContentHeight = 220,
+        content = {
+            Text(
+                text = "这台电脑上的 agent 想执行一个操作，需要你确认。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = pending.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        buttons = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                ApprovalButton("允许一次", primary = true) { onDecision(true) }
+                ApprovalButton("拒绝", danger = true) { onDecision(false) }
+            }
+        },
+    )
+}

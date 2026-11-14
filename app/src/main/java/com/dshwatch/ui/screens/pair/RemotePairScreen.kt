@@ -104,6 +104,10 @@ fun RemotePairScreen(
                         remoteServer = result.server,
                         remoteDeviceId = result.deviceId,
                         remoteHostId = first?.deviceId ?: base.remoteHostId,
+                        // 身份公钥必须跟着 Host 一起存：握手时要拿它 pin 住对面，
+                        // 只存 id 的话第一次连接就只能盲信服务端给的那把钥匙
+                        remoteHostKey = first?.identityKey?.takeIf { it.isNotBlank() } ?: base.remoteHostKey,
+                        remoteHostName = first?.name ?: base.remoteHostName,
                     )
                     if (idx >= 0) list[idx] = updated else list.add(updated)
                     st.copy(providers = list)

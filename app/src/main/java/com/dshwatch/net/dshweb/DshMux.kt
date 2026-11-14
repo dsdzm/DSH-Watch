@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -51,7 +52,12 @@ import java.util.UUID
 class DshMux(
     private val host: DshWebHost,
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
-) {
+) : DshSessionChannel {
+
+    /** `$events` 这一代连接分配的 clientId；回答审批要带上它 */
+    @Volatile
+    var eventsClientId: String? = null
+        private set
     private val cookie: String? get() = host.cookie?.header
     private val hostHeader: String get() = host.hostHeader
     private val muxUrl: String get() = DshWeb.muxUrl(host)
@@ -62,7 +68,9 @@ class DshMux(
      *
      * 调用方取消收集即断开连接（[callbackFlow] 的 awaitClose 会 close）。
      */
-    fun follow(sessionId: String, maxMessages: Int = 60): Flow<MuxEvent> = callbackFlow {
+    override fun follow(sessionId: String, maxMessages: Int): Flow<MuxEvent> = followInternal(sessionId, maxMessages)
+
+    private fun followInternal(sessionId: String, maxMessages: Int = 60): Flow<MuxEvent> = callbackFlow {
         val cookie = cookie ?: run {
             trySendBlocking(MuxEvent.Failed("还没有登录这台电脑"))
             close()
@@ -159,6 +167,56 @@ class DshMux(
         awaitClose {
             runCatching { socket.cancel() }
         }
+    }
+
+    /**
+     * 连接级的 `$events` 流：审批瀑布、会话状态都在这里。
+     *
+     * 单独开一条 WebSocket，而不是复用 [follow] 的连接：`follow` 是"订阅一回合、
+     * 回合结束就断开"的短连接，而审批必须活到用户回答为止 —— 一条流同时干两件事，
+     * 任何一边结束都会把另一边带走。
+     */
+    fun hostEvents(): Flow<JsonElement> = callbackFlow {
+        val cookie = cookie ?: run {
+            close()
+            return@callbackFlow
+        }
+        val request = Request.Builder()
+            .url(muxUrl)
+            .header("Cookie", cookie)
+            .apply { if (hostHeader.isNotBlank()) header("Host", hostHeader) }
+            .build()
+        val streamId = "ev-" + UUID.randomUUID().toString().take(8)
+        val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                webSocket.send(openFrame(streamId, DshWeb.HOST_EVENTS, buildJsonObject { }))
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val frame = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+                if (frame["streamId"].stringOrNull != streamId) return
+                val type = frame["type"].stringOrNull
+                if (type == "item") {
+                    val value = frame["value"] ?: return
+                    if ((value as? JsonObject)?.get("type").stringOrNull == "ready") {
+                        eventsClientId = (value as? JsonObject)?.get("clientId").stringOrNull
+                    }
+                    trySend(value)
+                } else if (type == "end" || type == "error") {
+                    close()
+                }
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                close()
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                close()
+            }
+        }
+        val socket = Http.client.newWebSocket(request, listener)
+        awaitClose { runCatching { socket.cancel() } }
     }
 
     private fun openFrame(streamId: String, endpoint: String, args: JsonObject): String =

@@ -120,7 +120,7 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 | 模式 | 说明 |
 |---|---|
 | **直连 API** | 任意 OpenAI 兼容服务：官方接口、中转站、本地 Ollama。Key 存 Android Keystore |
-| **DSH 服务器** | 手表用 SSH 连上你的电脑，在那边启动 `dsh web` 并把端口转发回来 |
+| **DSH 服务器** | 两条路：SSH 连上电脑起 `dsh web`，或走 DSH Remote 的加密隧道（手机上扫码配对） |
 
 另外内置两家免费通道（Agnes、智谱 GLM）。内置项的地址与 Key 在界面中不可见、不可改，
 模型名单锁定为免费档，避免误用计费模型。
@@ -181,6 +181,19 @@ adb install -r DSH-Watch-v1.21.0.apk
 >
 > 支持直连 `dsh web` 地址，但需要把整行 `dsh web: http://…/?token=…` 粘进来；
 > 手表上打字很痛苦，SSH 才是推荐路径。
+
+### 方式 C：DSH Remote（手机扫码配对）
+
+电脑上装 DSH Remote 插件并在服务端登记之后，可以不开 SSH、也不用在同一个 Wi-Fi：
+
+1. 手表 **设置 → 手机配对（DSH Remote）**，屏幕上出现二维码；
+2. 手机扫它打开手表提供的页面，填服务器地址、完成登录；
+3. 手表拿到设备凭据与电脑列表，回到 **设置 → 供应商 → DSH 服务器**；
+4. 点「通过 Remote 连接」，会话流与审批都走这条加密隧道。
+
+隧道是四层：控制 WebSocket 协商 → Relay 数据面 → Noise IK → 业务消息
+（`rpc.request` / `event`）。审批（`approval/request`）走连接级的 `$events`，
+手表上会弹出「允许一次 / 拒绝」—— 远端协议没有"总是允许"，所以这里也不给。
 
 首次启动会走一遍 6 页新手引导：什么是 API Key、上下文窗口怎么设、温度影响什么。
 

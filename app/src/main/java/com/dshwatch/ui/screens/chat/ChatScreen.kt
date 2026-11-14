@@ -108,6 +108,7 @@ import com.dshwatch.ui.components.PrimaryButton
 import com.dshwatch.ui.components.ShareResult
 import com.dshwatch.ui.components.shareFile
 import com.dshwatch.ui.components.TokenBadge
+import com.dshwatch.ui.components.RemoteApprovalDialog
 import com.dshwatch.ui.components.ToolApprovalDialog
 import com.dshwatch.ui.components.ToolCallCard
 import com.dshwatch.ui.components.GlassDialog
@@ -195,6 +196,9 @@ fun ChatScreen(
 
     val approval by engine.approval.collectAsStateWithLifecycle()
     val pendingQuestion by engine.question.collectAsStateWithLifecycle()
+
+    // 电脑上的审批：远端协议只回答「这一次」，所以不放进 engine 的那套状态机
+    val remoteApprovals by container.dshLink.approvals.collectAsStateWithLifecycle()
 
     // 把「只有界面能做」的动作接上：open_screen / open_file 这两个工具靠它落地。
     // 用 DisposableEffect 而不是 LaunchedEffect —— 离开聊天页时必须摘掉，
@@ -680,6 +684,17 @@ fun ChatScreen(
         ToolApprovalDialog(
             pending = pending,
             onDecision = { decision: ApprovalDecision -> engine.resolveApproval(decision) },
+        )
+    }
+
+    remoteApprovals.firstOrNull()?.let { pending ->
+        RemoteApprovalDialog(
+            pending = pending,
+            onDecision = { allow ->
+                scope.launch {
+                    runCatching { container.dshLink.respondApproval(pending.eventId, allow) }
+                }
+            },
         )
     }
 

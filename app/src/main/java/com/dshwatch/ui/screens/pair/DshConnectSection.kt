@@ -14,8 +14,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.model.Provider
+import com.dshwatch.net.dshweb.DshLink
+import com.dshwatch.net.remote.RemoteCredentials
+import com.dshwatch.net.remote.RemotePairing
 import com.dshwatch.net.ssh.DshSshStep
 import com.dshwatch.net.ssh.SshError
 import com.dshwatch.net.ssh.SshTarget
@@ -56,7 +60,61 @@ fun DshConnectSection(
     var advanced by remember { mutableStateOf(false) }
 
     // 不能 remember 一次就算完：断开之后按钮还写着「断开连接」，用户点了没反应
-    var linked by remember { mutableStateOf(container.dshLink.connected) }
+    var linked by remember { mutableStateOf(container.dshLink.mode == DshLink.Mode.SSH) }
+
+    var remoteBusy by remember { mutableStateOf(false) }
+    var remoteLinked by remember { mutableStateOf(container.dshLink.mode == DshLink.Mode.REMOTE) }
+    var remoteStatus by remember { mutableStateOf("") }
+    var remoteFailed by remember { mutableStateOf(false) }
+
+    /** 走 Noise 隧道连那台电脑。凭据都是配对时落库的，这里不再问用户 */
+    fun connectRemote() {
+        val scopeKey = RemotePairing.SCOPE
+        val identity = container.keyStore.getIdentityKey(scopeKey)
+        val access = container.keyStore.getRemoteAccess(scopeKey)
+        if (identity.isNullOrBlank() || access.isNullOrBlank()) {
+            remoteStatus = "配对凭据不在了（重装或清理过数据？），到「设置 → 手机配对」再来一次"
+            remoteFailed = true
+            return
+        }
+        val deviceId = container.keyStore.getRemoteDeviceId(scopeKey) ?: draft.remoteDeviceId
+        scope.launch {
+            remoteBusy = true
+            remoteFailed = false
+            remoteStatus = "准备中…"
+            runCatching {
+                container.dshLink.connectRemote(
+                    credentials = RemoteCredentials(
+                        server = draft.remoteServer,
+                        deviceId = deviceId,
+                        hostDeviceId = draft.remoteHostId,
+                        hostIdentityKey = draft.remoteHostKey,
+                        accessToken = access,
+                        refreshToken = container.keyStore.getRemoteRefresh(scopeKey).orEmpty(),
+                    ),
+                    identityKey = identity,
+                    clientVersion = BuildConfig.VERSION_NAME,
+                    json = container.json,
+                    onTokens = { newAccess, newRefresh ->
+                        container.keyStore.putRemoteAccess(scopeKey, newAccess)
+                        container.keyStore.putRemoteRefresh(scopeKey, newRefresh)
+                    },
+                    onStep = { message ->
+                        scope.launch(Dispatchers.Main.immediate) { remoteStatus = message }
+                    },
+                )
+            }.onSuccess {
+                remoteLinked = true
+                linked = false
+                remoteStatus = "已连接 · ${container.dshLink.describePath()}"
+                remoteFailed = false
+            }.onFailure {
+                remoteStatus = it.message ?: it.javaClass.simpleName
+                remoteFailed = true
+            }
+            remoteBusy = false
+        }
+    }
 
     fun connect() {
         scope.launch {
@@ -83,6 +141,7 @@ fun DshConnectSection(
                 // 首次连接把指纹记下来，之后每次比对 —— 变了就说明可能有人插在中间
                 onDraftChange(draft.copy(sshFingerprint = link.fingerprint))
                 linked = true
+                remoteLinked = false
                 val sessions = runCatching { container.dshLink.listSessions().size }.getOrDefault(-1)
                 result = if (sessions >= 0) {
                     "已连接 · 远端端口 ${link.remotePort} · ${sessions} 个会话"
@@ -102,6 +161,54 @@ fun DshConnectSection(
             }
             busy = false
         }
+    }
+
+    if (draft.remoteServer.isNotBlank() && draft.remoteHostId.isNotBlank()) {
+        Text(
+            text = "通过 DSH Remote 连接",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = "${draft.remoteHostName.ifBlank { "电脑" }} · ${draft.remoteServer}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(5.dp))
+        when {
+            remoteBusy -> GhostButton(text = remoteStatus.ifBlank { "连接中…" }, modifier = Modifier.fillMaxWidth(), onClick = {})
+            remoteLinked -> GhostButton(
+                text = "断开 Remote",
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    container.dshLink.close()
+                    remoteLinked = false
+                    remoteStatus = "已断开"
+                    remoteFailed = false
+                },
+            )
+            else -> GhostButton(
+                text = "通过 Remote 连接",
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { connectRemote() },
+            )
+        }
+        if (remoteStatus.isNotBlank() && !remoteBusy) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = remoteStatus,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (remoteFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = "或者走 SSH",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(4.dp))
     }
 
     Text(

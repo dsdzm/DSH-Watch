@@ -2,7 +2,7 @@ package com.dshwatch.net.backend
 
 import com.dshwatch.domain.model.Provider
 import com.dshwatch.net.dshweb.DshLink
-import com.dshwatch.net.dshweb.DshMux
+import com.dshwatch.net.dshweb.DshSessionChannel
 import com.dshwatch.net.dshweb.DshWebError
 import com.dshwatch.net.dshweb.MuxEvent
 import kotlinx.coroutines.CompletableDeferred
@@ -81,7 +81,7 @@ class DshServerBackend(
      */
     private suspend fun followTurn(
         scope: ProducerScope<ChatEvent>,
-        mux: DshMux,
+        mux: DshSessionChannel,
         sessionId: String,
         text: String,
     ) {
@@ -148,14 +148,13 @@ class DshServerBackend(
     }
 
     override suspend fun testConnection(provider: Provider, apiKey: String, serverToken: String): String {
-        if (link.host() == null) throw DshError.BadConfig("还没有连接电脑上的 DSH")
+        if (!link.connected) throw DshError.BadConfig("还没有连接电脑上的 DSH")
         val sessions = try {
             link.listSessions()
         } catch (t: Throwable) {
             throw toDshError(t)
         }
-        val port = link.remotePort
-        return "已连接 ${provider.name.ifBlank { "DSH" }}（远端 127.0.0.1:${port ?: "?"}，${sessions.size} 个会话）"
+        return "已连接 ${provider.name.ifBlank { "DSH" }}（${link.describePath()}，${sessions.size} 个会话）"
     }
 
     /**
@@ -167,18 +166,21 @@ class DshServerBackend(
     override suspend fun diagnose(provider: Provider, apiKey: String, serverToken: String): List<DiagStep> {
         val steps = ArrayList<DiagStep>(3)
 
-        steps += runStep("SSH 隧道") {
-            val port = link.remotePort ?: throw DshError.BadConfig("还没有连接")
-            "本地端口已转发到远端 127.0.0.1:$port"
+        steps += runStep("连接通道") {
+            if (!link.connected) throw DshError.BadConfig("还没有连接")
+            link.describePath()
         }
 
-        if (link.host() == null) {
+        if (!link.connected) {
             steps += DiagStep("登录", false, "还没有连接电脑")
             return steps
         }
 
         steps += runStep("登录") {
-            "cookie 有效（${link.host()?.cookie?.name ?: "dsh-auth"}）"
+            when (link.mode) {
+                com.dshwatch.net.dshweb.DshLink.Mode.REMOTE -> "设备令牌有效（Noise 隧道已加密）"
+                else -> "cookie 有效（${link.host()?.cookie?.name ?: "dsh-auth"}）"
+            }
         }
 
         steps += runStep("会话列表") {
