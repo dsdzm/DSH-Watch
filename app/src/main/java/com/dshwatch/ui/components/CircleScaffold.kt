@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.dshwatch.ui.m3e.M3eBackButton
+import com.dshwatch.ui.m3e.M3eIconTap
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.wear.LocalCircle
 import com.dshwatch.ui.wear.circleBezel
@@ -310,6 +312,11 @@ fun CircleBackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eBackButton(onClick)
+        return
+    }
+
     Box(
         modifier = modifier
             .size(44.dp)
@@ -344,6 +351,11 @@ fun CircleIconTap(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eIconTap(icon, contentDescription, enabled, onClick)
+        return
+    }
+
     Box(
         modifier = Modifier
             .height(32.dp)

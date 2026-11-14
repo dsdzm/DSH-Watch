@@ -51,12 +51,22 @@ fun PanelCard(
     val scheme = MaterialTheme.colorScheme
     val expanded = remember(panel) { mutableStateMapOf<Int, Boolean>() }
 
+    // M3E：面板卡片换成更高一层的容器色、更大的圆角；玻璃材质在 M3E 下不参与
+    val m3e = com.dshwatch.ui.theme.isM3eUi
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .glassSurface(
-                shape = RoundedCornerShape(14.dp),
-                cornerRadius = 14.dp,
+            .then(
+                if (m3e) {
+                    Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(scheme.surfaceContainerHigh)
+                } else {
+                    Modifier.glassSurface(
+                        shape = RoundedCornerShape(14.dp),
+                        cornerRadius = 14.dp,
+                    )
+                },
             )
             .padding(horizontal = 9.dp, vertical = 9.dp),
     ) {

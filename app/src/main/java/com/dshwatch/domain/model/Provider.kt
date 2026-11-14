@@ -424,6 +424,14 @@ data class AppSettings(
     val accentColor: String = "blue",
 
     /**
+     * 界面体系：经典 / M3E（见 [UiStyles]）。
+     *
+     * 这一项决定**用哪一套组件搭页面**，与 [appearance]（材质）、
+     * [themePreset]（颜色）互不影响。默认经典：老用户升级后界面不该变样。
+     */
+    val uiStyle: String = UiStyles.CLASSIC,
+
+    /**
      * 自定义背景图的**文件名**（存在 `files/background/` 下）。空串 = 没有背景图。
      *
      * 为什么只存文件名、不存绝对路径：

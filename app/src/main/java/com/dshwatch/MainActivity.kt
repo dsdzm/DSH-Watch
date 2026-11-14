@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
                 themePreset = settings.themePreset,
                 accentColor = settings.accentColor,
                 appearance = settings.appearance,
+                uiStyle = settings.uiStyle,
                 customBackground = settings.customBackground,
                 customBackgroundDim = settings.customBackgroundDim,
                 customBackgroundFrost = settings.customBackgroundFrost,

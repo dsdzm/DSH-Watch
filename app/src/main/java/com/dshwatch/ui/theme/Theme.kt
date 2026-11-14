@@ -170,6 +170,13 @@ fun DshWatchTheme(
      */
     appearance: String = com.dshwatch.domain.model.Appearances.M3E,
     /**
+     * 界面体系：经典 / M3E（见 [com.dshwatch.domain.model.UiStyles]）。
+     *
+     * 与 [appearance] 是两个维度：appearance 决定**材质**（纯色/玻璃），
+     * 这一项决定**用哪套组件搭页面**。
+     */
+    uiStyle: String = com.dshwatch.domain.model.UiStyles.CLASSIC,
+    /**
      * 自定义背景图的文件名（见 [CustomBackground]）。空串 = 不用背景图。
      *
      * 背景图是**整个 App 的底**，不是某一页的装饰：玻璃主题下卡片透出来的
@@ -199,6 +206,8 @@ fun DshWatchTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    // 未知取值（含老存档空串）一律落回经典 —— 宁可少一个选项，也不要画不出来
+    val uiStyleNow = com.dshwatch.domain.model.UiStyles.of(uiStyle)
     val systemDark = isSystemInDarkTheme()
     val dark = when (themeMode) {
         ThemeMode.SYSTEM -> systemDark
@@ -336,11 +345,21 @@ fun DshWatchTheme(
         LocalStrings provides strings,
         LocalGlass provides glass,
         LocalDarkTheme provides dark,
+        LocalUiStyle provides uiStyleNow,
     ) {
-        MaterialTheme(
-            colorScheme = colorScheme,
-            typography = DshTypography,
-            shapes = DshShapes,
+        com.dshwatch.ui.m3e.M3eMaterialTheme(
+            enabled = uiStyleNow == com.dshwatch.domain.model.UiStyles.M3E,
+            phone = colorScheme,
+            typography = if (uiStyleNow == com.dshwatch.domain.model.UiStyles.M3E) {
+                com.dshwatch.ui.m3e.M3eTypography
+            } else {
+                DshTypography
+            },
+            shapes = if (uiStyleNow == com.dshwatch.domain.model.UiStyles.M3E) {
+                com.dshwatch.ui.m3e.M3eShapes
+            } else {
+                DshShapes
+            },
         ) {
             // 有背景图时这一层也必须存在 —— M3E 主题下照片得有个地方画
             val photo = backdrop

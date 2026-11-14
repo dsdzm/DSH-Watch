@@ -6,6 +6,66 @@
 
 ---
 
+## [1.24.0-beta.1] — 2026-11-14（versionCode 79）
+
+> 预发布：稳定通道看不到这一版。设置 → 更新通道 → 测试版 才会提示。
+
+### 新增：两套界面并列，M3E 用的是 Wear 原生组件
+
+设置 → 外观 → **界面体系**，或者首次引导的最后一屏。两个选项：
+
+| | 经典 | M3E |
+|---|---|---|
+| 骨架 | 自绘圆屏几何（按弦长反推内接矩形） | `AppScaffold` + `TimeText` + 圆形安全区 |
+| 卡片 | `glassSurface` 自绘玻璃 / 纯色 | `androidx.wear.compose.material3.Card` |
+| 按钮 | 自绘胶囊 | `Button` / `FilledTonalButton` / `ButtonGroup` |
+| 开关 | 自绘 Switch | `SwitchButton`（整行可点、拇指滑过文字） |
+| 对话框 | `GlassDialog` | `AlertDialog`（内容自动落进圆内） |
+| 列表 | `WearList` | `WearList`（同一套，都是 Wear Foundation） |
+
+M3E 不是「换一套颜色」，是把**控件本身**换掉。按下时的形变、涟漪的落点、
+形状的圆角过渡、对话框的进入动画，全部来自 Wear Material 3 Expressive
+的 `MotionScheme.expressive()`。
+
+### 实现方式：组件层分派，不是 fork 一套页面
+
+页面代码一行没复制。做法是在公共组件里先问一句当前是哪套界面：
+
+```kotlin
+fun SwitchRow(...) {
+    if (isM3eUi) { M3eSwitchRow(...); return }
+    ...经典实现
+}
+```
+
+好处是**永远不会有漏掉的页面**：三十多个屏幕用的都是这几十个公共组件，
+换一处就全换。代价是两套实现必须在同一个签名下对齐 —— 这正是
+`M3eControls.kt` 里每个函数都照抄经典签名参数的原因。
+
+### 两套主题叠着：色板必须同源
+
+页面里写的是 `MaterialTheme.colorScheme`（手机版），M3E 控件读的是
+`androidx.wear.compose.material3.MaterialTheme`（Wear 版）—— 两个不同的类。
+所以 M3E 模式下同时提供两层，色板从同一份 `ColorScheme` 映射，
+色值严格一致，否则同一屏里「自己画的小字」和「M3E 卡片」会出现两种白。
+
+Wear 没有 `surface`，只有 `surfaceContainerLow/Container/High` 三档，
+映射关系写在 `M3eTheme.kt` 的表格里。有自定义背景图时手机版会把
+`background` 换成透明，Wear 的 `background` 必须退回 `surface` —— 否则
+整页底色会跟着变透明。
+
+### 修正
+
+- 不可点的设置行不再用 `Card(enabled = false)`：那会把内容压到 38% 透明，
+  读起来像「这一项坏了」。改为同形状的静态容器。
+- 消息气泡同理 —— 否则一进 M3E 模式历史消息全变灰。
+- `ButtonGroup` 的 `InteractionSource` 之前每次重组新建，按下形变会在
+  手指还没抬起时被重置。
+
+测试：1049 个单测全绿，新增 4 条守住色板同源与归一化。
+
+---
+
 ## [1.23.0-beta.4] — 2026-11-14（versionCode 78）
 
 > 预发布：稳定通道看不到这一版。设置 → 更新通道 → 测试版 才会提示。

@@ -99,16 +99,28 @@ fun ToolCallCard(
     val clipboard = LocalClipboardManager.current
     var expanded by remember { mutableStateOf(false) }
     val tint = toolStatusColor(call.status)
+    val m3e = com.dshwatch.ui.theme.isM3eUi
+    /*
+     * 工具卡片的圆角与底色跟着界面体系走。
+     *
+     * 它没有整个换成 `Card`：这张卡片里是"图标 + 状态 + 可展开的参数 + 复制按钮"，
+     * 结构比 Card 的固定插槽复杂，硬塞进去要把一百多行逻辑重排一遍，
+     * 换来的只是一个圆角。视觉上两者的差别只在角半径和容器色 —— 改这两处就够。
+     */
+    val cardRadius = if (m3e) 20.dp else 12.dp
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .then(
-                if (LocalGlass.current) {
-                    Modifier.glassSurface(shape = RoundedCornerShape(12.dp), cornerRadius = 12.dp)
-                } else {
-                    Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                when {
+                    m3e -> Modifier
+                        .clip(RoundedCornerShape(cardRadius))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    LocalGlass.current ->
+                        Modifier.glassSurface(shape = RoundedCornerShape(cardRadius), cornerRadius = cardRadius)
+                    else -> Modifier
+                        .clip(RoundedCornerShape(cardRadius))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
                 },
             )
@@ -283,11 +295,18 @@ fun ArtifactCard(
     }
     val sizeText = remember(sizeBytes) { Fmt.bytes(sizeBytes) }
 
+    val m3eArtifact = com.dshwatch.ui.theme.isM3eUi
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f))
+            .clip(RoundedCornerShape(if (m3eArtifact) 18.dp else 10.dp))
+            .background(
+                if (m3eArtifact) {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                },
+            )
             .tap(onClick = withHaptic { onOpen?.invoke(path) })
             .padding(horizontal = 7.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -525,6 +544,18 @@ private fun ApprovalButton(
     danger: Boolean = false,
     onClick: () -> Unit,
 ) {
+    // M3E：审批按钮就是标准按钮组的成员，没有理由再自绘一套
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        when {
+            primary -> com.dshwatch.ui.m3e.M3ePrimaryButton(text = text, onClick = onClick)
+            else -> com.dshwatch.ui.m3e.M3eGhostButton(
+                text = text,
+                danger = danger,
+                onClick = onClick,
+            )
+        }
+        return
+    }
     val color = when {
         danger -> MaterialTheme.colorScheme.error
         primary -> MaterialTheme.colorScheme.primary

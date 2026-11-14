@@ -53,6 +53,10 @@ fun ChoiceButtons(
     onPick: (Choices.Choice) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eChoiceButtons(choices, modifier, enabled, onPick, scheme)
+        return
+    }
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -110,6 +114,76 @@ fun ChoiceButtons(
                         .widthIn(max = 16.dp)
                         .size(15.dp),
                 )
+            }
+        }
+    }
+}
+
+
+/**
+ * M3E 版的选项按钮。
+ *
+ * 和经典版结构一样（序号徽标 + 文本 + 箭头），差别只是外壳：
+ * 每一条是一张独立 [androidx.wear.compose.material3.Card]，
+ * 按下时整张卡片有形变与涟漪 —— 这是 M3E 里"可点的东西"该有的反馈。
+ */
+@Composable
+private fun M3eChoiceButtons(
+    choices: List<Choices.Choice>,
+    modifier: Modifier,
+    enabled: Boolean,
+    onPick: (Choices.Choice) -> Unit,
+    scheme: androidx.compose.material3.ColorScheme,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        choices.forEach { c ->
+            androidx.wear.compose.material3.Card(
+                onClick = { onPick(c) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = enabled,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 10.dp, end = 8.dp, top = 6.dp, bottom = 6.dp,
+                ),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (c.custom) {
+                                    scheme.onSurfaceVariant.copy(alpha = 0.16f)
+                                } else {
+                                    scheme.primary.copy(alpha = 0.20f)
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = c.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (c.custom) scheme.onSurfaceVariant else scheme.primary,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = c.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = if (c.custom) Icons.Outlined.Edit else Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        tint = scheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
     }

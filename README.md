@@ -34,6 +34,24 @@ Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
 代价是它不跑真正的 DSH 运行时：没有 Node、没有本机 JDK。它用 OpenAI 兼容协议 +
 一套为小屏重写的工具集，复刻「多步 Agent」的体验，并把本机做不了的事交给云端。
 
+## 界面：两套并列，随时可切
+
+设置 → 外观 → **界面体系**（或首次引导的最后一屏）：
+
+| | 经典 | M3E |
+|---|---|---|
+| 骨架 | 自绘圆屏几何：按弦长反推内接矩形，顶栏压到 33dp | `AppScaffold` + `TimeText`，内容靠列表逐项缩放收进圆内 |
+| 卡片 / 按钮 / 开关 | 自绘玻璃或纯色胶囊 | `Card` / `Button` / `ButtonGroup` / `SwitchButton` |
+| 对话框 | `GlassDialog`（自绘 + 背景模糊） | `AlertDialog`（内容自动落进圆周） |
+| 观感 | 每屏多放一行，信息密度优先 | 更接近 Wear OS 系统应用，动效与形变优先 |
+
+两套共用同一份业务代码：**不是两套页面**，而是同一批公共组件在 `LocalUiStyle`
+下分派到两套实现。所以不存在「某个页面还是旧样子」的情况。
+
+M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件，
+含 `MotionScheme.expressive()` 的形状过渡与按压反馈；色板与经典界面同源，
+切换界面体系不会改变配色，只改变控件与版式。
+
 ## 功能
 
 ### 对话
