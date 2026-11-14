@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.1",
+            date = "2026-11-14",
+            highlights = listOf(
+                "修复 每次启动都提示「上次没能启动完成」——后台唤醒的进程被误判成崩溃",
+                "修复 界面被系统回收时启动标记漏删，导致同一张错误卡片反复出现",
+                "新增 启动体检里能分清崩在启动路径上还是运行期，并附上上次崩溃的异常行",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.0",
             date = "2026-11-14",
             highlights = listOf(

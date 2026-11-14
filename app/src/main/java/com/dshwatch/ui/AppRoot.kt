@@ -308,7 +308,12 @@ fun AppRoot(
                             "也可以连电脑，从 Android/data/com.dshwatch/files/crash/ 取文件。",
                         ),
                         dismissLabel = "知道了",
-                        onDismiss = { launchFailure = null },
+                        onDismiss = {
+                            // 光收起卡片不够：标记还在磁盘上，下次启动会再弹一次。
+                            // 用户已经看过这份报告，不该被同一份再拦一回。
+                            com.dshwatch.core.CrashLog.dismissLaunchFailure(appCtx)
+                            launchFailure = null
+                        },
                     )
                 }
             }

@@ -75,17 +75,33 @@ class CrashEvidenceRuleTest {
     fun `只画出内容就算启动成功，判定点不能放在 AppRoot`() {
         val m = stripComments(read("MainActivity.kt"))
         assertTrue(
-            "MainActivity 里 settingsReady 之后必须抹掉启动标记",
-            m.contains("CrashLog.endLaunch("),
+            "MainActivity 里 settingsReady 之后必须收尾（抹掉启动标记）",
+            m.contains("CrashLog.finishLaunchAsync(") || m.contains("CrashLog.endLaunch("),
         )
+        /*
+         * 收尾必须在 IO 上，而且**不能挂在 Activity 的协程上**。
+         *
+         * 1.23.0 那版写的是 `withContext(Dispatchers.IO) { … endLaunch }`，
+         * 直接放在 LaunchedEffect 里。协程跟着 Activity 销毁一起取消，而这台
+         * 设备 20 分钟里界面被回收重建 5 次 —— 每次撞上就漏删标记，
+         * 下次启动弹一张「上次没能启动完成」。
+         *
+         * 现在收尾在 CrashLog.finishLaunchAsync 里的进程级 scope 上执行，
+         * 这里守住两件事：MainActivity 不许自己写文件，CrashLog 里必须有进程级 scope。
+         */
+        val crash = stripComments(read("core/CrashLog.kt"))
         assertTrue(
-            "写文件要挪到 IO 线程：手表上主线程卡一下就掉帧",
-            m.contains("Dispatchers.IO"),
+            "收尾要用进程级 CoroutineScope(SupervisorJob() + Dispatchers.IO)，" +
+                "不能靠 Activity 的协程 —— 界面一被回收就漏删标记",
+            crash.contains("CoroutineScope(SupervisorJob() + Dispatchers.IO)"),
         )
         // 顺序：先写体检（它要读「上次是否崩过」），再抹标记
-        val snap = m.indexOf("writeStartupSnapshot")
-        val end = m.indexOf("CrashLog.endLaunch")
-        assertTrue("writeStartupSnapshot 要在 endLaunch 之前，否则体检永远写不出「上次没走完」", snap in 0..<end)
+        val snap = crash.indexOf("writeStartupSnapshot(app")
+        val end = crash.indexOf("endLaunch(app)")
+        assertTrue(
+            "writeStartupSnapshot 要在 endLaunch 之前，否则体检永远写不出「上次没走完」",
+            snap in 0..<end,
+        )
 
         /*
          * **不能再放回 AppRoot。**

@@ -30,6 +30,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        /*
+         * 「界面来了」—— 和 `Application.onCreate` 里的 beginLaunch 配对。
+         *
+         * 没有这一笔，闹钟 / 前台服务 / 更新检查把进程拉起来的那几次都会被
+         * 当成"用户打开过但没走完"，于是下次开 App 弹一张"上次没能启动完成"。
+         * 判据见 CrashLog.MarkerVerdict.BACKGROUND。
+         */
+        CrashLog.markUiAttached(this)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
 
@@ -95,11 +103,18 @@ class MainActivity : ComponentActivity() {
                         // 两次那么久。markFirstFrame 只在第一次定格启动耗时，
                         // 之后写「界面重建」。
                         CrashLog.markFirstFrame()
-                        withContext(Dispatchers.IO) {
-                            // 顺序：先写体检（它要读"上次是否崩过"），再抹标记
-                            CrashLog.writeStartupSnapshot(this@MainActivity, perf.tier.name)
-                            CrashLog.endLaunch(this@MainActivity)
-                        }
+                        /*
+                         * 收尾交给**进程级**协程，不在这里 `withContext(IO)`。
+                         *
+                         * 原因：这个 LaunchedEffect 的生命周期跟着 Activity 走。
+                         * 收尾要落两次盘（私有目录 + Android/data），只要 Activity
+                         * 在这段时间里被销毁重建，协程就被取消，「抹掉启动标记」那一步
+                         * 永远不执行 —— 下次启动就会报「上次没能启动完成」。
+                         *
+                         * 实测设备（412×502、192MB 堆、低内存）20 分钟重建了 5 次，
+                         * 用户每开一次就被这张卡片拦一次，而他什么都没遇到。
+                         */
+                        CrashLog.finishLaunchAsync(applicationContext, perf.tier.name)
                     }
                     /*
                      * 圆屏几何在这里算一次，往下整棵树共享。

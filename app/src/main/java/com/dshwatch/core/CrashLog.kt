@@ -11,6 +11,10 @@ import java.util.Date
 import java.util.Locale
 import java.util.Timer
 import java.util.TimerTask
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * 全局未捕获异常兜底：把堆栈写进文件、留在内存里，下次启动由界面主动取走。
@@ -35,11 +39,71 @@ object CrashLog {
     private const val LAST = "last.txt"
     private const val LAST_OK_AT = "launch.ok.at"
     private const val ALIVE_AT = "alive.at"
+    private const val FIRST_FRAME_AT = "launch.firstframe"
+
+    /**
+     * 「界面上来了」的标记。
+     *
+     * ## 为什么需要它：进程 ≠ 界面
+     *
+     * [beginLaunch] 挂在 `Application.onCreate` 上 —— 那是**进程**的起点。
+     * 而这个 App 有一堆会在后台把进程拉起来的东西：B站的定时闹钟、
+     * 前台服务的重启、更新检查。这些唤醒**不打开任何界面**，
+     * 却同样会写下"启动中"标记，然后进程在几十秒内被系统回收。
+     *
+     * 下次用户真的打开 App，读到那个标记，就判成「上次没能启动完成」。
+     * 用户看到的是"每次都弹一张错误报告"，而每一次都不是崩溃。
+     *
+     * 所以真正的判据不是"进程起来过"，而是"界面来过"。这个文件在
+     * `MainActivity.onCreate` 写下，缺了它就说明那次只是后台唤醒。
+     */
+    private const val UI_AT = "launch.ui"
+
+    /**
+     * 启动收尾用的进程级协程。
+     *
+     * 不能挂在 Activity 的 `LaunchedEffect` 上 —— 那个协程跟着 Activity 销毁
+     * 一起被取消。收尾要落两次盘（私有目录 + `Android/data`），这段时间里
+     * 只要界面被系统回收，`endLaunch` 就永远不执行，启动标记留在磁盘上，
+     * 下次启动就会报「上次没能启动完成」。
+     *
+     * 这不是理论风险：实测设备 412×502、192MB 堆、系统标记为低内存，
+     * 20 分钟里界面被回收重建 5 次 —— 用户看到的是一开机弹一张错误卡片，
+     * 而他自己什么都没遇到。
+     */
+    private val finishScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 缓存在内存里的一份，供当前进程内的诊断页读取 */
     @Volatile
     var lastText: String? = null
         private set
+
+    /**
+     * 启动标记的判定规则（纯函数，便于单测）。
+     *
+     * 四个输入都是磁盘上四个小文件里的时间戳，0 表示那个文件不存在。
+     * 判定顺序是有原因的，不能重排：
+     *
+     * 1. **没有界面（`uiAt == 0`）** → 后台唤醒。闹钟、前台服务重启、更新检查
+     *    都会把进程拉起来，写标记，然后被系统回收 —— 这是"每次都弹"的头号来源。
+     *    判据是文件在不在，确定、不需要拿时间猜，所以排第一。
+     * 2. **有更新的正常收尾记录（`lastOkAt > wroteAt`）** → 残留。正常收尾是
+     *    「先写成功时间，再删标记」，所以成功时间比标记新，说明那个标记早该被删了。
+     * 3. **标记早于本次安装** → 覆盖安装杀了旧进程，不是崩溃。
+     * 4. 其余才算崩溃。安装时间读不出来（部分 ROM 会抛）时也归到这里：
+     *    宁可多报一次，也别漏掉真的。
+     */
+    internal fun judgeMarkerVerdict(
+        wroteAt: Long,
+        installedAt: Long,
+        lastOkAt: Long,
+        uiAt: Long,
+    ): MarkerVerdict {
+        if (uiAt <= 0L) return MarkerVerdict.BACKGROUND
+        if (lastOkAt > wroteAt) return MarkerVerdict.STALE
+        if (installedAt <= 0L) return MarkerVerdict.CRASHED
+        return if (wroteAt < installedAt) MarkerVerdict.STALE else MarkerVerdict.CRASHED
+    }
 
     /** 装到 Application 上。重复调用无副作用 */
     fun install(context: Context) {
@@ -174,6 +238,8 @@ object CrashLog {
         // 这一条补的是一个很常见的误报：覆盖安装会先杀进程，
         // 旧进程来不及抹标记，新版一启动就读到它，看起来像「上次崩了」。
         MarkerVerdict.STALE -> "➖ 忽略：标记是这次安装之前留下的（覆盖安装会杀进程，不算崩溃）"
+        // 闹钟 / 服务 / 广播拉起进程 —— 没有界面，所以也不该有"启动完成"这一说
+        MarkerVerdict.BACKGROUND -> "➖ 忽略：上次是后台唤醒（没打开过界面），不是崩溃"
     }
 
     /**
@@ -279,6 +345,15 @@ object CrashLog {
                 // 只写"疑似闪退"等于什么都没说。补上一条：上次那个进程活了多久。
                 // 活了几个小时的，多半是用户在后台切走、被系统回收，不是故障。
                 appendLine("上次进程：$previousRun")
+                /*
+                 * 有 Java 堆栈时把异常那一行也抄进来。
+                 *
+                 * 崩溃报告和体检是两份文件，用户一般只会发其中一份 ——
+                 * 而他发过来的那份，往往正好缺另一半的信息。
+                 */
+                lastText?.lineSequence()
+                    ?.firstOrNull { it.startsWith("异常：") }
+                    ?.let { appendLine("上次崩溃：${it.removePrefix("异常：")}") }
                 // 「本次启动」这一行以前写的是「进程活到现在多久」，
                 // 于是用户点进设置、停留两分钟再导出，就会看到「本次启动：120000ms」——
                 // 看上去像启动要两分钟。真实含义其实是两件事，必须拆开写：
@@ -390,6 +465,15 @@ object CrashLog {
         previousRun = previousRunDesc(context)
         touchAlive(context)
         launchWasIncomplete = launchMarkerVerdict == MarkerVerdict.CRASHED
+        /*
+         * 旧的一次性标记要在写新标记之前清掉。
+         *
+         * [UI_AT] / [FIRST_FRAME_AT] 描述的是"**这一次**进程有没有界面、有没有画到首帧"。
+         * 上一个进程留下的那份必须在这里作废 —— 否则本次是后台唤醒（不写 UI_AT），
+         * 下次启动读到的还是上一次的 UI_AT，又会判成"有界面却没收尾"。
+         */
+        runCatching { File(File(context.filesDir, DIR), UI_AT).delete() }
+        runCatching { File(File(context.filesDir, DIR), FIRST_FRAME_AT).delete() }
         runCatching {
             File(File(context.filesDir, DIR).apply { mkdirs() }, LAUNCH_MARKER)
                 .writeText(launchMark.toString())
@@ -410,6 +494,14 @@ object CrashLog {
 
         /** 标记还在，但写于本次安装**之前** → 覆盖安装杀掉了旧进程，不是崩溃 */
         STALE,
+
+        /**
+         * 标记还在，但那次**根本没有界面**（闹钟 / 服务 / 广播把进程拉起来的）。
+         *
+         * 这一类最容易被误判成崩溃：标记在、没有堆栈、存活时间还特别短 ——
+         * 三条都跟"启动崩了"一模一样。区别只有一个：那次没写 [UI_AT]。
+         */
+        BACKGROUND,
     }
 
     /**
@@ -426,18 +518,47 @@ object CrashLog {
      * 区分办法是拿标记的时间戳和**本次安装时间**比：
      * 标记早于安装时间，那它一定是上一个安装实例留下的，跟崩溃无关。
      * 只有标记晚于安装时间，才说明是这个版本自己没走完。
+     *
+     * 再补一条更硬的判据：**[LAST_OK_AT] 比标记还新**。
+     *
+     * 每次正常收尾都会先写「成功时间」再删标记。所以只要磁盘上有一条
+     * 比标记更新的成功记录，就说明**那个标记已经被处理过了**，它现在还在
+     * 只可能是删除失败（外部存储被占、ROM 锁文件），不是崩溃。
+     *
+     * 这一条是为「每次都报」准备的：安装时间在同一台机器上读完就不变，
+     * 而标记会被每次启动重写；一旦 endLaunch 因为生命周期被取消而漏删，
+     * 旧判据会**永久**判 CRASHED，用户每开一次就弹一次卡片。加上这条之后，
+     * 那种情况会被识别成残留并自愈。
      */
     private fun judgePreviousMarker(context: Context): MarkerVerdict {
+        val dir = File(context.filesDir, DIR)
         val wroteAt = runCatching {
-            val f = File(File(context.filesDir, DIR), LAUNCH_MARKER)
+            val f = File(dir, LAUNCH_MARKER)
             if (f.exists()) f.readText().trim().toLongOrNull() else null
         }.getOrNull() ?: return MarkerVerdict.CLEAN
 
-        val installedAt = lastUpdateTime(context)
-        // 时间读不出来（部分 ROM 的 PackageManager 会抛）时保守处理：
-        // 当作真崩溃，宁可多报一次，也不要漏掉真的。
-        if (installedAt <= 0L) return MarkerVerdict.CRASHED
-        return if (wroteAt < installedAt) MarkerVerdict.STALE else MarkerVerdict.CRASHED
+        return judgeMarkerVerdict(
+            wroteAt = wroteAt,
+            installedAt = lastUpdateTime(context),
+            lastOkAt = readLong(context, File(dir, LAST_OK_AT)),
+            uiAt = readLong(context, File(dir, UI_AT)),
+        )
+    }
+
+    /**
+     * 界面真的起来了：记一笔。
+     *
+     * 在 `MainActivity.onCreate` 调，越早越好 —— 它要和 [beginLaunch] 配对，
+     * 两者之差就是「进程起来了」和「用户真的打开了」之间的区别。
+     *
+     * 同步写一个小文件（几十字节）：这一步不能异步，异步就等于给崩溃留了个
+     * 窗口 —— 恰好崩在窗口里的，会被判成后台唤醒而漏报。
+     */
+    fun markUiAttached(context: Context) {
+        runCatching {
+            File(File(context.filesDir, DIR).apply { mkdirs() }, UI_AT)
+                .writeText(System.currentTimeMillis().toString())
+        }
     }
 
     /** 本次安装 / 更新的时间。兼容安装时被杀进程的判定要用它 */
@@ -455,6 +576,53 @@ object CrashLog {
         touchAlive(context)
         runCatching { File(File(context.filesDir, DIR), LAUNCH_MARKER).delete() }
         runCatching { externalDir(context)?.let { File(it, LAUNCH_MARKER).delete() } }
+        // 首帧标记也一起抹掉：它只在「进程没走到收尾」时有诊断价值
+        runCatching { File(File(context.filesDir, DIR), FIRST_FRAME_AT).delete() }
+        runCatching { File(File(context.filesDir, DIR), UI_AT).delete() }
+    }
+
+    /**
+     * 启动收尾（进程级，不随 Activity 销毁取消）。
+     *
+     * 顺序是「首帧落盘 → 体检 → 抹标记」：
+     *  - 首帧落盘让下一次报告能区分「崩在启动路径上」和「画完界面后在运行期没的」
+     *  - 体检要在抹标记之前写，它读的是本次启动**开始时**快照下来的判定
+     *
+     * 用 [finishScope] 而不是调用方的协程，原因见那个字段的注释。
+     */
+    fun finishLaunchAsync(context: Context, tier: String? = null) {
+        val app = context.applicationContext
+        finishScope.launch {
+            runCatching { persistFirstFrame(app) }
+            runCatching { writeStartupSnapshot(app, tier) }
+            runCatching { endLaunch(app) }
+            Unit
+        }
+    }
+
+    /** 把"这次画到首帧了"写下来，供下一次启动判断崩溃发生在哪个阶段 */
+    private fun persistFirstFrame(context: Context) {
+        val at = firstFrameAt
+        if (at <= 0) return
+        runCatching {
+            File(File(context.filesDir, DIR).apply { mkdirs() }, FIRST_FRAME_AT)
+                .writeText(at.toString())
+        }
+        touchAlive(context)
+    }
+
+    /**
+     * 用户点了「知道了」：承认这一次，并且把标记清掉。
+     *
+     * 只把界面上的卡片收起来是不够的 —— 标记还在磁盘上，下次启动会再弹一次。
+     * 那正是「每次进入应用都有这个错误报告」的成因。用户既然已经看过这份报告，
+     * 就不该被同一份再拦一次。
+     */
+    fun dismissLaunchFailure(context: Context) {
+        launchWasIncomplete = false
+        runCatching { File(File(context.filesDir, DIR), LAUNCH_MARKER).delete() }
+        runCatching { externalDir(context)?.let { File(it, LAUNCH_MARKER).delete() } }
+        runCatching { File(File(context.filesDir, DIR), UI_AT).delete() }
     }
 
     /**
@@ -475,12 +643,26 @@ object CrashLog {
 
     /** 上一次进程留下的存活痕迹，给报告用 */
     private fun previousRunDesc(context: Context): String = runCatching {
-        val started = readLong(context, File(File(context.filesDir, DIR), LAUNCH_MARKER))
+        val dir = File(context.filesDir, DIR)
+        val started = readLong(context, File(dir, LAUNCH_MARKER))
         if (started <= 0) return@runCatching "无记录"
-        val alive = readLong(context, File(File(context.filesDir, DIR), ALIVE_AT))
+        val alive = readLong(context, File(dir, ALIVE_AT))
         val lasted = if (alive > started) alive - started else 0
         val endedText = if (alive > started) "最后一次还活着：${stamp(alive)}" else "没有任何存活记录（进程起来就没）"
-        "上个进程启动于 ${stamp(started)}，${endedText}，存活 ${lasted / 1000} 秒"
+        /*
+         * 补一句「崩在哪个阶段」。
+         *
+         * 「上次没走完」可能是启动期死的，也可能是画完界面之后在运行期没的 ——
+         * 两者的排查方向完全相反，但原来那句话对二者一视同仁。
+         * 首帧标记能分清：有它 = 界面画出来了；没它 = 连第一帧都没到。
+         */
+        val firstFrame = readLong(context, File(dir, FIRST_FRAME_AT))
+        val phase = if (firstFrame > 0) {
+            "，且已画出首帧（消失发生在运行期，不是启动崩）"
+        } else {
+            "，且没画到首帧（消失发生在启动路径上）"
+        }
+        "上个进程启动于 ${stamp(started)}，${endedText}，存活 ${lasted / 1000} 秒$phase"
     }.getOrDefault("无记录")
 
     private fun readLong(context: Context, f: File): Long =
