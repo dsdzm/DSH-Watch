@@ -98,7 +98,15 @@ class AppContainer(private val app: Context) {
     )
 
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
-    val backends = BackendRegistry(json)
+
+    /**
+     * 当前连着的那台电脑。
+     *
+     * 放在 [backends] 之前：Kotlin 按声明顺序初始化，反过来会拿到未赋值的 null。
+     */
+    val dshLink = com.dshwatch.net.dshweb.DshLink()
+
+    val backends = BackendRegistry(json, dshLink)
 
     /**
      * 连接本机 / 局域网上的 `dsh web`。

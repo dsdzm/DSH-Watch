@@ -58,6 +58,7 @@ class DshWebClient(
         withContext(Dispatchers.IO) {
             val req = Request.Builder()
                 .url(DshWeb.loginUrl(host, token))
+                .dshHost(host)
                 .header("Accept", "text/html,application/json")
                 // 必须自己看 302：cookie 在重定向响应上，跟随后就丢了
                 .get()
@@ -105,6 +106,7 @@ class DshWebClient(
         }
         val req = Request.Builder()
             .url(DshWeb.rpcUrl(host, endpoint))
+            .dshHost(host)
             .header("Cookie", cookie.header)
             .header("Accept", "application/json")
             .post(json.encodeToString(JsonObject.serializer(), envelope).toRequestBody(JSON_MEDIA))
@@ -161,6 +163,7 @@ class DshWebClient(
         val cookie = host.cookie ?: return@withContext false
         val req = Request.Builder()
             .url(host.baseUrl.trimEnd('/') + "/")
+            .dshHost(host)
             .header("Cookie", cookie.header)
             .get()
             .build()
@@ -241,6 +244,17 @@ class DshWebClient(
     /** `session/cancel`：打断当前回合；空闲时服务端也回 accepted */
     suspend fun cancel(host: DshWebHost, sessionId: String) {
         call(host, "session/cancel", buildJsonObject { put("request", buildJsonObject { put("sessionId", sessionId) }) })
+    }
+
+    /**
+     * 走隧道时把 Host 头改回远端那台机器。
+     *
+     * dsh 的围栏按 `Host` 判断「这是不是本机」，并拒绝任何与自己不一致的
+     * `Origin`。OkHttp 默认不发 Origin（正合要求），但 Host 会取 URL 的 ——
+     * 隧道下那就成了本地随机端口，服务端不认。
+     */
+    private fun Request.Builder.dshHost(host: DshWebHost): Request.Builder = apply {
+        if (host.hostHeader.isNotBlank()) header("Host", host.hostHeader)
     }
 
     companion object {

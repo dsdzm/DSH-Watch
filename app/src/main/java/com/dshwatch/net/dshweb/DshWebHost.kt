@@ -32,6 +32,15 @@ data class DshWebHost(
     val baseUrl: String,
     val authority: String,
     val cookie: DshCookie? = null,
+    /**
+     * 请求时显式带上的 `Host` 头。
+     *
+     * 走 SSH 隧道时两者必须分开：连接落在 `127.0.0.1:<本地端口>`，
+     * 但服务端是按 `127.0.0.1:<远端端口>` 来算 cookie 名、并按它做 Origin 围栏的。
+     * 如果只按 URL 走默认 Host，服务端会认为这是一台「陌生主机」，
+     * 于是每次请求都 401 —— 而 401 看起来和「密码错了」一模一样。
+     */
+    val hostHeader: String = "",
 ) {
     val paired: Boolean get() = cookie != null
 

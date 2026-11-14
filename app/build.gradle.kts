@@ -106,8 +106,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 75
-        versionName = "1.23.0-beta.1"
+        versionCode = 76
+        versionName = "1.23.0-beta.2"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -189,6 +189,9 @@ android {
         resources {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
+                // jsch 与 jspecify 都带这一份多版本 MANIFEST，合并时会撞名；
+                // 它不是运行时资源，去掉不影响任何行为
+                "/META-INF/versions/9/OSGI-INF/MANIFEST.MF",
                 "/META-INF/DEPENDENCIES",
                 "/META-INF/*.kotlin_module",
                 "DebugProbesKt.bin",
@@ -239,10 +242,13 @@ dependencies {
 
     // 扫码登录：只用 core（生成 QR 矩阵），不引 android 那一层
     implementation(libs.zxing.core)
+    // SSH 隧道：手表直连电脑，在远端起 dsh web 并把端口转发到本机
+    implementation(libs.jsch)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
+    testImplementation(libs.sshd.core)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
 }

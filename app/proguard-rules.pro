@@ -70,3 +70,10 @@
     public static int i(...);
 }
 
+
+# ---------- JSch（SSH 隧道）----------
+# jsch 用 `Class.forName("com.jcraft.jsch.jce." + 算法名)` 反射加载加密实现。
+# 一旦这些类被 R8 裁掉或改名，运行时就报 "Algorithm not available" ——
+# 而且 debug 包不开 R8，这个错只在 release 上出现，本地测不出来。
+-keep class com.jcraft.jsch.** { *; }
+-dontwarn com.jcraft.jsch.**

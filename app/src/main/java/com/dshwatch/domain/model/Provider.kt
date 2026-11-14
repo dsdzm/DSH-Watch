@@ -50,11 +50,25 @@ data class Provider(
     val priceInPerMillion: Double = 0.0,
     val priceOutPerMillion: Double = 0.0,
 
-    /** DSH_SERVER 专用 */
-    val deviceName: String = "",
-    val pairedAt: Long = 0L,
     /** DSH_SERVER 专用：远端会话 id 缓存 */
     val lastRemoteSession: String = "",
+
+    /**
+     * DSH_SERVER 专用：怎么连上那台电脑。
+     *
+     * 走 SSH 而不是「填地址 + 配对码」：手表上敲不进 43 位的启动令牌，
+     * 也没有摄像头扫码，而 SSH 只需要主机、用户名、密码三样，
+     * 且电脑上开一个 sshd 比装插件配中继简单得多。
+     */
+    val sshHost: String = "",
+    val sshPort: Int = 22,
+    val sshUser: String = "",
+    /** 远端启动命令，默认 `dsh web`；nvm 装的 dsh 可能要写绝对路径 */
+    val sshCommand: String = "dsh web",
+    /** 远端工作目录（会话的 cwd），空表示登录目录 */
+    val sshCwd: String = "",
+    /** 首次连接记下的主机密钥指纹，之后每次连接都要比对 */
+    val sshFingerprint: String = "",
 
     /**
      * 是否允许把图片作为多模态输入发出去。
