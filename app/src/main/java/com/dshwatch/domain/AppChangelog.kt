@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.0-beta.3",
+            date = "2026-11-14",
+            highlights = listOf(
+                "新增 手机配对：手表开个网页，手机扫码打开后完成 DSH Remote 登录，不用在表上打字",
+                "支持 在手机上粘贴令牌或用邮箱密码登录自建服务器",
+                "修复 配对页面只认一次性口令与 IP 地址，同网段的其他人打不开",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.0-beta.2",
             date = "2026-11-14",
             highlights = listOf(

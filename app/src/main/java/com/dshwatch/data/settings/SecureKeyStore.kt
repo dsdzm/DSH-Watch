@@ -109,6 +109,31 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
 
     fun putSshPassword(providerId: String, value: String?) = put(k(providerId, FIELD_SSH_PASSWORD), value)
 
+    // ------------------------------------------------------------ DSH Remote
+
+    /**
+     * 设备访问令牌。和 API Key 同级：它能让持有者以这台设备的名义
+     * 连上账号里的所有主机，明文落盘等于把电脑的入口交出去。
+     */
+    fun getRemoteAccess(scope: String): String? = get(k(scope, FIELD_REMOTE_ACCESS))
+
+    fun putRemoteAccess(scope: String, value: String?) = put(k(scope, FIELD_REMOTE_ACCESS), value)
+
+    /** 刷新令牌每次使用都会轮换，旧的再用会吊销整个令牌族 */
+    fun getRemoteRefresh(scope: String): String? = get(k(scope, FIELD_REMOTE_REFRESH))
+
+    fun putRemoteRefresh(scope: String, value: String?) = put(k(scope, FIELD_REMOTE_REFRESH), value)
+
+    /** 本机 X25519 私钥（base64url）。Noise 握手要用它证明「还是这台设备」 */
+    fun getIdentityKey(scope: String): String? = get(k(scope, FIELD_IDENTITY_KEY))
+
+    fun putIdentityKey(scope: String, value: String?) = put(k(scope, FIELD_IDENTITY_KEY), value)
+
+    /** 设备 id：注册时生成，之后不再变，服务器靠它认人 */
+    fun getRemoteDeviceId(scope: String): String? = get(k(scope, FIELD_REMOTE_DEVICE_ID))
+
+    fun putRemoteDeviceId(scope: String, value: String?) = put(k(scope, FIELD_REMOTE_DEVICE_ID), value)
+
     fun getPairingCode(providerId: String): String? = get(k(providerId, FIELD_PAIRING))
 
     fun putPairingCode(providerId: String, value: String?) = put(k(providerId, FIELD_PAIRING), value)
@@ -239,6 +264,10 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         private const val FIELD_TOKEN = "token"
         private const val FIELD_PAIRING = "pairing"
         private const val FIELD_SSH_PASSWORD = "sshPassword"
+        private const val FIELD_REMOTE_ACCESS = "remoteAccess"
+        private const val FIELD_REMOTE_REFRESH = "remoteRefresh"
+        private const val FIELD_IDENTITY_KEY = "identityKey"
+        private const val FIELD_REMOTE_DEVICE_ID = "remoteDeviceId"
 
         /** GitHub 令牌不属于任何 provider，用一个合成作用域复用同一套存储 */
         private const val CLOUD_SCOPE = "cloud"

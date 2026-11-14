@@ -71,6 +71,20 @@ data class Provider(
     val sshFingerprint: String = "",
 
     /**
+     * DSH_SERVER 的第二条路：DSH Remote 服务器。
+     *
+     * 和 SSH 并列而不是替代：SSH 只要有台能登的电脑就能用，
+     * Remote 需要电脑上装 Remote 插件并在服务端登记；两者的取舍写在文档里。
+     */
+    val remoteServer: String = "",
+    /** 本机在服务端的设备 id */
+    val remoteDeviceId: String = "",
+    /** 要连的那台电脑（Host）的设备 id */
+    val remoteHostId: String = "",
+    /** 那台电脑的身份公钥，握手时用来确认对面确实是它 */
+    val remoteHostKey: String = "",
+
+    /**
      * 是否允许把图片作为多模态输入发出去。
      *
      * 默认开：用户主动附图就是要图生文，此时不发等于骗人。

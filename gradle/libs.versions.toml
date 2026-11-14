@@ -13,6 +13,8 @@ securityCrypto = "1.1.0-alpha06"
 zxing = "3.5.3"
 # SSH 客户端：mwiede 的 jsch 分支，支持 curve25519/ed25519 与现代 MAC
 jsch = "0.2.20"
+# X25519 与 ChaCha20-Poly1305：Noise IK 握手要用，Android 自带的 JCE 在旧版本上没有
+bouncycastle = "1.77"
 # Shizuku：借 adb 权限（uid 2000）执行命令，不需要 root
 shizuku = "12.1.0"
 # 本地脚本执行：JS 引擎（纯 Java，不引入原生库）
@@ -41,6 +43,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 androidx-wear-compose-material3 = { group = "androidx.wear.compose", name = "compose-material3", version.ref = "wearCompose" }
 androidx-wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearCompose" }
 
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
@@ -50,6 +53,7 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 jsch = { group = "com.github.mwiede", name = "jsch", version.ref = "jsch" }
+bcprov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 # 只在测试里用：起一个真 sshd 来验证客户端，避免「编译过=能用」
 sshd-core = { group = "org.apache.sshd", name = "sshd-core", version = "2.13.2" }
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }

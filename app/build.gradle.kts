@@ -106,8 +106,8 @@ android {
         // Android 9 = API 28，手表端要求
         minSdk = 28
         targetSdk = 34
-        versionCode = 76
-        versionName = "1.23.0-beta.2"
+        versionCode = 77
+        versionName = "1.23.0-beta.3"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -244,11 +244,14 @@ dependencies {
     implementation(libs.zxing.core)
     // SSH 隧道：手表直连电脑，在远端起 dsh web 并把端口转发到本机
     implementation(libs.jsch)
+    // Noise IK 握手（X25519 + ChaCha20-Poly1305），只用到轻量 API，不注册 JCE provider
+    implementation(libs.bcprov)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     testImplementation(libs.sshd.core)
+    testImplementation(libs.mockwebserver)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
 }

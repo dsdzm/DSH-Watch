@@ -351,6 +351,10 @@ interface AppStrings {
 
     // DSH 服务器
     val pairTitle: String
+
+    /** 手机扫码配对（DSH Remote） */
+    val remoteTitle: String
+    val entryRemoteDesc: String
     val pairHint: String
     val serverAddress: String
     val pairingCode: String
@@ -925,6 +929,9 @@ object Zh : AppStrings {
     override val connectionFailed = "连接失败"
 
     override val pairTitle = "连接电脑（SSH）"
+
+    override val remoteTitle = "手机配对（DSH Remote）"
+    override val entryRemoteDesc = "手表开个网页，手机扫码完成登录"
     override val pairHint = "在电脑端 DSH 打开 dsh-workspace 的「远程访问」，启用并创建配对，把地址和一次性配对码填到这里。"
     override val serverAddress = "服务器地址"
     override val pairingCode = "配对码"
@@ -1566,6 +1573,9 @@ object En : AppStrings {
     override val connectionFailed = "Connection failed"
 
     override val pairTitle = "Connect via SSH"
+
+    override val remoteTitle = "Pair with phone (DSH Remote)"
+    override val entryRemoteDesc = "The watch serves a page; sign in from your phone"
     override val pairHint = "On your computer open dsh-workspace → Remote access, enable and create a pairing code."
     override val serverAddress = "Server address"
     override val pairingCode = "Pairing code"

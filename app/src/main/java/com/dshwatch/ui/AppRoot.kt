@@ -194,6 +194,11 @@ fun AppRoot(
                     Screen.Providers -> ProvidersScreen(container = container, settings = settings, nav = nav)
                     Screen.Usage -> UsageScreen(container = container, nav = nav)
                     Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)
+                    Screen.Remote -> com.dshwatch.ui.screens.pair.RemotePairScreen(
+                        container = container,
+                        settings = settings,
+                        nav = nav,
+                    )
                     Screen.About -> AboutScreen(container = container, nav = nav)
                     Screen.Update -> com.dshwatch.ui.screens.update.UpdateScreen(
                         container = container,

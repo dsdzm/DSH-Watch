@@ -42,6 +42,9 @@ import java.io.File
  */
 class AppContainer(private val app: Context) {
 
+    /** 少数需要 Context 的组件（局域网配对门户要读 assets）用这个，别让它们各自再传一遍 */
+    val appContext: Context get() = app
+
     val json = Jsonx.lenient
 
     /*
