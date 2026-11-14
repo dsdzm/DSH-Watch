@@ -42,6 +42,7 @@ M3E 不是「换一套颜色」，是把**控件本身**换掉。按下时的形
 | 对话框标签 | 左对齐 | 居中 |
 | chip | 38dp，被按钮的最小高度撑开 | **32dp**，标签 13sp |
 | 分段选择 | 36dp | **48dp**（触摸下限） |
+| 单选行 | 自绘小圆点 + 只有文字可点 | **整行可点**的 `RadioButton` |
 
 数字不是估的：`ButtonDefaults.Height = 52`、`IconSize = 26`、Wear 字阶
 `labelLarge = 20sp`，都在单测里读出来核对过（`M3eThemeTest`）。

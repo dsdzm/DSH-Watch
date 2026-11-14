@@ -41,6 +41,7 @@ import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.IconButton
 import androidx.wear.compose.material3.MaterialTheme as W3
 import androidx.wear.compose.material3.OutlinedButton
+import androidx.wear.compose.material3.RadioButton
 import androidx.wear.compose.material3.Slider
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
@@ -905,4 +906,47 @@ fun M3eDialogAction(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/**
+ * 单选项。
+ *
+ * Wear 的 [RadioButton] 不是"一个小圆点贴在行尾"——**整行就是单选项**，
+ * 左边的圆圈、中间的主副标题、按下时整块的形变，都是同一个组件。
+ * 手机上的写法（Row + RadioButton + 自己处理点击）在表上会出现
+ * "只有圆点能点"的空洞感，而这里整行 48dp 都能点。
+ *
+ * 没有 `leading`（图标、色块）时才用它；有自定义前置内容的选择行
+ * 仍然走经典实现 —— 硬塞进 RadioButton 会把前置内容挤掉。
+ */
+@Composable
+fun M3eRadioRow(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    hint: String? = null,
+) {
+    RadioButton(
+        selected = selected,
+        onSelect = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        label = {
+            Text(
+                text = title,
+                style = W3.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        secondaryLabel = hint?.let {
+            {
+                Text(
+                    text = it,
+                    style = W3.typography.labelSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+    )
 }

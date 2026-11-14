@@ -832,6 +832,15 @@ private fun PickRow(
     hint: String? = null,
     leading: @Composable (() -> Unit)? = null,
 ) {
+    if (com.dshwatch.ui.theme.isM3eUi && leading == null) {
+        com.dshwatch.ui.m3e.M3eRadioRow(
+            title = title,
+            selected = selected,
+            onClick = onClick,
+            hint = hint,
+        )
+        return
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

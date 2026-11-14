@@ -107,6 +107,12 @@ fun AskUserDialog(
 
 @Composable
 private fun OptionRow(index: Int, text: String, onClick: () -> Unit) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        // 选项是"点一下就提交"，不是单选框：用整块可点的卡片，
+        // 避免画一个永远不选中的圆圈让人以为还要再确认一次
+        com.dshwatch.ui.m3e.M3eSettingRow(title = "${index}. $text", onClick = onClick)
+        return
+    }
     val src = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
