@@ -3,10 +3,10 @@ package com.dshwatch.net.backend
 import com.dshwatch.domain.model.ProviderType
 import kotlinx.serialization.json.Json
 
-open class BackendRegistry(json: Json) {
+open class BackendRegistry(json: Json, dshLink: com.dshwatch.net.dshweb.DshLink = com.dshwatch.net.dshweb.DshLink()) {
 
     val openAiCompat = OpenAiCompatBackend(json)
-    val dshServer = DshServerBackend(json)
+    val dshServer = DshServerBackend(json, dshLink)
 
     /**
      * 对外暴露的后端统一包一层 [IoBackend]。

@@ -98,7 +98,24 @@ class AppContainer(private val app: Context) {
     )
 
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
-    val backends = BackendRegistry(json)
+
+    /**
+     * 当前连着的那台电脑。
+     *
+     * 放在 [backends] 之前：Kotlin 按声明顺序初始化，反过来会拿到未赋值的 null。
+     */
+    val dshLink = com.dshwatch.net.dshweb.DshLink()
+
+    val backends = BackendRegistry(json, dshLink)
+
+    /**
+     * 连接本机 / 局域网上的 `dsh web`。
+     *
+     * 与 [backends] 并列而不是塞进去：这是一条**连接**通道（登录、探测、会话枚举），
+     * 不是聊天后端。混在一起会让「连不上」和「模型报错」共用同一个失败出口，
+     * 而这两种情况的处理方式完全不同。
+     */
+    val dshWeb = com.dshwatch.net.dshweb.DshWebConnector()
 
     /** 图片 / 视频生成通道，与聊天后端并列 */
     val mediaApi = com.dshwatch.net.media.MediaApi(json)

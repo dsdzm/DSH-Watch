@@ -104,8 +104,8 @@ fun ProviderEditScreen(
                 .orEmpty(),
         )
     }
-    var serverToken by remember(providerId) {
-        mutableStateOf(existing?.let { container.keyStore.getServerToken(it.id) }.orEmpty())
+    var sshPassword by remember(providerId) {
+        mutableStateOf(existing?.let { container.keyStore.getSshPassword(it.id) }.orEmpty())
     }
 
     var busy by remember { mutableStateOf("") }
@@ -127,7 +127,7 @@ fun ProviderEditScreen(
                 st.copy(providers = list, activeProviderId = active)
             }
             if (toSave.type == ProviderType.DSH_SERVER) {
-                container.keyStore.putServerToken(toSave.id, serverToken.trim().ifBlank { null })
+                container.keyStore.putSshPassword(toSave.id, sshPassword.ifBlank { null })
             } else if (!toSave.isBuiltin) {
                 // 内置项的 key 只在编译期注入、只在请求时按 id 取，不写进本机存储：
                 // 写进去等于把内置 Key 复制一份到加密库里，诊断导出或备份都能带出来
@@ -153,7 +153,7 @@ fun ProviderEditScreen(
                     } else {
                         apiKey.trim()
                     },
-                    serverToken = serverToken.trim(),
+                    serverToken = "",
                 )
             }
             outcome.onSuccess {
@@ -176,7 +176,7 @@ fun ProviderEditScreen(
                 container.backends.of(draft.type).listModels(
                     provider = draft.copy(baseUrl = draft.baseUrl.trim()),
                     apiKey = apiKey.trim(),
-                    serverToken = serverToken.trim(),
+                    serverToken = "",
                 )
             }.onSuccess { models ->
                 if (models.isEmpty()) {
@@ -333,15 +333,15 @@ fun ProviderEditScreen(
                     }
                     Spacer(Modifier.height(5.dp))
                 } else {
-                    TextRow(
-                        label = s.baseUrl,
-                        value = draft.baseUrl,
-                        placeholder = s.baseUrlHint,
-                        keyboardType = KeyboardType.Uri,
-                        onValueChange = { draft = draft.copy(baseUrl = it) },
-                    )
-                    Spacer(Modifier.height(6.dp))
                     if (draft.type == ProviderType.OPENAI_COMPAT) {
+                        TextRow(
+                            label = s.baseUrl,
+                            value = draft.baseUrl,
+                            placeholder = s.baseUrlHint,
+                            keyboardType = KeyboardType.Uri,
+                            onValueChange = { draft = draft.copy(baseUrl = it) },
+                        )
+                        Spacer(Modifier.height(6.dp))
                         TextRow(
                             label = s.apiKey,
                             value = apiKey,
@@ -350,15 +350,15 @@ fun ProviderEditScreen(
                             onValueChange = { apiKey = it },
                         )
                     } else {
-                        TextRow(
-                            label = s.pairedDevice,
-                            value = serverToken,
-                            placeholder = "配对后自动填入",
-                            isSecret = true,
-                            onValueChange = { serverToken = it },
+                        // DSH 不走「接口地址 + 配对码」：那条路在手表上无解
+                        // （43 位令牌手输不了，也没有摄像头扫码）。这里换成 SSH。
+                        com.dshwatch.ui.screens.pair.DshConnectSection(
+                            container = container,
+                            draft = draft,
+                            onDraftChange = { draft = it },
+                            password = sshPassword,
+                            onPasswordChange = { sshPassword = it },
                         )
-                        Spacer(Modifier.height(6.dp))
-                        GhostButton(text = s.pairTitle, onClick = { nav.push(Screen.Pair) })
                     }
                     Spacer(Modifier.height(6.dp))
                     if (busy == "test") {
@@ -576,7 +576,7 @@ fun ProviderEditScreen(
                             st.copy(providers = list, activeProviderId = toSave.id)
                         }
                         if (toSave.type == ProviderType.DSH_SERVER) {
-                            container.keyStore.putServerToken(toSave.id, serverToken.trim().ifBlank { null })
+                            container.keyStore.putSshPassword(toSave.id, sshPassword.ifBlank { null })
                         } else if (!toSave.isBuiltin) {
                             container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
                         }

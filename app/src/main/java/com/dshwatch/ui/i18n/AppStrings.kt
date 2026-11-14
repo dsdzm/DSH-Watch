@@ -872,7 +872,7 @@ object Zh : AppStrings {
 
     override val entryProviderUnset = "未配置"
     override val entryUsageDesc = "token 消耗与估算花费"
-    override val entryPairDesc = "连接电脑上的 DSH"
+    override val entryPairDesc = "用 SSH 连上电脑，在那边跑 DSH"
     override val entryWorkspaceDesc = "AI 生成的文件与构建产物"
     override val entryDiagnosticsDesc = "连不上时先跑这个，能看到每一步的原始报错"
     override val entryAboutDesc = "版本、更新日志与作者"
@@ -924,7 +924,7 @@ object Zh : AppStrings {
     override val testing = "测试中…"
     override val connectionFailed = "连接失败"
 
-    override val pairTitle = "配对 DSH 服务器"
+    override val pairTitle = "连接电脑（SSH）"
     override val pairHint = "在电脑端 DSH 打开 dsh-workspace 的「远程访问」，启用并创建配对，把地址和一次性配对码填到这里。"
     override val serverAddress = "服务器地址"
     override val pairingCode = "配对码"
@@ -1513,7 +1513,7 @@ object En : AppStrings {
 
     override val entryProviderUnset = "Not configured"
     override val entryUsageDesc = "Token usage and estimated cost"
-    override val entryPairDesc = "Connect to DSH on your computer"
+    override val entryPairDesc = "SSH into your computer and run DSH there"
     override val entryWorkspaceDesc = "Files and build outputs from AI"
     override val entryDiagnosticsDesc = "Run this first when it fails; shows the raw error at each step"
     override val entryAboutDesc = "Version, changelog and author"
@@ -1565,7 +1565,7 @@ object En : AppStrings {
     override val testing = "Testing…"
     override val connectionFailed = "Connection failed"
 
-    override val pairTitle = "Pair DSH server"
+    override val pairTitle = "Connect via SSH"
     override val pairHint = "On your computer open dsh-workspace → Remote access, enable and create a pairing code."
     override val serverAddress = "Server address"
     override val pairingCode = "Pairing code"

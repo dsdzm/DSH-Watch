@@ -11,6 +11,8 @@ serialization = "1.7.3"
 datastore = "1.1.1"
 securityCrypto = "1.1.0-alpha06"
 zxing = "3.5.3"
+# SSH 客户端：mwiede 的 jsch 分支，支持 curve25519/ed25519 与现代 MAC
+jsch = "0.2.20"
 # Shizuku：借 adb 权限（uid 2000）执行命令，不需要 root
 shizuku = "12.1.0"
 # 本地脚本执行：JS 引擎（纯 Java，不引入原生库）
@@ -47,6 +49,9 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+jsch = { group = "com.github.mwiede", name = "jsch", version.ref = "jsch" }
+# 只在测试里用：起一个真 sshd 来验证客户端，避免「编译过=能用」
+sshd-core = { group = "org.apache.sshd", name = "sshd-core", version = "2.13.2" }
 shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
 shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 

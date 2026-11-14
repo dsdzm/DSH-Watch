@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.0-beta.2",
+            date = "2026-11-14",
+            highlights = listOf(
+                "新增 用 SSH 连接电脑上的 DSH：填主机、用户名、密码，手表自动在电脑上启动服务并转发端口",
+                "支持 直接粘贴 ssh 整行，自动拆出主机、端口与用户名",
+                "改进 对话改为订阅会话流，回答逐字出现",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.0-beta.1",
             date = "2026-11-13",
             highlights = listOf(

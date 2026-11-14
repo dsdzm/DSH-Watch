@@ -99,6 +99,16 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
 
     fun putServerToken(providerId: String, value: String?) = put(k(providerId, FIELD_TOKEN), value)
 
+    /**
+     * SSH 登录密码。
+     *
+     * 与 API Key 同级对待：明文写进设置文件的话，任何能读应用目录的备份、
+     * 或者一次「导出诊断」，就等于把电脑的登录口令交出去了。
+     */
+    fun getSshPassword(providerId: String): String? = get(k(providerId, FIELD_SSH_PASSWORD))
+
+    fun putSshPassword(providerId: String, value: String?) = put(k(providerId, FIELD_SSH_PASSWORD), value)
+
     fun getPairingCode(providerId: String): String? = get(k(providerId, FIELD_PAIRING))
 
     fun putPairingCode(providerId: String, value: String?) = put(k(providerId, FIELD_PAIRING), value)
@@ -228,6 +238,7 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         private const val FIELD_API_KEY = "apiKey"
         private const val FIELD_TOKEN = "token"
         private const val FIELD_PAIRING = "pairing"
+        private const val FIELD_SSH_PASSWORD = "sshPassword"
 
         /** GitHub 令牌不属于任何 provider，用一个合成作用域复用同一套存储 */
         private const val CLOUD_SCOPE = "cloud"
