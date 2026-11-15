@@ -8,6 +8,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -165,26 +166,56 @@ fun SettingsGroupScreen(
         scope.launch { container.settingsRepo.update(block) }
     }
 
+    /*
+     * 组内容只写一次，两套骨架共用。
+     *
+     * 这里是**唯一**一处「M3E 与经典共用代码」的地方，而且是刻意的：
+     * 十个分组、四十多项设置，重写一遍的意义只在于顺序与分组，
+     * 而顺序在上一版的 M3E 化里已经调过了。真正要换的是**外层骨架** ——
+     * 经典是 `WatchScaffold + verticalScroll`，M3E 是
+     * `M3eScaffold + TransformingLazyColumn`（见 M3eList）。
+     */
+    val groupContent: @Composable ColumnScope.() -> Unit = {
+        when (groupId) {
+            SettingsGroups.MODEL -> ModelGroup(settings, nav, s)
+            SettingsGroups.ABILITY -> AbilityGroup(settings, update, container, nav, s)
+            SettingsGroups.CHAT -> ChatGroup(settings, update, s)
+            SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, s)
+            SettingsGroups.FILES -> FilesGroup(settings, update, container, nav, s)
+            SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
+            SettingsGroups.PLUGINS -> PluginsGroup(settings, update, container, s)
+            SettingsGroups.MCP -> McpGroup(settings, update, container, s)
+            SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
+            else -> ConnectionGroup(settings, update, container, nav, s)
+        }
+    }
+
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        val listState = com.dshwatch.ui.m3e.rememberM3eListState()
+        com.dshwatch.ui.m3e.M3eScaffold(
+            title = SettingsGroups.title(groupId, s),
+            onBack = { nav.pop() },
+        ) {
+            com.dshwatch.ui.m3e.M3eList(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                item(key = "__group__") {
+                    Column(modifier = Modifier.fillMaxWidth(), content = groupContent)
+                }
+            }
+        }
+        return
+    }
+
     WatchScaffold(title = SettingsGroups.title(groupId, s), onBack = { nav.pop() }) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .wearVerticalScroll(rememberScrollState())
                 .padding(bottom = 10.dp),
-        ) {
-            when (groupId) {
-                SettingsGroups.MODEL -> ModelGroup(settings, nav, s)
-                SettingsGroups.ABILITY -> AbilityGroup(settings, update, container, nav, s)
-                SettingsGroups.CHAT -> ChatGroup(settings, update, s)
-                SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, s)
-                SettingsGroups.FILES -> FilesGroup(settings, update, container, nav, s)
-                SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
-                SettingsGroups.PLUGINS -> PluginsGroup(settings, update, container, s)
-                SettingsGroups.MCP -> McpGroup(settings, update, container, s)
-                SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
-                else -> ConnectionGroup(settings, update, container, nav, s)
-            }
-        }
+            content = groupContent,
+        )
     }
 }
 

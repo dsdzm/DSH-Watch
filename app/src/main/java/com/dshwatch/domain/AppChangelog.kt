@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.6",
+            date = "2026-11-15",
+            highlights = listOf(
+                "重构 M3E 界面的页面层：对话、会话列表、设置、用量四页改为独立实现，走谷歌官方的 TransformingLazyColumn",
+                "支持 列表滚动时的官方贴边变换：靠近边缘的卡片自动缩小、变淡、收窄，不再逐项改写内边距",
+                "统一 M3E 对话页为全宽卡片：说话人靠容器色区分，不再左右分栏",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.5",
             date = "2026-11-15",
             highlights = listOf(

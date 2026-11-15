@@ -414,7 +414,7 @@ private fun ConversationRow(
  * 因此默认值直接给出「新建文件夹」，而不是让用户先想名字再看到候选。
  */
 @Composable
-private fun WorkDirDialog(
+internal fun WorkDirDialog(
     container: AppContainer,
     conversation: Conversation,
     onPicked: (String) -> Unit,
@@ -584,7 +584,7 @@ private fun DirRow(text: String, selected: Boolean, onClick: () -> Unit) {
  * 文本在打开弹窗时才读盘：会话列表只缓存了 index，正文要单独 load。
  */
 @Composable
-private fun ExportDialog(
+internal fun ExportDialog(
     container: AppContainer,
     conversation: Conversation,
     onDismiss: () -> Unit,
@@ -695,7 +695,7 @@ private fun ExportDialog(
  * 不如在按下「导入」之前就让人看见识别到了几条。
  */
 @Composable
-private fun ImportDialog(
+internal fun ImportDialog(
     container: AppContainer,
     scene: String,
     cardId: String,

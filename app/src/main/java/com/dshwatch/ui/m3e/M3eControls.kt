@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -596,7 +598,17 @@ fun M3eDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = minOf(maxContentHeight, 190).dp),
+                    .heightIn(max = minOf(maxContentHeight, 190).dp)
+                    /*
+                     * 内容超出上限时必须能滚，不能裁。
+                     *
+                     * 会话菜单五项、模型列表十二项都超过 190dp：不滚的话
+                     * 底部那几项直接被切掉，而且**不会有任何报错** ——
+                     * 用户看到的是「菜单里没有删除」，而不是「内容被截断了」。
+                     * 这一条和 1.23.3 的按钮出界是同一类问题：槽位溢出后
+                     * 不会崩，只是静静地少东西。
+                     */
+                    .verticalScroll(rememberScrollState()),
                 content = content,
             )
         },

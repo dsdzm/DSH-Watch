@@ -1534,7 +1534,7 @@ private fun AgentTurnItem(
  * 其余（用户消息、单条助手消息）各自成组。这样 LazyColumn 里每个条目
  * 就是前端意义上的「一条消息」，多步 Agent 只会出现一条工作流程卡片。
  */
-private fun groupMessages(msgs: List<ChatMessage>): List<MessageGroup> {
+internal fun groupMessages(msgs: List<ChatMessage>): List<MessageGroup> {
     val out = ArrayList<MessageGroup>()
     var i = 0
     while (i < msgs.size) {
@@ -1554,7 +1554,7 @@ private fun groupMessages(msgs: List<ChatMessage>): List<MessageGroup> {
 }
 
 /** LazyColumn 的渲染单元：一个 key 对应「一条」前端可见的消息回合 */
-private data class MessageGroup(val key: String, val messages: List<ChatMessage>)
+internal data class MessageGroup(val key: String, val messages: List<ChatMessage>)
 
 /**
  * Agent 的「工作块」—— 一轮回答里全部思考与工具调用的统一容器。
@@ -1573,7 +1573,7 @@ private data class MessageGroup(val key: String, val messages: List<ChatMessage>
  *     点开即预览、右侧导出，不用先展开工作流。
  */
 @Composable
-private fun AgentWorkBlock(
+internal fun AgentWorkBlock(
     blockKey: Any,
     calls: List<ToolCallRecord>,
     reasoning: String,
@@ -1797,7 +1797,7 @@ private fun MsgAction(text: String, onClick: () -> Unit) {
 }
 
 /** 产物在磁盘上的真实大小；读不到返回 0（界面会自动省略这一项） */
-private fun artifactSizeOf(container: AppContainer, path: String): Long =
+internal fun artifactSizeOf(container: AppContainer, path: String): Long =
     runCatching { File(container.workspaceStore.rootDir(), path).length() }.getOrDefault(0L)
 
 @Composable
@@ -2008,7 +2008,7 @@ private fun ModelPickerDialog(
  * 而不是 `Screen` 对象 —— 工具层不应该知道界面的类型。
  * 这里做唯一一次映射，键错了就静默忽略（工具侧已经校验过一遍）。
  */
-private fun openScreen(nav: WatchNavigator, key: String) {
+internal fun openScreen(nav: WatchNavigator, key: String) {
     val target = when (key) {
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_SETTINGS -> Screen.Settings
         com.dshwatch.domain.agent.UiActionChannel.SCREEN_EXEC -> Screen.ExecSettings
@@ -2043,7 +2043,7 @@ private fun openScreen(nav: WatchNavigator, key: String) {
  * 会把主线程拖出掉帧 —— 而掉帧和"生成慢"在体感上根本分不开。
  */
 @Composable
-private fun rememberTokensPerSecond(
+internal fun rememberTokensPerSecond(
     engine: com.dshwatch.domain.ChatEngine,
     streaming: Boolean,
 ): Int {

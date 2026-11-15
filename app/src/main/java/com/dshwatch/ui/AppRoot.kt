@@ -171,6 +171,19 @@ fun AppRoot(
             // 新页面就带着上一页的模糊进来 —— 表现为「点进去只有一片糊，内容看不见」。
             // 光靠弹窗自己的 onDispose 管不到「页面换了」这件事。
             com.dshwatch.ui.components.GlassBackdropHost(resetKey = page) {
+                // M3E 先分派：命中的页面走独立实现（结构不同，不只是配色不同）。
+                // 没命中的回落到下面的经典分支 —— 它们的控件层已经按 M3E 分派，
+                // 不会出现"两套视觉硬拼在一起"。
+                if (com.dshwatch.ui.theme.isM3eUi &&
+                    com.dshwatch.ui.m3e.M3ePage(
+                        page = page,
+                        container = container,
+                        settings = settings,
+                        nav = nav,
+                    )
+                ) {
+                    return@GlassBackdropHost
+                }
                 when (page) {
                     // 根屏按「用户的主要使用场景」分发：编程进工作台，酒馆/写作进各自的列表。
                     // 这样用户选了"角色扮演"，进 App 直接看到角色，而不是先看一张编程界面。
