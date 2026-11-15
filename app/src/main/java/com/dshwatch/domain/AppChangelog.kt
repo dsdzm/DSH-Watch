@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.2",
+            date = "2026-11-15",
+            highlights = listOf(
+                "新增 应用内更新可以把安装包保存到本地，路径和安装命令直接摊在更新页上，点一下即可复制",
+                "新增 保存过的安装包会被认回来：重进更新页仍可直接安装，不必重下",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.1",
             date = "2026-11-14",
             highlights = listOf(

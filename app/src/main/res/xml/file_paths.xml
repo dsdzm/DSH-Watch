@@ -20,4 +20,18 @@
     <cache-path name="share_cache" path="share/" />
     <!-- 应用内更新下载的 APK：装完就删，放缓存而不是 files，别长期占用用户数据区 -->
     <cache-path name="apk" path="apk/" />
+    <!--
+      「保存安装包到本地」存下的两份。
+
+      少了这两条，`UpdateInstall` 交给系统安装器时会抛
+      IllegalArgumentException: Failed to find configured root —— 和上面 workspace
+      那次是同一个坑，只是换了个目录。表现同样是「点了没反应」，且被 runCatching 吞掉。
+
+      · apk_ext：应用外部目录 <包名>/files/Download/DSH-Watch/（无需任何权限）
+      · apk_public：公共「下载」目录 Download/DSH-Watch/（<external-path> 映射的是
+        外部存储根，只有本应用确实读得到时才会走到这里，见 UpdateStore.findSaved）
+      两者都不是敏感数据：就是用户自己点的那个安装包。
+    -->
+    <external-files-path name="apk_ext" path="Download/DSH-Watch/" />
+    <external-path name="apk_public" path="Download/DSH-Watch/" />
 </paths>

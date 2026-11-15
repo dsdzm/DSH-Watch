@@ -27,11 +27,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.update.SaveState
 import com.dshwatch.domain.update.UpdateInstall
 import com.dshwatch.domain.update.UpdateChannel
 import com.dshwatch.domain.update.UpdateState
+import com.dshwatch.domain.update.UpdateStore
+import com.dshwatch.ui.components.GhostButton
 import com.dshwatch.ui.components.KeyValueRow
 import com.dshwatch.ui.components.PrimaryButton
 import com.dshwatch.ui.components.SectionHeader
@@ -61,9 +67,21 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
     val center = container.updateCenter
 
     val state by center.state.collectAsStateWithLifecycle()
+    val save by center.saveState.collectAsStateWithLifecycle()
     val settings by container.settings.collectAsStateWithLifecycle()
     var noSettingsPage by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf("") }
+
+    /*
+     * 存到公共「下载」目录需要写权限，但**只在 Android 9 及以下**：Android 10 起
+     * 走 MediaStore 不需要权限。所以这里不会在大多数设备上弹窗，只有老设备会。
+     *
+     * 无论用户点允许还是拒绝都继续保存 —— 拒绝时 [UpdateStore] 会退到应用外部目录，
+     * 那个位置 `adb pull` 照样能取到。让「拒绝权限」等于「功能不可用」是最糟的设计。
+     */
+    val writePermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ -> center.saveToLocal() }
 
     /*
      * 进页面自动查一次，但只在「什么都没查过」时：
@@ -85,6 +103,15 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
         if (!center.install()) {
             localError = s.updateInstallFailed
         }
+    }
+
+    fun startSave() {
+        localError = ""
+        if (UpdateStore.needsWritePermission(context)) {
+            writePermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            return
+        }
+        center.saveToLocal()
     }
 
     WatchScaffold(title = s.updateTitle, onBack = { nav.pop() }) {
@@ -237,6 +264,44 @@ fun UpdateScreen(container: AppContainer, nav: WatchNavigator) {
                     )
                     Spacer(Modifier.height(6.dp))
                     PrimaryButton(text = s.updateInstall) { startInstall() }
+
+                    /*
+                     * 「保存安装包」永远排在「安装」下面。
+                     *
+                     * 它不是给正常人用的第二个选项 —— 手表上「安装未知应用」这个设置页
+                     * 经常根本不存在，那时「安装」按钮会一路走到「无法调起系统安装器」，
+                     * 用户手里什么都没有。这条退路必须一直在，且一步就能点到。
+                     */
+                    Spacer(Modifier.height(6.dp))
+                    GhostButton(text = s.updateSaveLocal) { startSave() }
+
+                    when (val sv = save) {
+                        SaveState.Saving -> {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = s.updateSaving,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        is SaveState.Failed -> {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = s.updateSaveFailed + sv.reason,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
+                        is SaveState.Saved -> {
+                            Spacer(Modifier.height(8.dp))
+                            SavedPanel(sv)
+                        }
+
+                        SaveState.Idle -> Unit
+                    }
+
                     if (noSettingsPage) {
                         Spacer(Modifier.height(8.dp))
                         PermissionHint(
@@ -322,6 +387,62 @@ private fun PermissionHint(
             )
         }
     }
+}
+
+/**
+ * 「已保存到本地」：一条路径 + 一条能直接粘贴的命令。
+ *
+ * 为什么不弹个 Toast 说「保存成功」就完事：用户真正的下一步是**把包弄去装**，
+ * 而这一步发生在手表之外的设备上。所以这里必须把「东西在哪」「怎么用」写全 ——
+ * 路径可点即复制，命令也可点即复制，中间不需要任何记忆。
+ */
+@Composable
+private fun SavedPanel(saved: SaveState.Saved) {
+    val s = LocalStrings.current
+    val clipboard = LocalClipboardManager.current
+    val store = UpdateStore.Saved(saved.file, saved.place)
+
+    var copied by remember { mutableStateOf(false) }
+    SettingCard {
+        Text(
+            text = s.updateSavedTo,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = store.path,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .weight(1f)
+                    .tap(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(store.path))
+                            copied = true
+                        },
+                    ),
+            )
+            Text(
+                text = if (copied) s.updateCopied else "⧉",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+
+    Spacer(Modifier.height(6.dp))
+    val install = UpdateStore.adbInstallCommand(store)
+    PermissionHint(
+        text = if (install != null) s.updateInstallByAdb else s.updatePullByAdb,
+        command = install ?: UpdateStore.adbPullCommand(store),
+        copiedLabel = s.updateCopied,
+        onCopy = { clipboard.setText(AnnotatedString(it)) },
+    )
 }
 
 /** 包大小，一行说完 */

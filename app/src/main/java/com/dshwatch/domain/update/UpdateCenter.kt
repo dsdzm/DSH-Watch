@@ -26,6 +26,20 @@ sealed interface UpdateState {
 }
 
 /**
+ * 「保存安装包到本地」的状态。
+ *
+ * 和 [UpdateState] 分开，是因为两者可以同时成立：包已经下载好（Ready），
+ * 用户还能再点一次「保存到本地」换一个位置。若把保存塞进 UpdateState，
+ * 「已保存」就会顶掉「可安装」，用户反而失去了直接安装的入口。
+ */
+sealed interface SaveState {
+    data object Idle : SaveState
+    data object Saving : SaveState
+    data class Saved(val file: File, val place: UpdateStore.Place) : SaveState
+    data class Failed(val reason: String) : SaveState
+}
+
+/**
  * 更新流程的状态中心。
  *
  * 为什么要有这一层而不是让页面自己调 [UpdateChecker]：
@@ -45,9 +59,13 @@ class UpdateCenter(
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
-    /** 防止连点「检查更新」/「下载」把请求叠起来 */
+    private val _saveState = MutableStateFlow<SaveState>(SaveState.Idle)
+    val saveState: StateFlow<SaveState> = _saveState.asStateFlow()
+
+    /** 防止连点「检查更新」/「下载」/「保存」把请求叠起来 */
     private val checking = AtomicBoolean(false)
     private val downloading = AtomicBoolean(false)
+    private val saving = AtomicBoolean(false)
 
     /**
      * 启动时的静默检查：24 小时最多一次，且**不打扰用户**。
@@ -142,6 +160,9 @@ class UpdateCenter(
     fun download() {
         val available = _state.value as? UpdateState.Available ?: return
         if (!downloading.compareAndSet(false, true)) return
+        // 换版本了，上一版「已保存到 /sdcard/…/dshwatch-77.apk」的提示必须撤掉，
+        // 否则用户会以为手里那个旧包就是刚下好的新包
+        _saveState.value = SaveState.Idle
         scope.launch {
             _state.value = UpdateState.Downloading(0f)
             var lastPercent = -1
@@ -186,6 +207,15 @@ class UpdateCenter(
     /** 页面重新进入时，把「已下载好」的文件认回来（进程内缓存，重启后自然失效） */
     fun restoreFromCache() {
         if (_state.value !is UpdateState.Idle) return
+
+        /*
+         * 先看缓存，再看「用户保存到本地的包」。
+         *
+         * 顺序不能反：缓存里的那一份是最新下载的，保存过的那一份可能是上一轮留下的。
+         * 但缓存会被系统随时清掉（手表 192MB 堆、低内存设备，清得非常勤），
+         * 只认缓存的话，用户明明把包存到 /sdcard/Download 了，回来还是显示「下载」——
+         * 那正好把「保存到本地」这件事的意义抵消掉了。
+         */
         val dir = File(context.cacheDir, "apk")
         /*
          * 只认比当前版本更新的包。
@@ -200,8 +230,36 @@ class UpdateCenter(
                 code != null && code > com.dshwatch.BuildConfig.VERSION_CODE
             }
             ?.maxByOrNull { it.lastModified() }
+            ?: UpdateStore.findSaved(context, com.dshwatch.BuildConfig.VERSION_CODE)
             ?: return
         _state.value = UpdateState.Ready(candidate)
+    }
+
+    /**
+     * 把已下载的安装包存到本地，交给用户自己装。
+     *
+     * 这条路的必要性见 [UpdateStore]：手表上「安装未知应用」常常没有设置入口，
+     * 系统安装器根本叫不起来，那时唯一能做的就是把包給到用户手里。
+     *
+     * 写盘可能失败（空间不足、连外部存储都挂不上），失败原因原样给界面，
+     * 不吞掉 —— 「保存失败」四个字对用户没有任何可操作性。
+     */
+    fun saveToLocal() {
+        val ready = _state.value as? UpdateState.Ready ?: return
+        if (!saving.compareAndSet(false, true)) return
+        scope.launch {
+            _saveState.value = SaveState.Saving
+            _saveState.value = UpdateStore.save(context, ready.file).fold(
+                onSuccess = { SaveState.Saved(it.file, it.place) },
+                onFailure = { SaveState.Failed(it.message?.take(60) ?: "无法写入存储") },
+            )
+            saving.set(false)
+        }
+    }
+
+    /** 用户看过「已保存」之后收起提示，回到可以再存一次的干净状态 */
+    fun clearSaveState() {
+        _saveState.value = SaveState.Idle
     }
 
     private companion object {

@@ -441,6 +441,13 @@ interface AppStrings {
     val updateCopied: String
     val updateInstallFailed: String
     val updateNotes: String
+    // 应用内更新：把安装包存到本地（系统安装器叫不起来时的唯一出路）
+    val updateSaveLocal: String
+    val updateSaving: String
+    val updateSavedTo: String
+    val updateSaveFailed: String
+    val updateInstallByAdb: String
+    val updatePullByAdb: String
 
     // 诊断
     val navDiagnostics: String
@@ -991,6 +998,13 @@ object Zh : AppStrings {
     override val updateCopied = "已复制"
     override val updateInstallFailed = "无法调起系统安装器"
     override val updateNotes = "更新内容"
+
+    override val updateSaveLocal = "保存安装包"
+    override val updateSaving = "正在保存…"
+    override val updateSavedTo = "已保存到"
+    override val updateSaveFailed = "保存失败："
+    override val updateInstallByAdb = "用数据线在电脑上执行这条命令即可安装："
+    override val updatePullByAdb = "这个位置只有数据线能取到，先取回电脑再装："
 
     override val navDiagnostics = "诊断"
     override val diagTitle = "连接诊断"
@@ -1635,6 +1649,13 @@ object En : AppStrings {
     override val updateCopied = "Copied"
     override val updateInstallFailed = "Could not open the system installer"
     override val updateNotes = "What's new"
+
+    override val updateSaveLocal = "Save package"
+    override val updateSaving = "Saving…"
+    override val updateSavedTo = "Saved to"
+    override val updateSaveFailed = "Save failed: "
+    override val updateInstallByAdb = "Run this on a computer over USB to install:"
+    override val updatePullByAdb = "Only reachable over USB. Pull it to a computer first:"
 
     override val navDiagnostics = "Diagnostics"
     override val diagTitle = "Connection diagnostics"

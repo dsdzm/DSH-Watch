@@ -56,6 +56,18 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!--
+      应用内更新「保存安装包到本地」用。
+
+      只在 Android 10 及以下需要：那时按路径写公共「下载」目录要这个运行时权限。
+      Android 11 起 MediaStore 接手了这件事，不再需要任何权限，所以上限写死 29 ——
+      写了 30+ 也没用，只会让商店审核多问一句。
+
+      用户拒绝也不影响功能：UpdateStore 会退到应用外部目录，adb pull 照样取得到。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
