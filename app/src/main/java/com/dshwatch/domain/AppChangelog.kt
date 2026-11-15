@@ -23,6 +23,13 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.3",
+            date = "2026-11-15",
+            highlights = listOf(
+                "修复 M3E 界面下弹窗只剩「取消」，「保存」「提交」这第二个动作被挤到了框外",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.2",
             date = "2026-11-15",
             highlights = listOf(

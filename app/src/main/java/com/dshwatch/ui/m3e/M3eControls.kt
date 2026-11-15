@@ -525,9 +525,19 @@ fun M3eEmptyState(title: String, hint: String? = null, modifier: Modifier = Modi
  * **可滚动的圆形卡片**，在圆屏上边缘永远收在圆周内；后者是矩形，
  * 顶部那行标题会被圆周切掉。
  *
- * [buttons] 整块塞进 `confirmButton` 槽 —— 那个槽只是一块 Composable 区域，
- * 不强制只有一个按钮。这样调用方仍然可以自由排布「取消 / 确定」，
- * 而外框、遮罩、动画都由 M3E 组件负责。
+ * ## `confirmButton` 是一行，不是一个盒子
+ *
+ * 这一点是踩出来的：Wear 的签名是
+ * `confirmButton: @Composable RowScope.() -> Unit` —— 它把槽里发出的东西
+ * **横着排**。而 M3E 的按钮是整宽按钮（52dp 高、`fillMaxWidth`），
+ * 两个一起塞进去，第一个就吃掉整行宽度，第二个被挤到对话框外面：
+ * 界面上只剩「取消」，「保存」整个人间蒸发。
+ *
+ * 用户报的现象就是这一句：「m3e 主题有一些保存的选项没有了，只剩取消了」。
+ *
+ * 所以这里**必须**先包一层 [Column]：在 [RowScope] 里它拿到整行宽度，
+ * 里面的按钮再纵向堆叠，每颗都是整宽、都能点到。竖排也正好合乎手表读法 ——
+ * 两颗并排各 90dp，1.4 英寸屏上根本按不准。
  *
  * ## 为什么显式把 `dismissButton` 置空
  *
@@ -551,7 +561,15 @@ fun M3eDialog(
     AlertDialog(
         visible = true,
         onDismissRequest = onDismissRequest,
-        confirmButton = { buttons() },
+        confirmButton = {
+            // 见上：这一槽是 RowScope，不包一层 Column 就会被横着排，第二颗按钮出界
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                buttons()
+            }
+        },
         // 见上：默认那颗 × 与调用方的「取消」重复，这里不要
         dismissButton = {},
         title = {

@@ -7,6 +7,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import com.dshwatch.domain.model.UiStyles
 import com.google.common.truth.Truth.assertThat
+import java.io.File
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -112,5 +114,38 @@ class M3eThemeTest {
         assertThat(ButtonDefaults.CompactButtonHeight.value).isEqualTo(48f)
         assertThat(WearTypography().labelLarge?.fontSize?.value).isEqualTo(20f)
         assertThat(WearTypography().labelMedium?.fontSize?.value).isEqualTo(15f)
+    }
+
+    /**
+     * 对话框的按钮必须**先包一层 Column** 再塞进 `confirmButton`。
+     *
+     * 用户报的原话：
+     * > 「m3e 主题有一些保存的选项没有了，只剩取消了」
+     *
+     * 根因在 Wear 的签名上：`confirmButton: @Composable RowScope.() -> Unit`。
+     * 那个槽是一**行**，而 M3E 的按钮是整宽按钮 —— 两颗一起放进去，
+     * 第一颗吃掉整行，第二颗被排到对话框外面，永远看不见。
+     * 编译器对此一言不发，改坏了也不会报错，只会静默少一个按钮。
+     *
+     * 单测跑不起 Compose 布局，所以这里读源码守结构。
+     */
+    @Test
+    fun `对话框按钮竖排，不横着挤掉第二颗`() {
+        val f = File("src/main/java/com/dshwatch/ui/m3e/M3eControls.kt")
+        assertTrue("找不到 M3eControls.kt：${f.absolutePath}", f.isFile)
+        val src = f.readText()
+            .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+            .replace(Regex("//[^\\n]*"), "")
+
+        val slot = src.substringAfter("confirmButton = {").substringBefore("dismissButton")
+        assertThat(slot).isNotEmpty()
+        assertTrue(
+            "confirmButton 是 RowScope：必须用 Column(fillMaxWidth) 包住 buttons()，否则第二颗按钮会被挤出行外",
+            slot.contains("Column(") && slot.contains("buttons()"),
+        )
+        assertTrue(
+            "fillMaxWidth 少了就等于把整行让给第一个按钮",
+            slot.contains("fillMaxWidth"),
+        )
     }
 }
