@@ -1,5 +1,6 @@
 package com.dshwatch.ui.m3e
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,12 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,41 +36,65 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
 import com.dshwatch.ui.i18n.LocalStrings
-import com.dshwatch.ui.theme.LocalDeviceProfile
 
 /**
- * M3E 的页面骨架。
+ * 顶栏顶部的让位高度。
  *
- * ## 和经典骨架的根本差别：不再自己算几何
+ * `AppScaffold` 的时间文字是**画在内容之上的浮层**，不参与布局 ——
+ * 它不会把内容往下推，只会在原地盖住第一行。所以内容必须自己让出这一段。
  *
- * 经典那套（`CircleScaffold`）是「按弦长反推内容矩形」：算圆顶、算 0.69d、
- * 算某一行离圆心的距离，把内容裁进一个内接矩形里。好处是每屏能多放一行，
- * 代价是**所有比例都是硬编码的**，换一块屏幕就得重算。
+ * 这个值是量出来的，不是拍的：Wear M3 的 `TimeText` 是 24dp 的字，
+ * 上下各留 4dp 呼吸，合计 32dp。之前这里写的 24dp 只够字高、不含呼吸，
+ * 结果顶栏第一行贴着时间文字的下沿，视觉上像被压住。
+ */
+internal val M3eTimeTextInset = 32.dp
+
+/**
+ * 内容区的横向内收。
  *
- * M3E 这套走 Wear 官方的结构：
+ * **不再读 `profile.cornerInsetDp`。**
  *
- * ```
- * AppScaffold            ← 底色、时间文字、圆形安全区
- *   ├─ TimeText          ← 屏幕顶部那条时间（Wear 的签名元素）
- *   ├─ 顶栏              ← 返回 + 标题 + 动作
- *   └─ 内容              ← 页面自己的 WearList / 滚动容器
- * ```
+ * 那个值是给经典界面用的「用户可调」参数，用户可以把它设成 0（这台就是 0），
+ * 于是 M3E 的卡片会一直贴到屏幕边 —— 圆屏的四个角直接把卡片切掉。
+ * 圆屏的安全区是物理事实，不该跟着一个偏好开关走。
  *
- * 内容不再裁剪，超出圆周的部分靠 `WearList` 的逐项变换（越靠边越小、越淡）
- * 收进来。这是官方做法，也是 M3E 的观感来源：**滚动中的列表项会呼吸**。
+ * 列表页传 0：`TransformingLazyColumn` 自己有一份 `contentPadding`（横向 6dp），
+ * 再叠一层就是 14dp，卡片会窄得像手机上的缩略图。
+ */
+internal val M3ePageInset = 8.dp
+
+/**
+ * M3E 的页面骨架（固定顶栏版）。
  *
- * ## 顶栏为什么是「标题居中」而不是「左标题 + 右图标」
+ * ## 这一版修掉的两个真 bug
  *
- * 上一版顶栏照搬了手机的 `TopAppBar`：标题左对齐、动作挤在右侧一行。
- * 那种排布在手表上会立刻读成「手机界面缩小版」—— 手机之所以能左标题，
- * 是因为横屏有 360dp 宽、可以一边标题一边四颗图标；手表最宽也就 220dp，
- * 两边同时占位的代价是标题被压成三四个字。
+ * ### 一、列表滚上去的内容会盖住顶栏
  *
- * Wear 的答案是把标题放到**正中间**、动作退到两侧，两边各留 44dp 的命中区。
- * 视线先落在中间，再往两边找按钮 —— 这是腕表的读法。
+ * `TransformingLazyColumn` 为了让贴边项能缩小、淡出，**关掉了绘制裁剪** ——
+ * 这是它做鱼眼变换的前提（缩放后的项需要画到列表边界之外）。
  *
- * 动作多于两颗时用 [M3eScaffold] 的 `stackedBar`：图标收成一排居中，
- * 标题降为下面一行小字。对话页是这种形态（历史 / 新建 / 切换模式 / 设置 四颗）。
+ * 代价是：只要列表上面压着一个固定顶栏，滚上去的项就会**直接画在顶栏上面**。
+ * 这不是「层级错了」，而是列表压根不管边界。
+ *
+ * 那两张截图正是这个：
+ * - 设置页里「自动检查更新」那张卡滚到了时间文字上面，返回键和标题被压在它下面
+ * - 对话页里最新的消息盖住了顶栏那一排图标，图标只露出下半截
+ *
+ * 修法是把「不裁剪」这个自由收回来：内容区显式 `clipToBounds()`。
+ * 贴边项的缩放本来就在列表内部完成，裁掉的只是那些**还没进来**的部分 ——
+ * 那部分原本就看不见（在圆周外），裁掉没有损失。
+ *
+ * ### 二、时间文字被压住
+ *
+ * 见 [M3eTimeTextInset]。
+ *
+ * ## 顶栏为什么是固定的，而不是跟着列表滚
+ *
+ * 官方的 `ScreenScaffold` 把标题和动作当作列表项，滚动时会滚走。那对
+ * 「一屏一件事」的设置页没问题，但对话页不行 —— 用户一进来就在最底部，
+ * 顶栏要是滚走了，他连「设置在哪」都看不到。
+ *
+ * 所以这里保留固定顶栏，用上面那条裁剪把边界守住。
  */
 @Composable
 fun M3eScaffold(
@@ -81,26 +107,15 @@ fun M3eScaffold(
     /**
      * 顶栏形态。
      *
-     * `false`（默认）：Wear 的标准 AppBar —— 返回在左、标题居中、动作在右。
-     * 适用于设置页、列表页这类「一屏一件事」的页面。
-     *
+     * `false`（默认）：返回在左、标题居中、动作在右。
      * `true`：动作收成一排**居中**的圆图标，标题变成下面一行小字。
-     * 适用于动作多的页面（对话页）。四颗图标加一个居中标题在 220dp 上排不下，
-     * 硬挤的结果就是标题只剩两个字的宽度。
      */
     stackedBar: Boolean = false,
+    /** 内容区横向内收。列表页传 0（列表自己带内边距），表单页用默认值。 */
+    horizontalInset: Dp = M3ePageInset,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val bg = androidx.compose.material3.MaterialTheme.colorScheme.background
-    val profile = LocalDeviceProfile.current
-    /*
-     * 圆屏的横向内收。
-     *
-     * 不再是经典那套「按弦长逐行算」，而是取一个固定值：顶栏那一行的弦宽最窄，
-     * 按它收一次就够 —— 下面的内容只会更宽，不会更窄。省掉逐行几何的好处是
-     * 页面在滚动时宽度恒定，不会出现「滚到中间字宽变了」的抖动。
-     */
-    val inset = profile.cornerInsetDp.dp
+    val bg = MaterialTheme.colorScheme.background
 
     AppScaffold(
         modifier = Modifier.fillMaxSize(),
@@ -108,14 +123,8 @@ fun M3eScaffold(
         containerColor = bg,
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            /*
-             * TimeText 是画在顶部的浮层，不参与布局。
-             *
-             * 所以这里必须显式让出一段高度，否则第一行内容会被时间文字压住。
-             * 24dp 是 TimeText 的默认高度；不能让给它的部分跟着界面缩放变 ——
-             * 时间文字自己会缩，这里只是让位。
-             */
-            Spacer(Modifier.height(24.dp))
+            // 给浮层的时间文字让位。见 M3eTimeTextInset 的注释。
+            Spacer(Modifier.height(M3eTimeTextInset))
 
             if (stackedBar) {
                 StackedBar(title = title, onBack = onBack, actions = actions)
@@ -125,16 +134,48 @@ fun M3eScaffold(
                     subtitle = subtitle,
                     onBack = onBack,
                     actions = actions,
-                    inset = inset,
+                    inset = horizontalInset,
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    /*
+                     * 这一行是本次修复的核心。
+                     *
+                     * 少了它，滚上去的列表项会画到顶栏和时间文字上面 ——
+                     * 而且**不会报错**，只是看着像布局乱了。
+                     */
+                    .clipToBounds(),
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = inset),
+                        .padding(horizontal = horizontalInset),
                     content = content,
+                )
+
+                /*
+                 * 顶栏下沿的一条渐隐。
+                 *
+                 * `clipToBounds` 能让滚上去的内容停在边界上，但**停得很硬** ——
+                 * 卡片上边缘会被一刀切平，看着像被裁坏了。
+                 *
+                 * 铺一条从页面底色到透明的竖渐变，被切的那一截就"化"进背景里。
+                 * 12dp 是刚好够遮住切口、又不至于吃掉一行正文的高度。
+                 */
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(12.dp)
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(bg, bg.copy(alpha = 0f)),
+                            )
+                        ),
                 )
 
                 if (bottom != null && bottomOverlay) {
@@ -154,7 +195,7 @@ fun M3eScaffold(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = inset, end = inset, bottom = 6.dp),
+                        .padding(start = horizontalInset, end = horizontalInset, bottom = 6.dp),
                 ) {
                     bottom()
                 }
@@ -176,7 +217,7 @@ private fun CenteredBar(
     subtitle: String?,
     onBack: (() -> Unit)?,
     actions: @Composable RowScope.() -> Unit,
-    inset: androidx.compose.ui.unit.Dp,
+    inset: Dp,
 ) {
     Box(
         modifier = Modifier
@@ -184,10 +225,6 @@ private fun CenteredBar(
             .heightIn(min = 46.dp)
             .padding(horizontal = inset),
     ) {
-        /*
-         * 标题铺满整行、居中，两侧用 48dp 的 padding 避让按钮。
-         * 这样即使左右按钮数量不等，标题的几何中心也和屏幕中心重合。
-         */
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -236,7 +273,7 @@ private fun CenteredBar(
  * 再塞一个标题就必然互相压。把标题降到第二行，两组各占一行，谁都不挤。
  *
  * 返回键也排进这一行（放在最左）。它是「动作」里最先被找的一个，
- * 混在一排 26dp 的图标里也认得出；单独占一行反而会把标题挤得更低。
+ * 混在一排 26dp 的图标里也认得出。
  */
 @Composable
 private fun StackedBar(
@@ -278,12 +315,10 @@ private fun StackedBar(
  *
  * ## 为什么是无底色的图标
  *
- * 上一版是 `FilledTonalIconButton`（灰底圆形）。那种「浮起来的圆」在手机上
- * 是 FAB 的语言，出现在顶栏左上角会被读成「一颗悬在标题旁边的按钮」，
- * 而不是「返回」。
+ * 灰底圆形（`FilledTonalIconButton`）在手机上是 FAB 的语言，出现在顶栏
+ * 左上角会被读成「一颗悬在标题旁边的按钮」，而不是「返回」。
  *
  * Wear 的顶栏动作一律**无容器**：只有 26dp 的图标 + 44dp 的命中区。
- * 底色留给真正需要强调的东西（主按钮、FAB），顶栏靠图标本身被识别。
  */
 @Composable
 fun M3eBackButton(onClick: () -> Unit) {
@@ -302,11 +337,9 @@ fun M3eBackButton(onClick: () -> Unit) {
 /**
  * M3E 的顶栏图标按钮。
  *
- * 用 [IconButton] 而不是自己画：它会自动处理涟漪、最小触摸区与无障碍语义，
- * 这是「用 M3E 组件」的实际好处 —— 观感之外，交互细节也一起拿过来了。
+ * 用 [IconButton] 而不是自己画：它会自动处理涟漪、最小触摸区与无障碍语义。
  *
- * 44dp 命中区 + 26dp 图标是 Wear 的 `IconSize` 规格。上一版是 34/18 —— 图标
- * 比规范小了一圈，在 1.4 英寸的屏上看起来像「一排标点符号」。
+ * 44dp 命中区 + 26dp 图标是 Wear 的 `IconSize` 规格。
  */
 @Composable
 fun M3eIconTap(
@@ -317,9 +350,8 @@ fun M3eIconTap(
     /**
      * 命中区直径。默认 44dp（Wear 的常规值）。
      *
-     * 对话页顶栏有 5 颗动作时，5×44=220dp 已经超过圆屏那一行的弦宽（约 189dp），
-     * 两侧的图标会被圆周切掉。这种情况传 36dp：5×36=180dp 刚好收在弦内，
-     * 图标仍是 24dp（只比 26dp 小一档），视觉上还是一条整齐的图标带。
+     * 五颗动作时传 36dp：5×44=220dp 已经超过圆屏那一行的弦宽（约 189dp），
+     * 两侧的图标会被圆周切掉。
      */
     diameter: Dp = 44.dp,
     /** 图标边长，默认 26dp（Wear M3 规范） */
@@ -339,10 +371,9 @@ fun M3eIconTap(
 }
 
 /**
- * M3E 底部的主操作按钮（对话页的「新对话 / 输入」这类）。
+ * M3E 底部的主操作按钮。
  *
- * 单独抽出来是因为圆屏底部的 FAB 有个硬要求：**直径不能超过 0.20d**。
- * 再大就会顶到圆周，横向弦长不够，按钮两侧会被切掉。
+ * 圆屏底部的 FAB 有硬要求：**直径不能超过 0.20d**。再大就会顶到圆周。
  */
 @Composable
 fun M3eFab(
@@ -384,7 +415,7 @@ fun M3eFab(
 @Composable
 fun M3eButtonRow(
     modifier: Modifier = Modifier,
-    spacing: androidx.compose.ui.unit.Dp = 6.dp,
+    spacing: Dp = 6.dp,
     content: @Composable RowScope.() -> Unit,
 ) {
     Row(

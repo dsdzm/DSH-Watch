@@ -23,6 +23,16 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.7",
+            date = "2026-11-15",
+            highlights = listOf(
+                "修复 列表滚上去的内容盖住顶栏与时间文字：贴边列表为了做缩放关掉了绘制裁剪，滚出边界的项会画到顶栏上面",
+                "修复 顶栏与时间文字贴在一起：给时间文字让位的高度从 24dp 改成 32dp（之前只算了字高，没算上下呼吸）",
+                "修复 卡片贴到屏幕边被圆周切角：M3E 不再读「圆角安全边距」这个用户可调参数，圆屏安全区按物理值走",
+                "重做 设置二级页：不再是「一整个列表项」，改成长表单滚动，滚动时只平移不缩放",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.6",
             date = "2026-11-15",
             highlights = listOf(

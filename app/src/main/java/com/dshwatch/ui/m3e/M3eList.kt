@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
@@ -40,7 +41,19 @@ fun M3eList(
     content: TransformingLazyColumnScope.() -> Unit,
 ) {
     TransformingLazyColumn(
-        modifier = modifier,
+        /*
+         * `clipToBounds` 是**必须**的，不是保险。
+         *
+         * `TransformingLazyColumn` 为了让贴边项能缩小、淡出，绘制时不裁剪 ——
+         * 缩放后的项需要画到列表边界之外才好看。但这条自由一旦遇上「列表上方
+         * 还压着一个固定顶栏」的页面，滚上去的项就会直接画在顶栏和时间文字上面。
+         *
+         * 用户截图里那两处错乱都是这个：设置页的开关卡盖住了返回键，
+         * 对话页的最新消息盖住了顶栏那一排图标。两者都不报错，只是看着像布局乱了。
+         *
+         * 裁掉的只是还没进入列表区域的部分 —— 那部分本来就在圆周外，看不见。
+         */
+        modifier = modifier.clipToBounds(),
         state = state,
         contentPadding = contentPadding,
         verticalArrangement = verticalArrangement,

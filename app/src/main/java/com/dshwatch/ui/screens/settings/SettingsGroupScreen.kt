@@ -167,13 +167,20 @@ fun SettingsGroupScreen(
     }
 
     /*
-     * 组内容只写一次，两套骨架共用。
+     * 组内容只写一次，两套骨架共用 —— 但**骨架必须各走各的**。
      *
-     * 这里是**唯一**一处「M3E 与经典共用代码」的地方，而且是刻意的：
-     * 十个分组、四十多项设置，重写一遍的意义只在于顺序与分组，
-     * 而顺序在上一版的 M3E 化里已经调过了。真正要换的是**外层骨架** ——
-     * 经典是 `WatchScaffold + verticalScroll`，M3E 是
-     * `M3eScaffold + TransformingLazyColumn`（见 M3eList）。
+     * 这里曾经把整组内容塞进 `TransformingLazyColumn` 的**一个 item** 里，
+     * 结果是用户截图里的那一幕：内容盖住了时间文字和返回键。
+     *
+     * 原因有两层：
+     *
+     * 1. `TransformingLazyColumn` 不裁剪，滚上去的项会画到列表外面；
+     * 2. 更致命的是它按 item 的整体做贴边变换 —— 一个两千多 dp 高的 item，
+     *    中心落在屏幕外，缩放系数算出来是错的，整块内容会被整体缩小/错位。
+     *    这一层不是裁剪能救的。
+     *
+     * 所以设置二级页**不用列表**：它是一份长表单，不是一串卡片。
+     * 用 `Column + verticalScroll`，滚动时只平移、不缩放，布局稳定。
      */
     val groupContent: @Composable ColumnScope.() -> Unit = {
         when (groupId) {
@@ -191,19 +198,17 @@ fun SettingsGroupScreen(
     }
 
     if (com.dshwatch.ui.theme.isM3eUi) {
-        val listState = com.dshwatch.ui.m3e.rememberM3eListState()
         com.dshwatch.ui.m3e.M3eScaffold(
             title = SettingsGroups.title(groupId, s),
             onBack = { nav.pop() },
         ) {
-            com.dshwatch.ui.m3e.M3eList(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                item(key = "__group__") {
-                    Column(modifier = Modifier.fillMaxWidth(), content = groupContent)
-                }
-            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 12.dp),
+                content = groupContent,
+            )
         }
         return
     }

@@ -96,7 +96,11 @@ fun M3eUsageScreen(
     }
     val aggregate = remember(records, period) { UsageRepository.aggregate(records, from, to) }
 
-    M3eScaffold(title = s.usageTitle, onBack = { nav.pop() }) {
+    M3eScaffold(
+        title = s.usageTitle,
+        onBack = { nav.pop() },
+        horizontalInset = 0.dp,
+    ) {
         M3eList(state = listState, modifier = Modifier.weight(1f)) {
             /*
              * 区间放在第一项 —— 它是这一页唯一的显式状态。

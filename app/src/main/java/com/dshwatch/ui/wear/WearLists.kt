@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -176,7 +177,19 @@ fun WearList(
     val spec = rememberTransformationSpec()
     val rotary = RotaryScrollableDefaults.behavior(state)
     TransformingLazyColumn(
-        modifier = modifier.fillMaxSize(),
+        /*
+         * 必须裁切。
+         *
+         * `TransformingLazyColumn` 为了让贴边项能缩小、淡出，绘制时不裁剪 ——
+         * 缩放后的项要画到列表边界外才好看。但这条自由一旦遇上
+         * 「列表上方压着一个固定顶栏」的页面，滚上去的项就会直接画在顶栏上。
+         *
+         * 这个列表是全项目几十个页面的入口，所以这个 bug 是**全局**的：
+         * 用户截图里的设置页、对话页，都是它。而且不报错，只是看着像布局乱了。
+         *
+         * 裁掉的只是还没进入列表区域的部分 —— 那部分本来就在圆周外，看不见。
+         */
+        modifier = modifier.fillMaxSize().clipToBounds(),
         state = state,
         contentPadding = contentPadding ?: WearLayout.listPadding(),
         verticalArrangement = verticalArrangement,

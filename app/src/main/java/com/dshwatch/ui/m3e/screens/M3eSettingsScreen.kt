@@ -3,6 +3,7 @@ package com.dshwatch.ui.m3e.screens
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -68,7 +69,11 @@ fun M3eSettingsScreen(
     val s = LocalStrings.current
     val listState = rememberM3eListState()
 
-    M3eScaffold(title = s.navSettings, onBack = { nav.pop() }) {
+    M3eScaffold(
+        title = s.navSettings,
+        onBack = { nav.pop() },
+        horizontalInset = 0.dp,
+    ) {
         M3eList(state = listState, modifier = Modifier.weight(1f)) {
             item(key = "__hdr_config__") { M3eSectionHeader("配置") }
 

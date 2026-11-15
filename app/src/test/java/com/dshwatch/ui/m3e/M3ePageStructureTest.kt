@@ -105,4 +105,42 @@ class M3ePageStructureTest {
         assertThat(body).contains("TransformingLazyColumn(")
         assertThat(body).doesNotContain("androidx.compose.foundation.lazy.LazyColumn")
     }
+
+    /**
+     * 列表必须裁切。
+     *
+     * `TransformingLazyColumn` 为了让贴边项能缩小淡出，绘制时**不裁剪** ——
+     * 缩放后的项要画到列表边界外才好看。但这条自由一旦遇上「列表上方压着
+     * 固定顶栏」的页面，滚上去的项就会直接画在顶栏和时间文字上面。
+     *
+     * 用户截图里那两处错乱（设置页的开关卡盖住返回键、对话页的消息盖住图标）
+     * 都是这个，而且**不报错**。所以这里钉死：两个列表入口都必须有 clipToBounds。
+     */
+    @Test
+    fun `列表容器必须裁切边界`() {
+        val list = File("src/main/java/com/dshwatch/ui/m3e/M3eList.kt")
+        assertThat(list.isFile).isTrue()
+        assertThat(list.readText()).contains("clipToBounds")
+
+        // 经典那个列表是全项目几十个页面的入口，同样必须裁
+        val wear = File("src/main/java/com/dshwatch/ui/wear/WearLists.kt")
+        assertThat(wear.isFile).isTrue()
+        assertThat(wear.readText()).contains("clipToBounds")
+    }
+
+    /**
+     * 顶栏与内容之间必须给时间文字让位，而且不能再去读用户的圆角内收。
+     *
+     * 时间文字是 `AppScaffold` 画的浮层，不参与布局 —— 不让位就会被压住。
+     * 圆角内收那个参数用户可以设成 0，一设成 0 卡片就贴到屏幕边、被圆周切掉；
+     * 圆屏的安全区是物理事实，不该跟着偏好开关走。
+     */
+    @Test
+    fun `骨架给时间文字让位且不读用户内收`() {
+        val body = code(File("src/main/java/com/dshwatch/ui/m3e/M3eScaffold.kt").readText())
+        assertThat(body).contains("M3eTimeTextInset")
+        assertThat(body).contains("clipToBounds")
+        // 注释里会写「不再读 cornerInsetDp」，说明理由；代码里不许真去读
+        assertThat(body).doesNotContain("cornerInsetDp")
+    }
 }

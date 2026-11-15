@@ -240,6 +240,7 @@ fun M3eChatScreen(
             tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         bottomOverlay = true,
+        horizontalInset = 0.dp,
         bottom = {
             /*
              * 底部只有一颗按钮，语义随状态变。

@@ -115,6 +115,8 @@ fun M3eSessionsScreen(
     M3eScaffold(
         title = if (filtered && cardTitle.isNotBlank()) cardTitle else s.sessionsTitle,
         onBack = { nav.pop() },
+        // 列表自己带横向内边距（TransformingLazyColumn 的 6dp），骨架不再叠加
+        horizontalInset = 0.dp,
         actions = {
             M3eIconTap(icon = Icons.Filled.Add, contentDescription = s.newChat, onClick = {
                 scope.launch {
