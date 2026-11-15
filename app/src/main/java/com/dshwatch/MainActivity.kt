@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = settings.dynamicColor,
                 themePreset = settings.themePreset,
                 accentColor = settings.accentColor,
+                seedColor = settings.seedColor,
                 appearance = settings.appearance,
                 uiStyle = settings.uiStyle,
                 customBackground = settings.customBackground,

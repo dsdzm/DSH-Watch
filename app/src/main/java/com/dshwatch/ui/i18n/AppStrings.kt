@@ -395,6 +395,12 @@ interface AppStrings {
     val ctxOver: String
     val ctxHot: String
     val ctxEmpty: String
+
+    // 莫奈取色（主题色）
+    val seedColors: String
+    val seedAutoHint: String
+    val seedPickHint: String
+    val seedNoPaper: String
     val clearUsage: String
     val clearUsageConfirm: String
 
@@ -989,6 +995,10 @@ object Zh : AppStrings {
     override val ctxOver = "已经超了窗口，这一轮会被裁掉最老的历史"
     override val ctxHot = "快满了。再聊几轮就要开始丢历史，长任务建议现在开新会话"
     override val ctxEmpty = "还没发过消息"
+    override val seedColors = "种子色"
+    override val seedAutoHint = "已由上方自动取色接管，关闭后生效"
+    override val seedPickHint = "点一个颜色，生成整套配色"
+    override val seedNoPaper = "没读到壁纸，正在用默认色相"
     override val noUsage = "还没有用量记录"
     override val clearUsage = "清空用量记录"
     override val clearUsageConfirm = "只清除统计，不影响会话内容。确定吗？"
@@ -1652,6 +1662,10 @@ object En : AppStrings {
     override val ctxOver = "Over the window — the oldest history gets dropped this turn"
     override val ctxHot = "Nearly full. A few more turns and history starts getting dropped"
     override val ctxEmpty = "No messages yet"
+    override val seedColors = "Seed color"
+    override val seedAutoHint = "Taken over by dynamic color. Turn it off to use these"
+    override val seedPickHint = "Pick one color to generate a full palette"
+    override val seedNoPaper = "No wallpaper found — using the default hue"
     override val noUsage = "No usage yet"
     override val clearUsage = "Clear usage"
     override val clearUsageConfirm = "Only statistics are removed. Continue?"

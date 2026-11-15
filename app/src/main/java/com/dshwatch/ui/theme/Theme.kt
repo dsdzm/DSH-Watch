@@ -1,12 +1,9 @@
 package com.dshwatch.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -163,6 +160,12 @@ fun DshWatchTheme(
     themePreset: String = "oled",
     accentColor: String = "blue",
     /**
+     * 莫奈取色的种子色（`#RRGGBB`）。空串 = 未选，走「预设 + 强调色」那套手调色板。
+     *
+     * 只在 [dynamicColor] 关闭时生效 —— 开着时种子由壁纸/背景图现场算出。
+     */
+    seedColor: String = "",
+    /**
      * 外观风格（材质）：[com.dshwatch.domain.model.Appearances.M3E] 或 `GLASS`。
      *
      * 以前「玻璃」是 `themePreset = "glass"`，和颜色预设混在一个维度里 ——
@@ -216,24 +219,52 @@ fun DshWatchTheme(
     }
 
     // 主题预设 + 强调色：两者都变时才重算色板。
-    // 动态取色优先级最高 —— 它本来就是「跟着壁纸走」，用户开了就该由系统决定。
-    val useDynamic = dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    //
+    // 莫奈取色（v1.23.5 起）优先于这两者：它本来就是一整套色板，
+    // 一旦生效，「预设 + 强调色」就无从叠加 —— 所以只在没有种子时才走老路。
+    val explicitSeed = remember(seedColor) { ThemeSeeds.parseHex(seedColor) }
 
-    // **玻璃不改底色。**
-    //
-    // 这里曾经强制套了一层 OLED 近黑底，理由是「玻璃要有不透明的 surface 兜底」——
-    // 用户一句话就否了：「玻璃主题的背景怎么换了？不要换，不然纯白色背景无法体现出玻璃的透明」。
-    //
-    // 他说得对：玻璃是「透」，透出来的就是底下这张纸的颜色。纸被换成黑的，
-    // 半透明的白叠上去只剩灰，透明感无从谈起。浅色底上的玻璃才是真玻璃。
-    // 所以色板照用户选的预设走，玻璃只决定「卡片怎么画」。
-    val baseScheme = remember(dark, useDynamic, themePreset, accentColor) {
-        when {
-            useDynamic && dark -> dynamicDarkColorScheme(context)
-            useDynamic -> dynamicLightColorScheme(context)
-            else -> ThemePresets.scheme(themePreset, accentColor, dark)
+    /*
+     * 跟随壁纸取色：种子在 IO 线程算，**首帧不等它**。
+     *
+     * 初值先给 null（= 用回退色相），算完再切换 —— 冷启动不会因为读一张图
+     * 卡住第一帧。缓存放在 [SeedCache]，同一张背景图不会每次重组都重算。
+     */
+    val extractedSeed by produceState<Int?>(
+        initialValue = SeedCache.remembered(customBackground),
+        customBackground,
+        dynamicColor,
+    ) {
+        if (!dynamicColor) return@produceState
+        val r = SeedSource.resolve(context, customBackground)
+        val seed = r.seed ?: ThemeSeeds.fallback.argb
+        SeedCache.put(customBackground, seed, r.source)
+        value = seed
+    }
+
+    /*
+     * 最终种子。
+     *
+     * 「跟随壁纸」开着时用算出来的种子（哪怕没取到图也用回退色相 —— 总比
+     * 界面颜色突然回到手调色板好理解）；关着时用用户挑的种子；
+     * 两个都没有，才落回「预设 + 强调色」。
+     */
+    val monetSeed: Int? = when {
+        dynamicColor -> extractedSeed ?: ThemeSeeds.fallback.argb
+        explicitSeed != null -> explicitSeed
+        else -> null
+    }
+
+    val baseScheme = remember(dark, monetSeed, themePreset, accentColor) {
+        if (monetSeed != null) {
+            MonetScheme.of(monetSeed, dark)
+        } else {
+            ThemePresets.scheme(themePreset, accentColor, dark)
         }
     }
+
+    // 玻璃与莫奈取色互斥（见下方注释），预设色板仍然需要知道这条
+    val useDynamic = monetSeed != null
 
     /*
      * 背景图在**主题这一层**解码，而不是每页各读一遍。

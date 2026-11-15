@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>DSH Watch · 90s</title>
+<style>
+  @font-face{font-family:"CJK";src:local("Noto Sans CJK SC"),local("Noto Sans SC");}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:#070A0F}
+  body{font-family:"CJK","Noto Sans CJK SC",sans-serif;color:#EDF1F7;-webkit-font-smoothing:antialiased}
+  #root{position:relative;width:1920px;height:1080px;overflow:hidden}
+
+  /* 背景 */
+  .bg{position:absolute;inset:0;background:
+      radial-gradient(1200px 700px at 20% -10%,rgba(76,111,255,.18),transparent 60%),
+      radial-gradient(900px 600px at 88% 8%,rgba(125,211,252,.10),transparent 62%),
+      #070A0F;}
+  .grid{position:absolute;inset:0;opacity:.5;
+    background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+    background-size:64px 64px;
+    -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 15%,transparent 78%);}
+  .vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 45%,rgba(0,0,0,.72) 100%)}
+
+  /* HUD */
+  #hud{position:absolute;left:64px;right:64px;top:44px;display:flex;justify-content:space-between;
+       align-items:center;font-size:17px;letter-spacing:.18em;color:#5D6B7E;z-index:40;font-weight:500}
+  #hud .l{display:flex;align-items:center;gap:12px}
+  #hud .dot{width:8px;height:8px;border-radius:50%;background:#4C6FFF;box-shadow:0 0 12px #4C6FFF}
+  #hud .r{font-variant-numeric:tabular-nums;color:#6B7A8E}
+
+  /* 字幕 */
+  #sub{position:absolute;left:0;right:0;bottom:48px;text-align:center;z-index:50}
+  #sub span{display:inline-block;font-size:42px;font-weight:600;letter-spacing:.02em;
+    padding:10px 26px;border-radius:12px;background:rgba(4,7,11,.62);
+    text-shadow:0 2px 18px rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.06)}
+
+  .scene{position:absolute;inset:0;opacity:0;visibility:hidden}
+  .center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+  /* ---------- 笔记本 ---------- */
+  #sc-laptop .laptop{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);width:880px}
+  #sc-laptop .lid{width:800px;height:490px;margin:0 auto;border-radius:18px 18px 4px 4px;
+    background:linear-gradient(160deg,#1A2230,#0E141C);border:1px solid #26313F;
+    transform-origin:50% 100%;box-shadow:0 0 90px rgba(76,111,255,.22)}
+  #sc-laptop .scr{position:absolute;inset:16px;border-radius:8px;background:#060A10;overflow:hidden}
+  #sc-laptop .code{padding:30px 34px;font-family:ui-monospace,monospace;font-size:17px;line-height:2.05}
+  #sc-laptop .code div{opacity:0;white-space:nowrap}
+  #sc-laptop .k{color:#7C8CA3}.c1{color:#6FA8FF}.c2{color:#7DD3FC}.c3{color:#3DDC97}.c4{color:#FFB454}
+  #sc-laptop .base{width:880px;height:18px;margin:0 auto;border-radius:0 0 12px 12px;
+    background:linear-gradient(180deg,#2A3444,#161D27);border:1px solid #333F50;border-top:none}
+  #sc-laptop .notch{width:130px;height:6px;margin:-6px auto 0;border-radius:0 0 6px 6px;background:#0C1118}
+  #sc-laptop .glow{position:absolute;left:50%;top:46%;width:900px;height:500px;transform:translate(-50%,-50%);
+    background:radial-gradient(ellipse,rgba(76,111,255,.28),transparent 70%);filter:blur(30px)}
+
+  /* ---------- 手表 ---------- */
+  #sc-watch .wwrap{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%)}
+  .halo{position:absolute;left:50%;top:50%;width:900px;height:900px;transform:translate(-50%,-50%);
+    border-radius:50%;background:conic-gradient(from 0deg,rgba(76,111,255,.0),rgba(76,111,255,.20),rgba(125,211,252,.16),rgba(76,111,255,0));
+    filter:blur(44px);opacity:.9}
+  .watch{position:relative;width:660px;height:800px}
+  .case{position:absolute;inset:0;border-radius:96px;padding:14px;
+    background:linear-gradient(155deg,#39465A 0%,#18202B 38%,#2B3646 62%,#12171F 100%);
+    box-shadow:0 40px 120px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.08) inset,0 2px 0 rgba(255,255,255,.12) inset}
+  .scr{position:absolute;inset:14px;border-radius:84px;background:#05080D;overflow:hidden;
+    box-shadow:0 0 0 1px rgba(0,0,0,.9) inset,0 0 70px rgba(76,111,255,.10) inset}
+  .crown{position:absolute;right:-15px;top:250px;width:12px;height:86px;border-radius:6px;
+    background:linear-gradient(180deg,#46566C,#1B2431,#3A4859);box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+  .crown2{position:absolute;right:-13px;top:372px;width:9px;height:44px;border-radius:5px;
+    background:linear-gradient(180deg,#3C4A5E,#161E29)}
+  .sbar{position:absolute;left:0;right:0;top:0;height:56px;display:flex;align-items:center;
+    justify-content:space-between;padding:0 42px;font-size:15px;color:#8FA0B6;z-index:6;letter-spacing:.05em}
+  .sbar .b{display:flex;align-items:center;gap:8px}
+  .sbar .bd{width:26px;height:12px;border:1.5px solid #6F8199;border-radius:3px;position:relative}
+  .sbar .bd i{position:absolute;left:2px;top:2px;bottom:2px;background:#3DDC97;border-radius:1px;display:block}
+
+  .page{position:absolute;left:0;right:0;top:56px;bottom:0;opacity:0;visibility:hidden}
+
+  /* 运行中 */
+  .run{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;
+       align-items:center;justify-content:center;gap:26px}
+  .ring{width:150px;height:150px;border-radius:50%;position:relative}
+  .ring .track{position:absolute;inset:0;border-radius:50%;border:6px solid #131B25}
+  .ring .arc{position:absolute;inset:0;border-radius:50%;border:6px solid transparent;
+    border-top-color:#4C6FFF;border-right-color:#7DD3FC;transform:rotate(0deg)}
+  .ring .mid{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;color:#DCE6F8}
+  .run .t1{font-size:24px;color:#C6D2E3;font-weight:600}
+  .run .t2{font-size:17px;color:#6C7C92;letter-spacing:.04em}
+  .run .chips{display:flex;gap:10px}
+  .chip{font-size:14px;color:#8FA0B6;border:1px solid #1F2A38;background:#0C1219;
+        padding:5px 12px;border-radius:99px}
+
+  /* 聊天 */
+  .msgs{position:absolute;left:34px;right:34px;top:26px;bottom:112px;display:flex;flex-direction:column;
+        justify-content:flex-end;gap:18px}
+  .msg{opacity:0;transform:translateY(10px)}
+  .msg.u{align-self:flex-end;max-width:88%}
+  .msg.u .bub{background:#23408F;color:#EAF0FF;font-size:20px;line-height:1.62;
+    padding:14px 18px;border-radius:22px 22px 6px 22px}
+  .msg.a{max-width:94%}
+  .msg.a .bub{min-height:5.2em;background:#0E151E;border:1px solid #1B2634;color:#D5DFEC;font-size:19px;line-height:1.68;
+    padding:15px 18px;border-radius:20px 20px 20px 6px}
+  .tool{background:#0B1119;border:1px solid #1D2A39;border-radius:16px;padding:14px 16px;font-size:16px}
+  .tool .th{display:flex;align-items:center;gap:9px;color:#8FA6C4;font-size:15px;margin-bottom:8px}
+  .tool .ic{width:20px;height:20px;border-radius:6px;background:rgba(76,111,255,.18);
+    border:1px solid rgba(76,111,255,.42);display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:#9DB2FF}
+  .tool .fn{color:#C9D6E9;font-family:ui-monospace,monospace;font-size:15px}
+  .tool .meta{color:#5F7189;font-size:14px;margin-top:6px}
+  .tool .ok{color:#3DDC97}
+  .diff{font-family:ui-monospace,monospace;font-size:14.5px;line-height:1.95;margin-top:4px}
+  .diff .del{color:#FF8A8A;background:rgba(255,92,92,.10)}
+  .diff .add{color:#7FE3B4;background:rgba(61,220,151,.10)}
+  .diff span{display:block;padding:0 6px;border-radius:3px}
+
+  .inp{position:absolute;left:30px;right:30px;bottom:26px;height:66px;border-radius:20px;
+    background:#0C131B;border:1px solid #1E2A38;display:flex;align-items:center;padding:0 18px;gap:10px}
+  .inp .txt{font-size:18px;color:#D5DFEC;white-space:nowrap;overflow:hidden}
+  .inp .ph{font-size:18px;color:#4E5E73}
+  .caret{width:2px;height:22px;background:#4C6FFF;display:inline-block}
+  .send{margin-left:auto;width:44px;height:44px;border-radius:14px;background:#4C6FFF;
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .send svg{width:20px;height:20px;fill:#fff}
+
+  /* 弹窗 */
+  .ov{position:absolute;inset:0;background:rgba(3,6,10,.84);backdrop-filter:blur(9px);
+      display:flex;align-items:center;justify-content:center;opacity:0;visibility:hidden;z-index:9}
+  .dlg{width:500px;border-radius:26px;background:#0D141D;border:1px solid #22303F;
+       padding:24px 22px;box-shadow:0 30px 80px rgba(0,0,0,.7)}
+  .dlg h4{font-size:22px;font-weight:650;margin-bottom:6px;letter-spacing:.01em}
+  .dlg .desc{font-size:15px;color:#7E8FA5;line-height:1.6;margin-bottom:18px}
+  .kv{display:flex;gap:12px;margin-bottom:13px;font-size:15px}
+  .kv .k{color:#5F7189;width:44px;flex:0 0 auto}
+  .kv .v{color:#C9D6E9;line-height:1.55}
+  .cmd{margin-top:4px;background:#070B10;border:1px solid #1B2634;border-radius:10px;
+    padding:10px 12px;font-family:ui-monospace,monospace;font-size:15px;color:#9FE0FF}
+  .btnrow{display:flex;gap:10px;margin-top:20px}
+  .btn{flex:1;height:52px;border-radius:15px;display:flex;align-items:center;justify-content:center;
+    font-size:17px;font-weight:600;border:1px solid #26313F;color:#B9C3D2;background:#121A24}
+  .btn.pri{background:#4C6FFF;border-color:#4C6FFF;color:#fff}
+  .btn.danger{background:#C93A3A;border-color:#C93A3A;color:#fff}
+  .btn.ghost{background:transparent}
+  .dlg.warn{border-color:#5A2A2A;background:#130D0E}
+  .dlg.warn h4{color:#FF8A8A}
+  .warnbox{display:flex;gap:12px;background:rgba(255,92,92,.09);border:1px solid rgba(255,92,92,.28);
+    border-radius:12px;padding:13px 14px;font-size:14.5px;color:#F0C0C0;line-height:1.6;margin-bottom:16px}
+  .warnbox .ic{color:#FF6B6B;font-weight:700;flex:0 0 auto}
+
+  /* 设置页 */
+  #p-e{display:flex;flex-direction:column;justify-content:center;padding-bottom:56px}
+  .set{padding:26px 30px}
+  .set .ttl{font-size:26px;font-weight:650;margin-bottom:20px}
+  .item{display:flex;align-items:center;gap:16px;padding:17px 0;border-bottom:1px solid #141C26}
+  .item .ico{width:46px;height:46px;border-radius:14px;background:#101823;border:1px solid #1C2836;
+    display:flex;align-items:center;justify-content:center;font-size:19px;color:#7DD3FC;flex:0 0 auto}
+  .item .nm{font-size:20px;color:#D5DFEC;flex:1}
+  .item .arrow{color:#3E4C5E;font-size:20px}
+  .item.on{background:rgba(76,111,255,.12);border-radius:12px;border-bottom-color:transparent;padding-left:10px;padding-right:10px}
+  .slider{display:flex;align-items:center;gap:16px;padding:22px 4px}
+  .slider .tr{flex:1;height:10px;border-radius:99px;background:#131B25;overflow:hidden}
+  .slider .fl{height:100%;width:40%;background:linear-gradient(90deg,#4C6FFF,#7DD3FC);border-radius:99px}
+  .slider .pc{font-size:18px;color:#9FB0C6;width:64px;text-align:right;font-variant-numeric:tabular-nums}
+
+  .float{position:absolute;left:26px;right:26px;bottom:24px;height:62px;border-radius:18px;
+    background:rgba(12,19,27,.96);border:1px solid #24313F;display:flex;align-items:center;
+    gap:12px;padding:0 16px;opacity:0;z-index:8}
+  .float .d{width:9px;height:9px;border-radius:50%;background:#4C6FFF;box-shadow:0 0 10px #4C6FFF}
+  .float .tx{font-size:14.5px;color:#9FB0C6;flex:1;line-height:1.35}
+  .float .tx b{color:#D5DFEC;font-weight:600;display:block;font-size:15px}
+  .float .stop{font-size:14px;color:#FF8A8A;border:1px solid rgba(255,92,92,.4);
+    padding:7px 14px;border-radius:11px;background:rgba(255,92,92,.08)}
+
+  /* 分屏 */
+  #sc-split .half{position:absolute;top:0;bottom:0;width:50%;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:26px;opacity:0}
+  #sc-split .l{left:0}#sc-split .r{left:50%}
+  #sc-split .divider{position:absolute;left:50%;top:14%;bottom:14%;width:1px;background:linear-gradient(180deg,transparent,rgba(74,96,124,.85),transparent)}
+  #sc-split .cardbox{width:560px;border-radius:28px;padding:52px 40px;display:flex;flex-direction:column;
+    align-items:center;gap:22px;border:1px solid #1E2937;background:rgba(12,18,26,.75)}
+  #sc-split .icon{width:170px;height:170px;border-radius:36px;display:flex;align-items:center;justify-content:center}
+  #sc-split .name{font-size:32px;font-weight:680}
+  #sc-split .sub2{font-size:20px;color:#7E8FA5;text-align:center;line-height:1.6}
+  #sc-split .mark{font-size:22px;font-weight:700;padding:8px 20px;border-radius:99px}
+  #sc-split .cross{color:#FF8A8A;background:rgba(255,92,92,.1);border:1px solid rgba(255,92,92,.3)}
+  #sc-split .tick{color:#3DDC97;background:rgba(61,220,151,.1);border:1px solid rgba(61,220,151,.3)}
+
+  /* 结尾 */
+  #sc-outro .box{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);text-align:center}
+  #sc-outro .logo{width:132px;height:132px;border-radius:34px;margin:0 auto 34px;
+    background:linear-gradient(145deg,#4C6FFF,#22306B);display:flex;align-items:center;justify-content:center;
+    font-size:34px;font-weight:800;letter-spacing:.02em;color:#EAF0FF;
+    box-shadow:0 24px 70px rgba(76,111,255,.42),0 0 0 1px rgba(255,255,255,.14) inset}
+  #sc-outro h3{font-size:58px;font-weight:720;letter-spacing:-.02em;margin-bottom:14px}
+  #sc-outro .tag{font-size:22px;color:#8FA0B6;letter-spacing:.04em}
+  #sc-outro .gh{margin-top:38px;font-size:24px;color:#7DD3FC;font-family:ui-monospace,monospace}
+  #sc-outro .meta{margin-top:14px;font-size:17px;color:#5F7189;letter-spacing:.08em}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="bg"></div>
+  <div class="grid"></div>
+  <div class="vig"></div>
+
+  <div id="hud">
+    <div class="l"><span class="dot"></span><span>DSH WATCH</span></div>
+    <div class="r" id="hudTime">00:00</div>
+  </div>
+
+  <!-- ===== S1 笔记本 ===== -->
+  <div class="scene" id="sc-laptop">
+    <div class="laptop">
+      <div class="glow" id="lapGlow"></div>
+      <div class="lid" id="lid">
+        <div class="scr">
+          <div class="code" id="codeLines">
+            <div><span class="k">$</span> <span class="c1">dsh</span> run --project dsh-watch</div>
+            <div><span class="c3">✓</span> workspace loaded <span class="k">(52 tools)</span></div>
+            <div><span class="c2">→</span> reading src/main/... <span class="k">12 files</span></div>
+            <div><span class="c2">→</span> applying patch <span class="c4">README.md</span></div>
+            <div><span class="c3">✓</span> build finished <span class="k">8.76 MB</span></div>
+            <div><span class="k">▌</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="base"></div>
+      <div class="notch"></div>
+    </div>
+  </div>
+
+  <!-- ===== S2-S7 手表 ===== -->
+  <div class="scene" id="sc-watch">
+    <div class="wwrap">
+      <div class="halo" id="halo"></div>
+      <div class="watch">
+        <div class="case"></div>
+        <div class="scr">
+          <div class="sbar"><span id="wTime">09:41</span>
+            <span class="b"><span>82%</span><span class="bd"><i id="batt" style="width:20px"></i></span></span>
+          </div>
+
+          <!-- P0 运行中 -->
+          <div class="page" id="p-run">
+            <div class="run">
+              <div class="ring">
+                <div class="track"></div><div class="arc" id="runArc"></div>
+                <div class="mid" id="runPct">0%</div>
+              </div>
+              <div class="t1">任务进行中</div>
+              <div class="t2">README.md · 修改版本号</div>
+              <div class="chips"><span class="chip" id="chip1">读文件</span><span class="chip" id="chip2">写入</span><span class="chip" id="chip3">校验</span></div>
+            </div>
+          </div>
+
+          <!-- PA PDF -->
+          <div class="page" id="p-a">
+            <div class="msgs">
+              <div class="msg u" id="a1"><div class="bub">看看下载里那份 PDF 讲了什么</div></div>
+              <div class="msg a" id="a2"><div class="tool">
+                <div class="th"><span class="ic">R</span><span>read_file</span></div>
+                <div class="fn">/Download/2026-11-report.pdf</div>
+                <div class="meta" id="a2m">读取中…</div>
+              </div></div>
+              <div class="msg a" id="a3"><div class="bub"><span id="a3t">这份报告共 14 页，核心结论有三条：一是</span></div></div>
+            </div>
+            <div class="inp" id="inpA"><span class="ph" id="inpAPh">发消息给 DSH</span><span class="txt" id="inpATxt"></span><span class="caret" id="caretA"></span>
+              <span class="send"><svg viewBox="0 0 24 24"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg></span></div>
+          </div>
+
+          <!-- PB 改版本号 -->
+          <div class="page" id="p-b">
+            <div class="msgs">
+              <div class="msg u" id="b1"><div class="bub">把 README 里的版本号改成 1.22.0</div></div>
+              <div class="msg a" id="b2"><div class="tool">
+                <div class="th"><span class="ic">E</span><span>edit_file</span></div>
+                <div class="fn">/workspace/README.md</div>
+                <div class="diff"><span class="del">- versionName = "1.21.0"</span><span class="add">+ versionName = "1.22.0"</span></div>
+              </div></div>
+              <div class="msg a" id="b3"><div class="tool">
+                <div class="th"><span class="ic ok">✓</span><span id="b3t">已写入 1 处</span></div>
+                <div class="meta">校验通过 · 未触及其他行</div>
+              </div></div>
+            </div>
+          </div>
+
+          <!-- PC 电池 + 审批 -->
+          <div class="page" id="p-c">
+            <div class="msgs">
+              <div class="msg u" id="c1"><div class="bub">看下电池温度</div></div>
+              <div class="msg a" id="c2"><div class="tool">
+                <div class="th"><span class="ic">$</span><span>adb_shell</span></div>
+                <div class="fn">dumpsys battery</div>
+                <div class="meta">等待确认…</div>
+              </div></div>
+              <div class="msg a" id="c3"><div class="bub">当前电池 <b style="color:#3DDC97">32.4°C</b>，电压 4.12V，健康状态良好。温度比一小时前高 1.2°C，属于正常范围。</div></div>
+            </div>
+            <div class="ov" id="ov-c"><div class="dlg" id="dlgC">
+              <h4>需要你的确认</h4>
+              <div class="desc">这条命令将以 shell 身份在设备上执行</div>
+              <div class="kv"><div class="k">用途</div><div class="v">读取电池温度与健康状态</div></div>
+              <div class="kv"><div class="k">命令</div><div class="v" style="width:100%"><div class="cmd" id="cmdC">dumpsys battery</div></div></div>
+              <div class="kv"><div class="k">范围</div><div class="v">日志类 · 以后不再询问</div></div>
+              <div class="btnrow"><div class="btn ghost">拒绝</div><div class="btn pri" id="okC">始终允许</div></div>
+            </div></div>
+          </div>
+
+          <!-- PD 危险 -->
+          <div class="page" id="p-d">
+            <div class="msgs">
+              <div class="msg u" id="d1"><div class="bub">把这个系统预装应用删了</div></div>
+              <div class="msg a" id="d2"><div class="tool" style="border-color:#3A2020">
+                <div class="th"><span class="ic" style="background:rgba(255,92,92,.16);border-color:rgba(255,92,92,.4);color:#FF8A8A">!</span><span style="color:#FF8A8A">adb_shell · 危险</span></div>
+                <div class="fn" style="color:#F0C0C0">rm -rf /system/app/SystemHelper</div>
+                <div class="meta">已拦截 · 未执行</div>
+              </div></div>
+            </div>
+            <div class="ov" id="ov-d1"><div class="dlg warn" id="dlgD1">
+              <h4>危险操作</h4>
+              <div class="warnbox"><span class="ic">!</span><div>删除系统分区下的文件，可能导致设备无法启动或系统更新失败。</div></div>
+              <div class="kv"><div class="k">命令</div><div class="v" style="width:100%"><div class="cmd" style="color:#FF9B9B">rm -rf /system/app/SystemHelper</div></div></div>
+              <div class="btnrow"><div class="btn ghost">取消</div><div class="btn danger" id="okD1">我了解风险，继续</div></div>
+            </div></div>
+            <div class="ov" id="ov-d2"><div class="dlg warn" id="dlgD2">
+              <h4>最后确认</h4>
+              <div class="desc" style="color:#C99">此操作不可撤销。确认后立即执行，没有任何回滚手段。</div>
+              <div class="btnrow"><div class="btn ghost" id="cancelD2">取消</div><div class="btn danger">确认删除</div></div>
+            </div></div>
+          </div>
+
+          <!-- PE 设置 -->
+          <div class="page" id="p-e">
+            <div class="set">
+              <div class="ttl">设置</div>
+              <div class="item"><div class="ico">◍</div><div class="nm">网络</div><div class="arrow">›</div></div>
+              <div class="item" id="setDis"><div class="ico">☀</div><div class="nm">显示</div><div class="arrow">›</div></div>
+              <div class="item"><div class="ico">▮</div><div class="nm">电池</div><div class="arrow">›</div></div>
+              <div class="item"><div class="ico">▤</div><div class="nm">应用</div><div class="arrow">›</div></div>
+            </div>
+            <div class="slider"><span style="font-size:20px;color:#7E8FA5">亮度</span><div class="tr"><div class="fl" id="bri"></div></div><span class="pc" id="briPc">40%</span></div>
+            <div class="float" id="floatE"><span class="d"></span><div class="tx"><b>AI 正在操作设备</b>正在点击：显示</div><div class="stop">停止</div></div>
+          </div>
+        </div>
+        <div class="crown"></div><div class="crown2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== S8 分屏 ===== -->
+  <div class="scene" id="sc-split">
+    <div class="divider" id="splitDiv"></div>
+    <div class="half l" id="halfL">
+      <div class="cardbox">
+        <div class="icon" style="background:#0E141C;border:1px solid #1E2937">
+          <svg width="86" height="86" viewBox="0 0 24 24" fill="none" stroke="#4A5A70" stroke-width="1.3">
+            <rect x="3" y="5" width="18" height="11" rx="1.5"/><path d="M2 19h20"/>
+          </svg>
+        </div>
+        <div class="name" style="color:#7E8FA5">遥控方案</div>
+        <div class="sub2">手表只是显示器<br>电脑必须一直开着</div>
+        <div class="mark cross">电脑关机就断</div>
+      </div>
+    </div>
+    <div class="half r" id="halfR">
+      <div class="cardbox" style="border-color:rgba(76,111,255,.35);background:rgba(18,26,44,.7)">
+        <div class="icon" style="background:linear-gradient(150deg,#22306B,#101A31);border:1px solid rgba(76,111,255,.45)">
+          <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#9DB2FF" stroke-width="1.3">
+            <rect x="7" y="4" width="10" height="16" rx="3"/><path d="M10 4V2h4v2M10 20v2h4v-2"/>
+          </svg>
+        </div>
+        <div class="name">本地引擎</div>
+        <div class="sub2">工具循环跑在表盘上<br>电脑关机也能跑</div>
+        <div class="mark tick">一个 APK · 8.7MB</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== S9 结尾 ===== -->
+  <div class="scene" id="sc-outro">
+    <div class="box">
+      <div class="logo">DSH</div>
+      <h3>DSH Watch</h3>
+      <div class="tag">把 AI 助手装进手表，不经过电脑</div>
+      <div class="gh">github.com/dsdzm/DSH-Watch</div>
+      <div class="meta">GPL-3.0 · v1.21.0 · com.dshwatch</div>
+    </div>
+  </div>
+
+  <div id="sub"><span id="subText"></span></div>
+</div>
+
+<script>
+/* ============ 工具 ============ */
+const $ = s => document.querySelector(s);
+const clamp = (x,a,b)=>Math.min(b,Math.max(a,x));
+const p = (t,a,b)=>clamp((t-a)/(b-a),0,1);
+const ease = x => x<=0?0:x>=1?1:1-Math.pow(1-x,3);
+const easeOut = x => x<=0?0:x>=1?1:1-Math.pow(1-x,2.4);
+const mix = (a,b,k)=>a+(b-a)*k;
+
+function show(el, o, extra){
+  if(!el) return;
+  el.style.opacity = o.toFixed(4);
+  el.style.visibility = o<=0.002?'hidden':'visible';
+  if(extra) el.style.transform = extra;
+}
+
+/* ============ 时间点（秒） ============ */
+const T = {
+  lapIn:[0.5,1.9], lapCode:[1.8,2.9], lidClose:[2.9,3.7], lapOut:[4.3,5.0],
+  watchIn:[4.6,6.2], haloOn:[5.6,7.4],
+  runStart:6.8, runEnd:12.0,
+  // A: PDF
+  aStart:12.0, aType:[12.3,14.6], aSend:14.7, aUser:14.9,
+  aTool:16.0, aRead:[18.2,20.0], aAns:19.9, aAnsEnd:25.2,
+  // B: 版本号
+  bStart:26.0, bUser:26.3, bTool:27.6, bDiff:[29.0,30.6], bOk:31.4,
+  // C: 电池 + 审批
+  cStart:40.0, cUser:40.2, cTool:41.6, dlgIn:43.0, dlgRead:[43.4,45.0],
+  cOkClick:48.0, dlgOut:[48.9,49.6], cAns:49.8,
+  // D: 危险
+  dStart:54.0, dUser:54.2, dTool:55.4, dD1:[56.4,57.4], dClick1:59.4,
+  dD2:[60.0,60.9], dCancel:62.0, dBlocked:63.0,
+  // E: 设置
+  eStart:66.0, eUser:66.2, eSet:67.2, eTap:69.0, eSlider:[70.0,73.4], eFloat:73.6,
+  // F: 分屏
+  fStart:78.0, fL:[78.2,79.4], fDiv:[79.0,79.8], fR:[79.8,81.2],
+  // G: 结尾
+  gStart:88.0, gLogo:[88.2,89.0], gText:[88.8,89.6]
+};
+
+/* ============ 场景显隐 ============ */
+const scL = $('#sc-laptop'), scW = $('#sc-watch'), scS = $('#sc-split'), scO = $('#sc-outro');
+
+function scene(el, on){
+  el.style.opacity = on.toFixed(3);
+  el.style.visibility = on<=0.002?'hidden':'visible';
+}
+
+/* ============ 字幕 ============ */
+const SUBS = [
+  [0.0, 4.4, '电脑关了。'],
+  [4.4, 12.0, '它还在跑。'],
+  [12.0, 26.0, '51 个工具，在表盘上执行'],
+  [26.0, 40.0, '读文件、改代码，不需要电脑'],
+  [40.0, 54.0, 'Shizuku 提权，用途写清楚才执行'],
+  [54.0, 66.0, '危险操作，两次确认'],
+  [66.0, 78.0, 'AI 自己操作这台设备'],
+  [78.0, 88.0, '别人的手表是遥控器，这块是主机'],
+  [88.0, 90.0, '开源 · GPL-3.0 · 欢迎提 issue']
+];
+const subEl = $('#sub'), subText = $('#subText');
+let lastSub = '';
+function renderSub(t){
+  let cur = null;
+  for(const s of SUBS){ if(t>=s[0] && t<s[1]){ cur = s; break; } }
+  if(!cur){ subEl.style.opacity = 0; return; }
+  const a = easeOut(p(t, cur[0], cur[0]+0.35));
+  const b = 1 - easeOut(p(t, cur[1]-0.3, cur[1]));
+  const o = Math.min(a,b);
+  if(cur[2] !== lastSub){ subText.textContent = cur[2]; lastSub = cur[2]; }
+  subEl.style.opacity = clamp(o,0,1).toFixed(3);
+  const y = (1-a)*10 - (1-b)*6;
+  subEl.style.transform = `translateY(${y.toFixed(1)}px)`;
+}
+
+/* ============ 打字机 ============ */
+function typed(str, t, a, b){
+  const k = p(t,a,b);
+  const n = Math.floor(str.length * k);
+  return str.slice(0, n);
+}
+
+/* ============ 主渲染 ============ */
+function renderAt(t){
+  $("#hudTime").textContent = String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');
+
+  /* --- S1 笔记本 --- */
+  const lIn = easeOut(p(t, ...T.lapIn));
+  const lOut = 1 - easeOut(p(t, ...T.lapOut));
+  scene(scL, Math.min(lIn, lOut));
+  const lid = $('#lid');
+  const close = ease(p(t, ...T.lidClose));
+  lid.style.transform = `scaleY(${mix(1,0.035,close)}) translateY(${mix(0,-6,close)}px)`;
+  lid.style.filter = `brightness(${mix(1,0.18,close)})`;
+  $('#lapGlow').style.opacity = (1-close*0.92).toFixed(3);
+  const lines = document.querySelectorAll('#codeLines div');
+  lines.forEach((el,i)=>{
+    const a = T.lapCode[0] + i*0.085;
+    show(el, easeOut(p(t,a,a+0.28)));
+  });
+
+  /* --- S2-S7 手表 --- */
+  const wIn = easeOut(p(t, ...T.watchIn));
+  const wOut = 1 - easeOut(p(t, 77.0, 78.4));
+  scene(scW, Math.min(wIn, wOut));
+  const wwrap = document.querySelector('#sc-watch .wwrap');
+  const zooms = [ [12,1.0],[14.6,1.02],[26,1.0],[40,1.02],[54,1.0],[66,1.01],[78,1.0] ];
+  let z = 1.0;
+  for(let i=0;i<zooms.length-1;i++){
+    if(t>=zooms[i][0] && t<zooms[i+1][0]) z = mix(zooms[i][1],zooms[i+1][1], p(t,zooms[i][0],zooms[i+1][0]));
+  }
+  wwrap.style.transform = `translate(-50%,-50%) translateY(${(1-wIn)*90}px) scale(${(0.94+0.06*wIn)*z})`;
+  $('#halo').style.opacity = (easeOut(p(t,...T.haloOn))*0.9).toFixed(3);
+  const spin = (t*14)%360;
+  $('#halo').style.transform = `translate(-50%,-50%) rotate(${spin}deg)`;
+
+  /* 页面切换 */
+  const pages = {
+    run: [6.8, 12.0],
+    a:   [12.0, 26.0],
+    b:   [26.0, 40.0],
+    c:   [40.0, 54.0],
+    d:   [54.0, 66.0],
+    e:   [66.0, 78.0]
+  };
+  const pageEls = { run:$('#p-run'), a:$('#p-a'), b:$('#p-b'), c:$('#p-c'), d:$('#p-d'), e:$('#p-e') };
+  for(const k in pages){
+    const [s,e] = pages[k];
+    let o = 0;
+    if(t>=s-0.02 && t<e+0.26){
+      const fin = easeOut(p(t,s,s+0.34));
+      const fout = 1 - easeOut(p(t,e+0.01,e+0.26));
+      o = Math.min(fin,fout);
+    }
+    const el = pageEls[k];
+    el.style.opacity = o.toFixed(3);
+    el.style.visibility = o<=0.002?'hidden':'visible';
+    el.style.transform = `translateY(${(1-o)*12}px)`;
+  }
+
+  /* 运行中 */
+  if(t>=6.6 && t<12.2){
+    const k = p(t, T.runStart, T.runEnd);
+    $('#runPct').textContent = Math.round(k*100)+'%';
+    $('#runArc').style.transform = `rotate(${k*300}deg)`;
+    $('#chip1').style.opacity = p(t,7.0,7.4).toFixed(2);
+    $('#chip2').style.opacity = p(t,8.4,8.8).toFixed(2);
+    $('#chip3').style.opacity = p(t,9.8,10.2).toFixed(2);
+  }
+
+  /* --- A: PDF --- */
+  if(t>=11.8 && t<26.4){
+    const q = '看看下载里那份 PDF 讲了什么';
+    const sent = t >= T.aSend;
+    const txt = sent ? '' : typed(q, t, ...T.aType);
+    $('#inpAPh').style.display = txt.length? 'none':'inline';
+    $('#inpATxt').textContent = txt;
+    $('#caretA').style.opacity = sent ? 0 : (Math.floor(t*2.4)%2? 1:0);
+    show($('#a1'), easeOut(p(t, T.aUser, T.aUser+0.35)), `translateY(${(1-easeOut(p(t,T.aUser,T.aUser+0.35)))*12}px)`);
+    const a2 = easeOut(p(t, T.aTool, T.aTool+0.4));
+    show($('#a2'), a2, `translateY(${(1-a2)*12}px)`);
+    if(t>T.aRead[0]){
+      const r = p(t,T.aRead[0],T.aRead[1]);
+      const total = 14, done = Math.round(total*r);
+      $('#a2m').innerHTML = r<1
+        ? `读取中… ${done}/${total} 页`
+        : `<span class="ok">已读取 · 14 页 · 18.2 KB</span>`;
+    }
+    const ans = '这份报告共 14 页，核心结论有三条：一是成本下降了 18%；二是东南亚市场增速最快；三是明年要把重心移到离线场景。';
+    const at = typed(ans, t, T.aAns, T.aAnsEnd);
+    const a3o = easeOut(p(t, T.aAns-0.2, T.aAns+0.3));
+    show($('#a3'), a3o, `translateY(${(1-a3o)*12}px)`);
+    $('#a3t').textContent = at;
+    $('#inpA').style.opacity = (1-p(t,25.4,25.9)).toFixed(2);
+  }
+
+  /* --- B: 改版本号 --- */
+  if(t>=25.8 && t<40.4){
+    const b1 = easeOut(p(t, T.bUser, T.bUser+0.35));
+    show($('#b1'), b1, `translateY(${(1-b1)*12}px)`);
+    const b2 = easeOut(p(t, T.bTool, T.bTool+0.4));
+    show($('#b2'), b2, `translateY(${(1-b2)*12}px)`);
+    const d = p(t, ...T.bDiff);
+    const dels = document.querySelectorAll('#p-b .diff .del');
+    const adds = document.querySelectorAll('#p-b .diff .add');
+    dels.forEach(el=>el.style.opacity = (d>0.05?1:0));
+    adds.forEach(el=>el.style.opacity = (d>0.55?1:0));
+    const b3 = easeOut(p(t, T.bOk, T.bOk+0.4));
+    show($('#b3'), b3, `translateY(${(1-b3)*12}px)`);
+  }
+
+  /* --- C: 电池 + 审批 --- */
+  if(t>=39.8 && t<54.4){
+    const c1 = easeOut(p(t, T.cUser, T.cUser+0.35));
+    show($('#c1'), c1, `translateY(${(1-c1)*12}px)`);
+    const c2 = easeOut(p(t, T.cTool, T.cTool+0.4));
+    show($('#c2'), c2, `translateY(${(1-c2)*12}px)`);
+
+    const dov = easeOut(p(t, T.dlgIn, T.dlgIn+0.42));
+    const dovOut = easeOut(p(t, ...T.dlgOut));
+    show($('#ov-c'), Math.min(dov, 1-dovOut));
+    $('#dlgC').style.transform = `translateY(${(1-dov)*40}px) scale(${0.94+0.06*dov})`;
+    // 逐行揭示
+    const kv = document.querySelectorAll('#dlgC .kv');
+    kv.forEach((el,i)=>{ el.style.opacity = p(t, 43.6+i*0.55, 43.9+i*0.55).toFixed(2); });
+    const click = p(t, T.cOkClick, T.cOkClick+0.22);
+    $('#okC').style.transform = `scale(${1 - 0.06*Math.sin(click*Math.PI)})`;
+    $('#okC').style.boxShadow = click>0? `0 0 0 ${12*click}px rgba(76,111,255,${0.35*(1-click)})` : 'none';
+
+    const c3 = easeOut(p(t, T.cAns, T.cAns+0.4));
+    show($('#c3'), c3, `translateY(${(1-c3)*12}px)`);
+    $('#c2 .meta').innerHTML = t>T.cAns ? '<span class="ok">已执行 · 0.4s</span>' : '等待确认…';
+  }
+
+  /* --- D: 危险 --- */
+  if(t>=53.8 && t<66.4){
+    const d1 = easeOut(p(t, T.dUser, T.dUser+0.35));
+    show($('#d1'), d1, `translateY(${(1-d1)*12}px)`);
+    const d2 = easeOut(p(t, T.dTool, T.dTool+0.4));
+    show($('#d2'), d2, `translateY(${(1-d2)*12}px)`);
+
+    const q1 = easeOut(p(t, ...T.dD1));
+    const q1out = easeOut(p(t, T.dClick1+0.05, T.dClick1+0.35));
+    show($('#ov-d1'), Math.min(q1, 1-q1out));
+    $('#dlgD1').style.transform = `translateY(${(1-q1)*46}px) scale(${0.94+0.06*q1})`;
+    const ck = p(t, T.dClick1, T.dClick1+0.2);
+    $('#okD1').style.transform = `scale(${1-0.06*Math.sin(ck*Math.PI)})`;
+    $('#okD1').style.background = ck>0 ? '#D84848' : '#C93A3A';
+
+    const q2 = easeOut(p(t, ...T.dD2));
+    const q2out = easeOut(p(t, T.dCancel, T.dCancel+0.4));
+    show($('#ov-d2'), Math.min(q2, 1-q2out));
+    $('#dlgD2').style.transform = `translateY(${(1-q2)*46}px) scale(${0.94+0.06*q2})`;
+    const cc = p(t, T.dCancel, T.dCancel+0.2);
+    $('#cancelD2').style.transform = `scale(${1-0.05*Math.sin(cc*Math.PI)})`;
+
+    const d2m = document.querySelector('#d2 .meta');
+    if(t>=T.dBlocked){
+      d2m.innerHTML = '<span style="color:#3DDC97">已拦截 · 未执行</span>';
+      $('#d2 .tool').style.borderColor = 'rgba(61,220,151,.35)';
+    }
+  }
+
+  /* --- E: 设置 --- */
+  if(t>=65.8 && t<78.4){
+    const e1 = p(t, T.eSet, T.eSet+0.45);
+    $('#p-e .set').style.opacity = e1.toFixed(2);
+    $('#p-e .set').style.transform = `translateX(${(1-e1)*40}px)`;
+    const tapOn = t>=T.eTap && t<T.eTap+0.9;
+    $('#setDis').classList.toggle('on', tapOn);
+    const sb = p(t, ...T.eSlider);
+    const val = Math.round(mix(40,100,sb));
+    $('#bri').style.width = val+'%';
+    $('#briPc').textContent = val+'%';
+    const fl = easeOut(p(t, T.eFloat, T.eFloat+0.4));
+    show($('#floatE'), fl, `translateY(${(1-fl)*20}px)`);
+    // 指针
+    const cur = document.querySelector('#p-e .slider');
+    if(t>=T.eTap && t<T.eFloat){
+      if(!window.__cur){ window.__cur = document.createElement('div');
+        window.__cur.style.cssText='position:absolute;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.9);box-shadow:0 0 0 10px rgba(255,255,255,.14),0 4px 14px rgba(0,0,0,.6);pointer-events:none;z-index:20';
+        document.querySelector('#p-e').appendChild(window.__cur);
+      }
+      const r = $('#setDis').getBoundingClientRect();
+      const pr = $('#p-e').getBoundingClientRect();
+      const kx = mix(-130, 0, p(t,T.eTap,T.eSlider[0]+0.4));
+      window.__cur.style.opacity=1;
+      window.__cur.style.left = (r.right - pr.left - 48 + kx) + 'px';
+      window.__cur.style.top  = (r.top - pr.top + r.height/2 - 13) + 'px';
+    } else if(window.__cur){ window.__cur.style.opacity=0; }
+  }
+
+  /* --- S8 分屏 --- */
+  const sIn = easeOut(p(t, T.fStart, T.fStart+0.5));
+  const sOut = 1 - easeOut(p(t, 87.4, 88.3));
+  scene(scS, Math.min(sIn,sOut));
+  const hl = easeOut(p(t, ...T.fL));
+  const hr = easeOut(p(t, ...T.fR));
+  show($('#halfL'), hl, `translateX(${(1-hl)*-30}px)`);
+  show($('#halfR'), hr, `translateX(${(1-hr)*30}px)`);
+  $('#splitDiv').style.opacity = easeOut(p(t, ...T.fDiv)).toFixed(2);
+
+  /* --- S9 结尾 --- */
+  const oIn = easeOut(p(t, T.gStart, T.gStart+0.7));
+  scene(scO, oIn);
+  const lg = easeOut(p(t, ...T.gLogo));
+  const bx = document.querySelector('#sc-outro .box');
+  bx.style.transform = `translate(-50%,-50%) scale(${0.94+0.06*lg})`;
+  document.querySelector('#sc-outro .logo').style.opacity = lg.toFixed(2);
+  document.querySelector('#sc-outro h3').style.opacity = easeOut(p(t,...T.gText)).toFixed(2);
+
+  renderSub(t);
+}
+
+/* 首帧 */
+renderAt(0);
+window.renderAt = renderAt;
+window.DURATION = 90;
+window.__ready = true;
+</script>
+</body>
+</html>

@@ -166,15 +166,17 @@ class M3eThemeTest {
      * 所以这里把它的两条分支都钉死。
      */
     @Test
-    fun `用量页的上下文卡片两套界面各有容器`() {
-        val f = File("src/main/java/com/dshwatch/ui/screens/usage/UsageScreen.kt")
-        assertTrue("找不到 UsageScreen.kt：${f.absolutePath}", f.isFile)
+    fun `上下文卡片两套界面各有容器`() {
+        // v1.23.5 起这块从用量页搬到了 components（对话页顶栏也要开它），
+        // 路径跟着改 —— 测试守的是「卡片必须有两种容器」，不是某个文件的位置。
+        val f = File("src/main/java/com/dshwatch/ui/components/ContextUsage.kt")
+        assertTrue("找不到 ContextUsage.kt：${f.absolutePath}", f.isFile)
         val src = f.readText()
             .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
             .replace(Regex("//[^\\n]*"), "")
 
-        val card = src.substringAfter("private fun ContextCard(")
-            .substringBefore("private fun ContextBar(")
+        val card = src.substringAfter("fun ContextUsageCard(")
+            .substringBefore("@Composable\nprivate fun ContextMeterBar(")
         assertThat(card).isNotEmpty()
 
         assertTrue(
@@ -217,5 +219,44 @@ class M3eThemeTest {
         // 两处调用点（非编程场景 / 编程场景）
         val occurrences = Regex("\\\$tps t/s").findAll(src).count()
         assertThat(occurrences).isEqualTo(2)
+    }
+
+    /**
+     * 种子色卡片在 M3E 下不能变成裸文字。
+     *
+     * 与上下文卡片踩的是同一个坑：M3E 的 `M3eSettingCard` 只是一列（无底色、
+     * 无内边距），里面每一行必须自带 `M3eStaticSurface` 才有卡片感。
+     * 色点网格是「一行自定义内容」，最容易漏。
+     */
+    @Test
+    fun `种子色卡片两套界面各有容器`() {
+        val f = File("src/main/java/com/dshwatch/ui/screens/settings/ThemeColorSection.kt")
+        assertTrue("找不到 ThemeColorSection.kt：${f.absolutePath}", f.isFile)
+        val src = f.readText()
+
+        assertThat(src).contains("M3eStaticSurface")
+        assertThat(src).contains("SettingCard(")
+        assertThat(src).contains("isM3eUi")
+        assertThat(src).contains("W3.typography")
+        // 「跟随壁纸取色」的开关也要两套：经典走 SettingCard 包 SwitchRow
+        assertThat(src).contains("SwitchRow(")
+    }
+
+    /**
+     * 对话页顶栏加到五颗时，M3E 的命中区必须降档。
+     *
+     * 圆屏那一行的弦宽约 189dp。五颗 44dp = 220dp，两端的图标会被圆周切掉 ——
+     * 而且**不会报错**，只是在某些表上看着"图标缺了个角"。
+     */
+    @Test
+    fun `五颗动作时 M3E 顶栏降档`() {
+        val f = File("src/main/java/com/dshwatch/ui/screens/chat/ChatScreen.kt")
+        val src = f.readText()
+            .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+            .replace(Regex("//[^\\n]*"), "")
+
+        assertThat(src).contains("denseBar")
+        assertThat(src).contains("diameter = if (denseBar) 36.dp else 44.dp")
+        assertThat(src).contains("iconSize = if (denseBar) 24.dp else 26.dp")
     }
 }

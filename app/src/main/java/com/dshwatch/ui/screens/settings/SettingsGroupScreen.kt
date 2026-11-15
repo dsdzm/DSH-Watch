@@ -356,7 +356,6 @@ private fun AppearanceGroup(
     var editingPreset by remember { mutableStateOf(false) }
     var editingAppearance by remember { mutableStateOf(false) }
     var editingUiStyle by remember { mutableStateOf(false) }
-    var editingAccent by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
     var editingBackground by remember { mutableStateOf(false) }
     val dark = when (settings.themeMode) {
@@ -430,20 +429,43 @@ private fun AppearanceGroup(
             showDivider = true,
             onClick = { editingAppearance = true },
         )
-        // 预设与强调色正交：预设定底色层级，强调色定主色。
-        // 选任一项都会关掉动态取色 —— 不然用户挑的颜色会被系统色直接盖掉。
+    }
+    /*
+     * 主题色单独一张卡 —— 两个理由：
+     *
+     * 1. **不能套在上面那张 SettingCard 里**。经典界面里它是带玻璃底的卡片，
+     *    而种子色自己也要一张卡（色点得有底色）。套起来就是"卡中卡"：
+     *    内层圆角压在外层直角上，像贴错位置的贴纸。
+     * 2. **要排在「主题预设」之前**。顺序就是主次：日常调的是「跟着壁纸走 /
+     *    我挑一个颜色」，预设是没启用取色时的那套手调色板。反过来的话，
+     *    用户先看到一串预设、再看到开关，很容易把"选了预设但颜色没变"
+     *    理解成坏了 —— 其实是取色在接管。
+     *
+     * 旧版本这里是「强调色」一行 + 「动态取色」一个开关，两种心智模型并排：
+     * 前者是 6 套手调色板里挑一套，后者是"系统说了算"。用户看不出谁在生效，
+     * 也选不出其它颜色。现在合成一张卡：开关决定种子从哪来，种子决定整套色板。
+     */
+    Spacer(Modifier.height(6.dp))
+    ThemeColorSection(settings = settings, update = update, dark = dark)
+    Spacer(Modifier.height(6.dp))
+    SettingCard {
+        // 预设与取色互斥：预设是整套手调色板，莫奈取色也是整套生成色板，
+        // 同时存在只会让人分不清哪个在生效。选预设 ⇒ 退出取色。
         SettingRow(
             title = s.themePreset,
-            subtitle = s.themePresetHint,
+            /*
+             * 莫奈取色在生效时，预设是**不起作用**的（种子生成的是一整套色板，
+             * 没有"背景留给谁"这一层）。不写出来的话，用户会在这里点来点去
+             * 却发现界面不变 —— 那不是"预设坏了"，是被上游接管了。
+             */
+            subtitle = if (settings.dynamicColor || settings.seedColor.isNotBlank()) {
+                "莫奈取色生效中 · 选预设会退出取色"
+            } else {
+                s.themePresetHint
+            },
             trailing = s.themePresetLabel(settings.themePreset) + " ›",
             showDivider = true,
             onClick = { editingPreset = true },
-        )
-        SettingRow(
-            title = s.accentColor,
-            trailing = s.accentLabel(settings.accentColor) + " ›",
-            showDivider = true,
-            onClick = { editingAccent = true },
         )
         /*
          * 自定义背景放在配色之后。
@@ -467,13 +489,6 @@ private fun AppearanceGroup(
             onClick = { editingBackground = true },
         )
         Spacer(Modifier.height(4.dp))
-        SwitchRow(
-            title = s.dynamicColor,
-            subtitle = s.dynamicColorHint,
-            checked = settings.dynamicColor,
-            onCheckedChange = { v -> update { it.copy(dynamicColor = v) } },
-        )
-        Spacer(Modifier.height(2.dp))
         /*
          * 界面大小：**唯一**的缩放轴，缩放的是密度，dp 与 sp 一起变。
          *
@@ -701,7 +716,17 @@ private fun AppearanceGroup(
                     onClick = {
                         // 选玻璃时关掉动态取色：动态色板会把底色晕替换掉，
                         // 玻璃会变成一块没有底色的灰片（见 DshWatchTheme）
-                        update { it.copy(appearance = Appearances.GLASS, dynamicColor = false) }
+                        update {
+                            it.copy(
+                                appearance = Appearances.GLASS,
+                                dynamicColor = false,
+                                // 玻璃靠"透出底色 + 色晕"成立，而莫奈色板是一整套
+                                // 平铺的色阶，两者叠起来玻璃会失去层次 —— 选玻璃
+                                // 就等于退出取色，这里顺手把种子也清掉，
+                                // 不然用户会看到"选了玻璃但界面没变"
+                                seedColor = "",
+                            )
+                        }
                         editingAppearance = false
                     },
                 )
@@ -728,7 +753,7 @@ private fun AppearanceGroup(
                             title = s.themePresetLabel(preset.id),
                             selected = preset.id == settings.themePreset,
                             onClick = {
-                                update { it.copy(themePreset = preset.id, dynamicColor = false) }
+                                update { it.copy(themePreset = preset.id, dynamicColor = false, seedColor = "") }
                                 editingPreset = false
                             },
                             leading = {
@@ -748,45 +773,6 @@ private fun AppearanceGroup(
                 }
             },
             buttons = { GlassDialogButton(s.close, onClick = { editingPreset = false }) },
-        )
-    }
-
-    if (editingAccent) {
-        GlassDialog(
-            onDismissRequest = { editingAccent = false },
-            title = s.accentColor,
-            maxContentHeight = 260,
-            // 内容自带 verticalScroll，这里不能再套一层
-            scrollable = false,
-            content = {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 240.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Accents.all.forEach { accent ->
-                        PickRow(
-                            title = s.accentLabel(accent.id),
-                            selected = accent.id == settings.accentColor,
-                            onClick = {
-                                update { it.copy(accentColor = accent.id, dynamicColor = false) }
-                                editingAccent = false
-                            },
-                            leading = {
-                                Box(
-                                    modifier = Modifier
-                                        .size(12.dp)
-                                        .background(
-                                            if (dark) accent.darkPrimary else accent.lightPrimary,
-                                            CircleShape,
-                                        ),
-                                )
-                            },
-                        )
-                    }
-                }
-            },
-            buttons = { GlassDialogButton(s.close, onClick = { editingAccent = false }) },
         )
     }
 

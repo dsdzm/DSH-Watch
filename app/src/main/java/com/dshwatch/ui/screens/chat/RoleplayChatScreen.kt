@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
@@ -50,6 +51,7 @@ import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.HintText
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.components.ContextUsageDialog
 import com.dshwatch.ui.components.IconTap
 import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
@@ -101,6 +103,13 @@ fun RoleplayChatScreen(
     var card by remember { mutableStateOf<RoleCard?>(null) }
     var showInfo by remember { mutableStateOf(false) }
     var memoryText by remember { mutableStateOf("") }
+    var showContext by remember { mutableStateOf(false) }
+
+    // 上下文构成：与编程对话页同一份数据、同一个面板。
+    // 酒馆里它同样有用 —— 长期记忆压缩的时机就是看这个数字，
+    // 用户以前只能等到"压缩发生了"才知道窗口满了。
+    val ctxSnapshot by engine.context.collectAsStateWithLifecycle()
+    val ctxInsight = ctxSnapshot?.takeIf { it.conversationId == conversation?.id }?.insight
 
     val cardId = conversation?.roleCardId.orEmpty()
     LaunchedEffect(cardId) {
@@ -189,6 +198,9 @@ fun RoleplayChatScreen(
             // 对话页也要能进设置：这一页是从角色列表 push 上来的，
             // 如果只在列表页放设置，用户聊到一半想改模型/外观就得先退出去。
             // 与 ChatScreen 顶栏保持同一组图标，避免"换个场景就找不到同一个功能"。
+            IconTap(Icons.Outlined.PieChart, LocalStrings.current.ctxTitle) {
+                showContext = true
+            }
             IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {
                 nav.push(Screen.Settings)
             }
@@ -308,6 +320,36 @@ fun RoleplayChatScreen(
                 )
             }
             item(key = "__tail__") { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+
+    if (showContext) {
+        val snapshot = ctxInsight
+        if (snapshot != null) {
+            ContextUsageDialog(insight = snapshot, onDismiss = { showContext = false })
+        } else {
+            // 没有快照 = 这一轮还没发出去。不能显示 0：0 会被读成"窗口一点没占"
+            com.dshwatch.ui.components.GlassDialog(
+                onDismissRequest = { showContext = false },
+                title = LocalStrings.current.ctxTitle,
+                content = {
+                    androidx.compose.material3.Text(
+                        text = if (messages.isEmpty()) {
+                            LocalStrings.current.ctxEmpty
+                        } else {
+                            "这条会话的上下文构成会在下一次发送时计算"
+                        },
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                buttons = {
+                    com.dshwatch.ui.components.GlassDialogButton(
+                        LocalStrings.current.close,
+                        onClick = { showContext = false },
+                    )
+                },
+            )
         }
     }
 }

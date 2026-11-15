@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.5",
+            date = "2026-11-15",
+            highlights = listOf(
+                "新增 莫奈取色：任意一个种子色都能生成整套 Material You 色板，跟随壁纸或自定义背景自动取色",
+                "新增 主题色面板：跟随壁纸取色的开关加一盘九色种子，见「设置 → 外观」",
+                "新增 对话页顶栏的上下文按钮：不用进设置就能看清这一轮花在哪，编程与酒馆两个场景都有",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.4",
             date = "2026-11-15",
             highlights = listOf(

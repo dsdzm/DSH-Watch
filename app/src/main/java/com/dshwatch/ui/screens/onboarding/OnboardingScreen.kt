@@ -246,10 +246,10 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                         }
                     },
                     onPickPreset = { id ->
-                        update { it.copy(themePreset = id, dynamicColor = false) }
+                        update { it.copy(themePreset = id, dynamicColor = false, seedColor = "") }
                     },
                     onPickAccent = { id ->
-                        update { it.copy(accentColor = id, dynamicColor = false) }
+                        update { it.copy(accentColor = id, dynamicColor = false, seedColor = "") }
                     },
                 )
             }

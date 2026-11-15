@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -99,6 +100,7 @@ import com.dshwatch.ui.components.AskUserDialog
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.ChoiceButtons
 import com.dshwatch.ui.components.ConfirmDialog
+import com.dshwatch.ui.components.ContextUsageDialog
 import com.dshwatch.ui.components.ContextBar
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.PanelCard
@@ -194,6 +196,17 @@ fun ChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var showAgentDialog by remember { mutableStateOf(false) }
     var showScenePicker by remember { mutableStateOf(false) }
+    var showContext by remember { mutableStateOf(false) }
+
+    /*
+     * 上下文构成的数据源。
+     *
+     * 只认「属于当前会话」的快照：ChatEngine 切会话的赋值点有十来处，
+     * 逐个清空既容易漏、又会和「正在发送」的时序打架。带上会话 id 比一下，
+     * 切过去自然空着 —— 空着只是没数字，挂着别的会话的数字才是误导。
+     */
+    val ctxSnapshot by engine.context.collectAsStateWithLifecycle()
+    val ctxInsight = ctxSnapshot?.takeIf { it.conversationId == conversation?.id }?.insight
 
     val approval by engine.approval.collectAsStateWithLifecycle()
     val pendingQuestion by engine.question.collectAsStateWithLifecycle()
@@ -317,24 +330,30 @@ fun ChatScreen(
         stackedBar = m3e,
         actions = {
             /*
-             * 顶栏四颗：历史 / 新建 / 切换模式 / 设置。
+             * 顶栏最多五颗：历史 / 新建 / 切换模式 / 上下文 / 设置。
              *
-             * 经典界面：圆屏用 32dp 的 CircleIconTap，方屏用 40dp 的 IconTap ——
+             * 经典界面：圆屏用 32dp 的 CircleIconTap，方屏用 44dp 的 IconTap ——
              * 圆屏顶栏那一行的可用弦宽只有约 170dp，四颗 40dp 会把标题挤没。
              *
              * M3E 界面：两者都分派到 M3eIconTap（44dp 命中区 + 26dp 图标），
-             * 而 M3E 的顶栏是 stackedBar —— 图标独占一行居中，标题在它下面，
-             * 所以 4×44=176dp 不会和标题抢宽度。
-             *
-             * 顶栏自身**不带任何背景板**：它直接落在页面的 surface 上，
-             * 只有图标和标题，不和内容争地盘。
+             * 而 M3E 的顶栏是 stackedBar —— 图标独占一行居中，标题在它下面。
+             * 五颗时 5×44=220dp 已经超过圆屏那一行的弦宽（约 189dp），
+             * 两端的图标会被圆周切掉，所以此时自动降一档到 36dp / 24dp。
              */
+            val actionCount = if (codingScene) 5 else 4
+            val denseBar = m3e && round && actionCount >= 5
             val tap: @Composable (androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit) -> Unit =
                 { icon, desc, onClick ->
-                    if (round && !m3e) {
-                        CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
-                    } else {
-                        IconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                    when {
+                        m3e -> com.dshwatch.ui.m3e.M3eIconTap(
+                            icon = icon,
+                            contentDescription = desc,
+                            onClick = onClick,
+                            diameter = if (denseBar) 36.dp else 44.dp,
+                            iconSize = if (denseBar) 24.dp else 26.dp,
+                        )
+                        round -> CircleIconTap(icon = icon, contentDescription = desc, onClick = onClick)
+                        else -> IconTap(icon = icon, contentDescription = desc, onClick = onClick)
                     }
                 }
             tap(Icons.Outlined.History, s.navSessions) { nav.push(Screen.Sessions) }
@@ -346,6 +365,14 @@ fun ChatScreen(
                 }
                 tap(sceneIcon(settings.useScene), "切换模式") { showScenePicker = true }
             }
+            /*
+             * 上下文用量：放在设置前面。
+             *
+             * 原来这块只在「设置 → 模型 → 用量」里，用户的原话是「我在设置里
+             * 没有找到你所说的具体用量」—— 要看「这一轮为什么贵」的人正看着对话，
+             * 不该先跳去设置翻二级页。入口要长在事情发生的地方。
+             */
+            tap(Icons.Outlined.PieChart, s.ctxTitle) { showContext = true }
             tap(Icons.Outlined.Settings, s.navSettings) { nav.push(Screen.Settings) }
         },
         /*
@@ -799,6 +826,35 @@ fun ChatScreen(
             },
             onDismiss = { showScenePicker = false },
         )
+    }
+
+    if (showContext) {
+        val snapshot = ctxInsight
+        if (snapshot != null) {
+            ContextUsageDialog(insight = snapshot, onDismiss = { showContext = false })
+        } else {
+            // 没有快照 = 这一轮还没发出去（或刚切到新会话）。
+            // 这里不能显示 0：0 会被读成「窗口一点没占」，而事实是还没算过。
+            GlassDialog(
+                onDismissRequest = { showContext = false },
+                title = s.ctxTitle,
+                content = {
+                    Text(
+                        text = if (messages.isEmpty()) {
+                            s.ctxEmpty
+                        } else {
+                            // 已有历史但还没发下一句：快照要等真正组请求时才有。
+                            // 这里说清楚，比显示一个用完整历史硬算出来的偏大数字好 ——
+                            // 那个数字会让人误以为该立刻开新会话
+                            "这条会话的上下文构成会在下一次发送时计算"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                buttons = { GlassDialogButton(s.close, onClick = { showContext = false }) },
+            )
+        }
     }
 }
 

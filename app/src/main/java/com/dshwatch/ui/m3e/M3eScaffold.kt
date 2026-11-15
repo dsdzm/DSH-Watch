@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.FilledIconButton
@@ -313,16 +314,26 @@ fun M3eIconTap(
     contentDescription: String?,
     enabled: Boolean = true,
     onClick: () -> Unit,
+    /**
+     * 命中区直径。默认 44dp（Wear 的常规值）。
+     *
+     * 对话页顶栏有 5 颗动作时，5×44=220dp 已经超过圆屏那一行的弦宽（约 189dp），
+     * 两侧的图标会被圆周切掉。这种情况传 36dp：5×36=180dp 刚好收在弦内，
+     * 图标仍是 24dp（只比 26dp 小一档），视觉上还是一条整齐的图标带。
+     */
+    diameter: Dp = 44.dp,
+    /** 图标边长，默认 26dp（Wear M3 规范） */
+    iconSize: Dp = 26.dp,
 ) {
     IconButton(
         onClick = onClick,
-        modifier = Modifier.size(44.dp),
+        modifier = Modifier.size(diameter),
         enabled = enabled,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(26.dp),
+            modifier = Modifier.size(iconSize),
         )
     }
 }
