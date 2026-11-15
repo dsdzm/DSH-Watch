@@ -256,6 +256,19 @@ class ChatEngine(
     private val _streaming = MutableStateFlow(false)
     val streaming: StateFlow<Boolean> = _streaming.asStateFlow()
 
+    /**
+     * 最近一次**实际发出**的上下文构成。
+     *
+     * 只保留最后一次，不做历史：这个数字的用途是「现在该不该开新会话」，
+     * 历史曲线在手表上一屏放不下，放得下也没人看。
+     *
+     * 带 [ContextSnapshot.conversationId] 是必须的：切到另一个会话时
+     * 这里仍是上一个会话的数字，界面拿它去比一下就知道要不要显示，
+     * 比在十来个切换点逐个清空可靠得多。
+     */
+    private val _context = MutableStateFlow<ContextSnapshot?>(null)
+    val context: StateFlow<ContextSnapshot?> = _context.asStateFlow()
+
     private val _banner = MutableStateFlow<Banner?>(null)
     val banner: StateFlow<Banner?> = _banner.asStateFlow()
 
@@ -1156,6 +1169,18 @@ class ChatEngine(
                 maxOutputTokens = provider.maxTokens,
                 maxTurns = Int.MAX_VALUE,
                 fullContext = true,
+            )
+
+            // 记下这一轮真实发出去的构成。放在 trimmed 之后 ——
+            // 用完整历史算出来的数字会比真实占用大得多，反而让人误以为该开新会话
+            _context.value = ContextSnapshot(
+                conversationId = conv.id,
+                insight = ContextMeter.analyze(
+                    systemPrompt = roundPrompt,
+                    turns = trimmed,
+                    contextWindow = provider.contextWindow,
+                    maxOutputTokens = provider.maxTokens,
+                ),
             )
 
             val request = ChatRequest(

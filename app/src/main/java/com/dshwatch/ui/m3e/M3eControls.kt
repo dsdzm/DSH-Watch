@@ -216,7 +216,7 @@ fun M3eSettingRow(
 
 /** 一块不可点击的容器，形状与 [Card] 一致 */
 @Composable
-private fun M3eStaticSurface(content: @Composable () -> Unit) {
+internal fun M3eStaticSurface(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()

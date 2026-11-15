@@ -148,4 +148,74 @@ class M3eThemeTest {
             slot.contains("fillMaxWidth"),
         )
     }
+
+    /**
+     * 新增的组件必须两套界面各有实现。
+     *
+     * 这条守着用户反复提过的那一点：
+     * > 「所有插件都要适配任何 UI 模式」
+     *
+     * 两套界面的**结构**本来就不一样，靠「组件层分派」这一个机制兜住 ——
+     * 页面代码写 `SettingCard`，经典下是玻璃卡、M3E 下是圆角底。
+     * 但有一个陷阱：M3E 的 `M3eSettingCard` 自己**没有底色也没有内边距**，
+     * 卡片感来自里面每一行自带的 `M3eStaticSurface`。所以任何「一行自定义内容」
+     * 直接塞进 SettingCard，在 M3E 下就会变成裸文字浮在页面上 —— 不报错、
+     * 只在 M3E 模式里看起来像没做完。
+     *
+     * 用量页的上下文卡片是最容易踩的一个（它里面有 Canvas 和五段自定义行），
+     * 所以这里把它的两条分支都钉死。
+     */
+    @Test
+    fun `用量页的上下文卡片两套界面各有容器`() {
+        val f = File("src/main/java/com/dshwatch/ui/screens/usage/UsageScreen.kt")
+        assertTrue("找不到 UsageScreen.kt：${f.absolutePath}", f.isFile)
+        val src = f.readText()
+            .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+            .replace(Regex("//[^\\n]*"), "")
+
+        val card = src.substringAfter("private fun ContextCard(")
+            .substringBefore("private fun ContextBar(")
+        assertThat(card).isNotEmpty()
+
+        assertTrue(
+            "M3E 分支要包 M3eStaticSurface：M3eSettingCard 本身没有底色",
+            card.contains("M3eStaticSurface"),
+        )
+        assertTrue(
+            "经典分支仍走 SettingCard，别把两套写成一模一样",
+            card.contains("SettingCard("),
+        )
+        assertTrue(
+            "要靠 isM3eUi 分派，不能只认一种界面",
+            card.contains("isM3eUi"),
+        )
+        assertTrue(
+            "M3E 的字阶必须取自 Wear 的 typography：labelMedium 在两边差了 3sp",
+            card.contains("W3.typography"),
+        )
+    }
+
+    /**
+     * 对话页的速率读数在 M3E 下要短一档。
+     *
+     * 那一行是「模型 chip + Agent chip + 生成中」，圆屏的弦宽只有约 220dp。
+     * 经典界面里 `生成中 · 38 tok/s` 就已经贴着边了，M3E 的 chip 更大，
+     * 再塞同样的字符串会把 chip 挤成两行。所以 M3E 分支只留数字和单位。
+     */
+    @Test
+    fun `生成速率在 M3E 下用短写法`() {
+        val f = File("src/main/java/com/dshwatch/ui/screens/chat/ChatScreen.kt")
+        assertTrue("找不到 ChatScreen.kt：${f.absolutePath}", f.isFile)
+        val src = f.readText()
+            .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+            .replace(Regex("//[^\\n]*"), "")
+
+        assertTrue(
+            "两处「生成中」都要带上速率，否则流式时看不出模型是不是卡住了",
+            Regex("m3e -> \"\\\$tps t/s\"").containsMatchIn(src),
+        )
+        // 两处调用点（非编程场景 / 编程场景）
+        val occurrences = Regex("\\\$tps t/s").findAll(src).count()
+        assertThat(occurrences).isEqualTo(2)
+    }
 }

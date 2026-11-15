@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.23.4",
+            date = "2026-11-15",
+            highlights = listOf(
+                "新增「当前会话上下文」面板：看清单轮的上下文由系统提示、你的消息、助手回复、工具调用、工具输出各占多少，以及还能折叠省下多少",
+                "新增生成速率显示：流式回复时实时看到 tok/s，卡住还是慢一眼分得清",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.3",
             date = "2026-11-15",
             highlights = listOf(

@@ -382,6 +382,19 @@ interface AppStrings {
     val byModel: String
     val byDay: String
     val noUsage: String
+
+    // 上下文构成（当前会话）
+    val ctxTitle: String
+    val ctxSystem: String
+    val ctxUser: String
+    val ctxAssistant: String
+    val ctxToolArgs: String
+    val ctxToolResults: String
+    val ctxReclaimable: String
+    val ctxTurns: String
+    val ctxOver: String
+    val ctxHot: String
+    val ctxEmpty: String
     val clearUsage: String
     val clearUsageConfirm: String
 
@@ -964,6 +977,18 @@ object Zh : AppStrings {
     override val costLabel = "估算花费"
     override val byModel = "按模型"
     override val byDay = "按天"
+
+    override val ctxTitle = "当前会话上下文"
+    override val ctxSystem = "系统提示"
+    override val ctxUser = "你的消息"
+    override val ctxAssistant = "助手回复"
+    override val ctxToolArgs = "工具调用"
+    override val ctxToolResults = "工具输出"
+    override val ctxReclaimable = "还能折叠省下"
+    override val ctxTurns = "条消息"
+    override val ctxOver = "已经超了窗口，这一轮会被裁掉最老的历史"
+    override val ctxHot = "快满了。再聊几轮就要开始丢历史，长任务建议现在开新会话"
+    override val ctxEmpty = "还没发过消息"
     override val noUsage = "还没有用量记录"
     override val clearUsage = "清空用量记录"
     override val clearUsageConfirm = "只清除统计，不影响会话内容。确定吗？"
@@ -1615,6 +1640,18 @@ object En : AppStrings {
     override val costLabel = "Est. cost"
     override val byModel = "By model"
     override val byDay = "By day"
+
+    override val ctxTitle = "This conversation's context"
+    override val ctxSystem = "System prompt"
+    override val ctxUser = "Your messages"
+    override val ctxAssistant = "Replies"
+    override val ctxToolArgs = "Tool calls"
+    override val ctxToolResults = "Tool output"
+    override val ctxReclaimable = "Foldable"
+    override val ctxTurns = "messages"
+    override val ctxOver = "Over the window — the oldest history gets dropped this turn"
+    override val ctxHot = "Nearly full. A few more turns and history starts getting dropped"
+    override val ctxEmpty = "No messages yet"
     override val noUsage = "No usage yet"
     override val clearUsage = "Clear usage"
     override val clearUsageConfirm = "Only statistics are removed. Continue?"

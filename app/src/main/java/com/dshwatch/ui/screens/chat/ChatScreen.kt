@@ -198,6 +198,10 @@ fun ChatScreen(
     val approval by engine.approval.collectAsStateWithLifecycle()
     val pendingQuestion by engine.question.collectAsStateWithLifecycle()
 
+    // 实时速率（tok/s）。对应生态里 dsh-TUI 的那个「TPS」——
+    // 手表上一屏只看得到两三个字，光有「生成中」分不清是卡住了还是在跑。
+    val tps = rememberTokensPerSecond(engine, streaming)
+
     // 电脑上的审批：远端协议只回答「这一次」，所以不放进 engine 的那套状态机
     val remoteApprovals by container.dshLink.approvals.collectAsStateWithLifecycle()
 
@@ -527,7 +531,12 @@ fun ChatScreen(
                             )
                             if (streaming) {
                                 Text(
-                                    text = s.generating,
+                                    text = when {
+                                        tps <= 0 -> s.generating
+                                        // M3E 的 chip 行本来就挤，只留数字和单位
+                                        m3e -> "$tps t/s"
+                                        else -> "${s.generating} · $tps tok/s"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.secondary,
                                 )
@@ -560,7 +569,12 @@ fun ChatScreen(
                         Spacer(Modifier.width(3.dp))
                         if (streaming) {
                             Text(
-                                text = s.generating,
+                                text = when {
+                                    tps <= 0 -> s.generating
+                                    // M3E 的 chip 行本来就挤，只留数字和单位
+                                    m3e -> "$tps t/s"
+                                    else -> "${s.generating} · $tps tok/s"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.secondary,
                             )
@@ -1951,4 +1965,49 @@ private fun openScreen(nav: WatchNavigator, key: String) {
         else -> return
     }
     nav.push(target)
+}
+
+/**
+ * 实时生成速率（tok/s）。对应生态里 `dsh-TUI` 的 TPS 读数。
+ *
+ * ## 为什么手表上需要这个
+ *
+ * 一屏只显示两三行字。光有「生成中」时，用户分不清是模型在跑、还是请求已经
+ * 挂住、还是网络卡住了 —— 而在手表上多等十秒的体感和手机上完全不同。
+ * 一个会动的数字，比任何转圈动画都更能说明「它还活着」。
+ *
+ * ## 两个刻意的取舍
+ *
+ * **前 1.2 秒不出数。** 首个 token 的排队时间（prefill）不算进速率里：
+ * 一个排队 3 秒、然后以 40 tok/s 输出的模型，把排队摊平后会显示成个位数，
+ * 用户会以为模型很慢，而实际上它跑得挺快。
+ *
+ * **每 600ms 才重算一次。** [TokenEstimator.estimate] 是 O(n)，流式过程中
+ * `live.text` 每来一个分片就变一次。跟着它每次都算，在几千字的长回复里
+ * 会把主线程拖出掉帧 —— 而掉帧和"生成慢"在体感上根本分不开。
+ */
+@Composable
+private fun rememberTokensPerSecond(
+    engine: com.dshwatch.domain.ChatEngine,
+    streaming: Boolean,
+): Int {
+    var tps by remember { mutableStateOf(0) }
+    LaunchedEffect(streaming) {
+        if (!streaming) {
+            tps = 0
+            return@LaunchedEffect
+        }
+        val start = android.os.SystemClock.elapsedRealtime()
+        tps = 0
+        while (true) {
+            kotlinx.coroutines.delay(600)
+            val elapsed = (android.os.SystemClock.elapsedRealtime() - start) / 1000.0
+            if (elapsed < 1.2) continue
+            val delta = engine.live.value
+            val produced = TokenEstimator.estimate(delta.text) +
+                TokenEstimator.estimate(delta.reasoning)
+            tps = (produced / elapsed).toInt().coerceAtLeast(0)
+        }
+    }
+    return tps
 }
