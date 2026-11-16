@@ -118,11 +118,74 @@ class PhoneUiStructureTest {
     }
 
     @Test
-    fun `语音输入走系统识别器并兜住缺失`() {
+    fun `对话页没有语音输入`() {
+        // 语音要额外拉起系统识别器，而多数精简 ROM 上根本没有那一个；
+        // 空框时那颗麦克风的结果是「按下去弹一句话」，不如换成发送键
         val chat = code(src("PhoneChatScreen.kt"))
-        assertThat(chat).contains("ACTION_RECOGNIZE_SPEECH")
-        // 精简 ROM 上没有识别器，launch 会抛；不接住就是一个按下去没反应的麦克风
-        assertThat(chat).contains("runCatching { voice.launch(intent) }")
+        val chrome = code(src("PhoneChatChrome.kt"))
+        listOf(chat, chrome).forEach { body ->
+            assertThat(body).doesNotContain("ACTION_RECOGNIZE_SPEECH")
+            assertThat(body).doesNotContain("RecognizerIntent")
+            assertThat(body).doesNotContain("Icons.Filled.Mic")
+        }
+    }
+
+    @Test
+    fun `加号打开拍照相册文件三格`() {
+        // 只拉起文件选择器的话，想发刚拍的照片得先去相册找一遍
+        val chat = code(src("PhoneChatScreen.kt"))
+        val chrome = code(src("PhoneChatChrome.kt"))
+        assertThat(chat).contains("PhoneAttachSheet(")
+        assertThat(chat).contains("ActivityResultContracts.TakePicture()")
+        assertThat(chat).contains("PickVisualMedia")
+        assertThat(chat).contains("ActivityResultContracts.OpenDocument()")
+        assertThat(chrome).contains("fun PhoneAttachSheet(")
+        assertThat(chrome).contains("拍照")
+        assertThat(chrome).contains("相册")
+        assertThat(chrome).contains("文件")
+    }
+
+    @Test
+    fun `左上角是历史记录抽屉`() {
+        // 那颗按钮在聊天应用里叫「历史记录」：点开该看到一列会话，不是一列设置入口
+        val chat = code(src("PhoneChatScreen.kt"))
+        assertThat(chat).contains("ModalNavigationDrawer(")
+        assertThat(chat).contains("PhoneHistoryDrawer(")
+
+        val drawer = code(src("PhoneHistoryDrawer.kt"))
+        assertThat(drawer).contains("ModalDrawerSheet(")
+        // 长按才出操作：token / 重命名 / 置顶 / 删除
+        assertThat(drawer).contains("onLongClick")
+        assertThat(drawer).contains("关于对话")
+        assertThat(drawer).contains("重命名")
+        // 按自然日分组，不是按 24 小时差值
+        assertThat(drawer).contains("昨天")
+        assertThat(drawer).contains("7 天内")
+    }
+
+    @Test
+    fun `手机外观页不摆手表专有的开关`() {
+        // 界面体系 / 玻璃材质 / 屏幕形状 / 整体缩放 / 看板娘在手机上按下去都不动，
+        // 摆出来只会让用户以为设置是装饰
+        val body = code(src("PhoneAppearanceScreen.kt"))
+        listOf("uiStyle", "appearance", "screenShape", "uiScale", "showMascot", "chatLayout")
+            .forEach { field -> assertThat(body).doesNotContain("settings.$field") }
+        // 真能生效的那几项必须在
+        assertThat(body).contains("dynamicColor")
+        assertThat(body).contains("seedColor")
+        assertThat(body).contains("themeMode")
+    }
+
+    @Test
+    fun `手机主题真的用种子色生成色板`() {
+        // 1.24.0 的手机主题只有「系统动态取色 + 写死 baseline」两条路，
+        // 设置里的种子色在这套界面上点完什么都不变
+        val theme = code(src("PhoneTheme.kt"))
+        assertThat(theme).contains("SeedSource.resolve")
+        assertThat(theme).contains("PhonePalette.of")
+
+        val palette = code(src("PhonePalette.kt"))
+        assertThat(palette).contains("MonetScheme.of")
     }
 
     @Test

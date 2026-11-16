@@ -61,7 +61,7 @@ object AttachmentStore {
              */
             val size = sizeOf(uri, meta.second)
             if (size > MAX_RAW_BYTES) {
-                return@withContext failed(id, name, mime, size, kind, "文件超过 8MB，手表上读不动")
+                return@withContext failed(id, name, mime, size, kind, "文件超过 8MB，读不动 —— 换一张小一点的")
             }
 
             val dir = File(root(appFilesDir), id).apply { mkdirs() }

@@ -18,6 +18,16 @@
     <files-path name="workspace" path="workspace/" />
     <external-files-path name="workspace_ext" path="workspace/" />
     <cache-path name="share_cache" path="share/" />
+    <!--
+      拍照的落地目录。
+
+      手机版对话页的「拍照」走系统相机（ACTION_IMAGE_CAPTURE），相机 App 需要一个
+      **可写的 uri** 来存原图 —— 它拿到的是我们通过 FileProvider 发出的
+      content://，映射的就是这条 cache/camera。少这一行，
+      `getUriForFile` 抛 IllegalArgumentException: Failed to find configured root，
+      表现是「点拍照什么都没发生」。
+    -->
+    <cache-path name="camera" path="camera/" />
     <!-- 应用内更新下载的 APK：装完就删，放缓存而不是 files，别长期占用用户数据区 -->
     <cache-path name="apk" path="apk/" />
     <!--

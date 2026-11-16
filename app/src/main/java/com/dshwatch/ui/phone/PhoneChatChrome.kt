@@ -28,13 +28,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Lightbulb
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.BottomSheetDefaults
@@ -421,8 +422,9 @@ private fun greetingOf(hour: Int): String = when (hour) {
  * 和原来那个带描边的 `OutlinedTextField` 比，这样做的好处是**输入框本身
  * 不抢视觉**——正文才是这一页的主角，输入框只要在拇指够得到的地方就行。
  *
- * 右侧按钮是**三态**的：生成中显示「停止」、框里有字显示「发送」、
- * 空框显示「麦克风」。一个位置解决三件事，拇指不用找。
+ * 右侧按钮只有两态：生成中显示「停止」、其余显示「发送」。空框时发送键**变灰**
+ * 而不是换成一个麦克风：同一位置轮流承担「语音 / 发送」两种语义，拇指按下之前
+ * 得先看一眼图标是什么，误触的代价是弹出一个语音面板 —— 而这里根本没有语音。
  */
 @Composable
 internal fun PhoneComposer(
@@ -433,10 +435,9 @@ internal fun PhoneComposer(
     note: String,
     attachments: List<Attachment>,
     onRemove: (Attachment) -> Unit,
-    onPickFile: () -> Unit,
+    onAttach: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onVoice: () -> Unit,
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
@@ -492,13 +493,13 @@ internal fun PhoneComposer(
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     IconButton(
-                        onClick = onPickFile,
+                        onClick = onAttach,
                         enabled = !busy,
                         modifier = Modifier.size(48.dp),
                     ) {
                         Icon(
                             Icons.Filled.Add,
-                            contentDescription = "附件",
+                            contentDescription = "添加文件",
                             tint = scheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp),
                         )
@@ -526,27 +527,15 @@ internal fun PhoneComposer(
                             disabledIndicatorColor = Color.Transparent,
                         ),
                     )
+                    val canSend = input.isNotBlank() || attachments.isNotEmpty()
                     FilledIconButton(
-                        onClick = {
-                            when {
-                                streaming -> onStop()
-                                input.isBlank() && attachments.isEmpty() -> onVoice()
-                                else -> onSend()
-                            }
-                        },
+                        onClick = { if (streaming) onStop() else onSend() },
+                        enabled = streaming || canSend,
                         modifier = Modifier.padding(end = 6.dp, bottom = 6.dp).size(40.dp),
                     ) {
                         Icon(
-                            imageVector = when {
-                                streaming -> Icons.Filled.Stop
-                                input.isBlank() && attachments.isEmpty() -> Icons.Filled.Mic
-                                else -> Icons.AutoMirrored.Filled.Send
-                            },
-                            contentDescription = when {
-                                streaming -> s.stop
-                                input.isBlank() && attachments.isEmpty() -> "语音输入"
-                                else -> s.send
-                            },
+                            imageVector = if (streaming) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (streaming) s.stop else s.send,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -558,28 +547,28 @@ internal fun PhoneComposer(
 
 // ---------------- 底部弹窗 ----------------
 
+// ---------------- 底部弹窗 ----------------
+
 /**
- * 菜单。
+ * 添加附件的面板。
  *
- * 参考图里左上角那个 `☰` 通常开抽屉；这里用底部弹窗 —— 手表的次级页
- * 全是整屏 push，抽屉要额外维护一套手势与遮罩，而这一页真正高频的只有
- * 「换个场景 / 翻记录 / 去设置」三件事，弹窗一次列完更省事。
+ * 参考的聊天应用里，输入框左侧那个 `＋` 点开是**三格**：拍照 / 相册 / 文件。
+ * 不做成「直接拉起文件选择器」有两个原因：
  *
- * **酒馆与写作放在这里**是这次的关键：之前手机版只有底部三个 tab，
- * 场景切换只存在于手表那套界面里，手机用户根本进不去这两个模式。
+ *  1. 文件选择器只认文件，想发刚拍的照片要先去相册找一遍 —— 中间那几步全是摩擦；
+ *  2. 手机上「发张图」比「传个文件」常见得多，而系统选择器的默认落点未必是相册。
+ *
+ * 三个入口分别对应：系统相机（`ACTION_IMAGE_CAPTURE`）、系统相册
+ * （`PickVisualMedia`，Android 13 起是系统级选择器，不需要读存储权限）、
+ * 文件（`OpenDocument`，任意类型）。**一个权限都不申请** —— 全都是让用户在
+ * 系统界面里自己选，选完拿一个 uri 回来。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PhoneMenuSheet(
-    scene: String,
-    onNewChat: () -> Unit,
-    onOpenSessions: () -> Unit,
-    onPickScene: () -> Unit,
-    onContext: () -> Unit,
-    onCutContext: () -> Unit,
-    onOpenProviders: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenHelp: () -> Unit,
+internal fun PhoneAttachSheet(
+    onCamera: () -> Unit,
+    onGallery: () -> Unit,
+    onFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -588,66 +577,64 @@ internal fun PhoneMenuSheet(
         dragHandle = { BottomSheetDefaults.DragHandle() },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(modifier = Modifier.padding(bottom = 28.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, bottom = 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AttachTile(
+                icon = Icons.Outlined.CameraAlt,
+                label = "拍照",
+                onClick = onCamera,
+                modifier = Modifier.weight(1f),
+            )
+            AttachTile(
+                icon = Icons.Outlined.PhotoLibrary,
+                label = "相册",
+                onClick = onGallery,
+                modifier = Modifier.weight(1f),
+            )
+            AttachTile(
+                icon = Icons.Outlined.AttachFile,
+                label = "文件",
+                onClick = onFile,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttachTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = scheme.surfaceContainerHighest,
+        modifier = modifier.height(92.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = scheme.onSurface,
+                modifier = Modifier.size(26.dp),
+            )
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = "新对话",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 6.dp),
-            )
-            Text(
-                text = "当前模式：${Scenes.label(scene)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 10.dp),
-            )
-            SheetRow(
-                icon = Icons.Filled.Add,
-                title = "新建会话",
-                subtitle = "在当前模式下开一段新的",
-                onClick = onNewChat,
-            )
-            SheetRow(
-                icon = Icons.Outlined.Translate,
-                title = "切换模式",
-                subtitle = "编程 / 酒馆 / 写作",
-                onClick = onPickScene,
-            )
-            SheetRow(
-                icon = Icons.Outlined.ChatBubbleOutline,
-                title = LocalStrings.current.navSessions,
-                subtitle = "翻以前的对话",
-                onClick = onOpenSessions,
-            )
-            SheetRow(
-                icon = Icons.Outlined.TableChart,
-                title = "上下文占用",
-                subtitle = "这一轮用掉了多少窗口",
-                onClick = onContext,
-            )
-            SheetRow(
-                icon = Icons.Outlined.AutoAwesome,
-                title = "清空这一轮上下文",
-                subtitle = "从这条往后不再带上更早的内容",
-                onClick = onCutContext,
-            )
-            SheetRow(
-                icon = Icons.Outlined.TableChart,
-                title = "供应商与模型",
-                subtitle = "换模型、填 Key、调思考强度",
-                onClick = onOpenProviders,
-            )
-            SheetRow(
-                icon = Icons.Outlined.Settings,
-                title = LocalStrings.current.navSettings,
-                subtitle = "外观、能力、设备类型",
-                onClick = onOpenSettings,
-            )
-            SheetRow(
-                icon = Icons.Outlined.AutoAwesome,
-                title = "帮助",
-                subtitle = "面板语法、能力说明",
-                onClick = onOpenHelp,
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = scheme.onSurface,
             )
         }
     }

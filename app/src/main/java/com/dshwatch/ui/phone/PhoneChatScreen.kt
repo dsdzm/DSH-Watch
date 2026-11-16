@@ -2,6 +2,7 @@ package com.dshwatch.ui.phone
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -20,15 +21,21 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,9 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.data.attachment.AttachmentStore
@@ -52,6 +61,7 @@ import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.Attachment
 import com.dshwatch.domain.model.AttachmentKinds
 import com.dshwatch.domain.model.ChatMessage
+import com.dshwatch.domain.model.Conversation
 import com.dshwatch.domain.model.MediaRef
 import com.dshwatch.domain.model.MessageStatus
 import com.dshwatch.domain.model.ProviderType
@@ -74,6 +84,10 @@ import com.dshwatch.ui.screens.chat.groupMessages
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 手机版的对话页。
@@ -85,7 +99,7 @@ import kotlinx.coroutines.withContext
  * | 骨架 | 圆屏/方屏各自算安全区 | 普通全宽，顶栏 + 列表 + 输入栏 |
  * | 气泡 | 全宽换底色（屏宽不够左右分栏） | 用户靠右、助手全宽 |
  * | 输入 | 进二级页，整屏一个输入框 | 常驻底部，边看边打 |
- * | 工具条 | 顶栏一排图标 | 标题 + 「新建 / 更多」两项 |
+ * | 历史 | 独立一页 | 左侧抽屉，随时拉开（长按会话出操作） |
  *
  * 「用户靠右」这件事在手机上是**必须**的：411dp 宽的屏，右侧留 15% 就能
  * 一眼分出发言人，而手表的 200dp 上这么分会把两列都压到 80dp。
@@ -119,7 +133,7 @@ fun PhoneChatScreen(
     val listState = rememberLazyListState()
 
     var input by remember { mutableStateOf("") }
-    var showMenu by remember { mutableStateOf(false) }
+    var showAttach by remember { mutableStateOf(false) }
     var showSceneSheet by remember { mutableStateOf(false) }
     var showModeSheet by remember { mutableStateOf(false) }
     var showModelPicker by remember { mutableStateOf(false) }
@@ -129,6 +143,28 @@ fun PhoneChatScreen(
     var attachBusy by remember { mutableStateOf(false) }
     var attachNote by remember { mutableStateOf("") }
 
+    // 历史抽屉
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var history by remember { mutableStateOf<List<Conversation>>(emptyList()) }
+    var historyVersion by remember { mutableIntStateOf(0) }
+    var renameTarget by remember { mutableStateOf<Conversation?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
+    var infoTarget by remember { mutableStateOf<Conversation?>(null) }
+
+    /*
+     * 会话列表在**抽屉打开时**才读。
+     *
+     * `index()` 要扫一遍 conversations 目录并解每条的头信息，放在首帧或每次重组
+     * 都会白花几毫秒；抽屉一拉就重读，既省掉这份开销，也保证「刚发完一条、
+     * 标题自动变了」能在下一次拉开时看到。
+     */
+    LaunchedEffect(historyVersion, drawerState.isOpen) {
+        if (drawerState.isOpen || history.isEmpty()) {
+            history = runCatching { container.conversationStore.index() }.getOrDefault(emptyList())
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (engine.conversation.value == null) {
             /*
@@ -136,7 +172,7 @@ fun PhoneChatScreen(
              *
              * 会话列表按时间倒序，第一条很可能是昨晚的酒馆剧情。把那条塞进
              * 这一页，用户看到的就是「一段没有角色的散文」—— 而且他以为是
-             * 对话记录坏了。酒馆会话有自己的渲染页，从记录页点进去才对。
+             * 对话记录坏了。酒馆会话有自己的渲染页，从历史里点进去才对。
              */
             container.conversationStore.index()
                 .firstOrNull { Scenes.of(it.scene) == Scenes.CODING }
@@ -188,39 +224,6 @@ fun PhoneChatScreen(
         nav.popToRoot()
     }
 
-    /*
-     * 语音输入走系统的识别界面（`ACTION_RECOGNIZE_SPEECH`），不在本进程录音。
-     *
-     * 这样做的好处是**不需要任何权限**：录音与识别都在识别器 App 里完成，
-     * 我们只拿到一行文本。代价是部分精简 ROM 没有识别器 —— 那时 launch
-     * 会抛 ActivityNotFoundException，接住并给一句人话，比一个按下去没反应的
-     * 麦克风键好。
-     */
-    val voice = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val text = result.data
-            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-            .orEmpty()
-        if (result.resultCode == android.app.Activity.RESULT_OK && text.isNotBlank()) {
-            input = (input + " " + text).trim()
-        }
-    }
-
-    fun startVoice() {
-        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
-            )
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
-            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说点什么")
-        }
-        val ok = runCatching { voice.launch(intent) }.isSuccess
-        if (!ok) attachNote = "这台设备没有语音输入，装一个语音助手或者直接打字"
-    }
-
     fun submit() {
         val value = input.trim()
         if (value.isEmpty() && attachments.isEmpty()) return
@@ -228,17 +231,18 @@ fun PhoneChatScreen(
             input = ""
             attachments.clear()
             attachNote = ""
+            historyVersion++
         } else {
             // 上一轮还在生成：内容留在框里，别把用户刚打的字吃掉
             attachNote = "上一轮还在生成，等它写完再发"
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri ?: return@rememberLauncherForActivityResult
+    /** 三个入口（拍照 / 相册 / 文件）拿回来的 uri 都走这里 */
+    fun addUri(uri: Uri) {
         if (attachments.size >= AttachmentKinds.MAX_FILES) {
             attachNote = "一次最多带 ${AttachmentKinds.MAX_FILES} 个文件"
-            return@rememberLauncherForActivityResult
+            return
         }
         scope.launch {
             attachBusy = true
@@ -251,125 +255,319 @@ fun PhoneChatScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding(),
-    ) {
-        PhoneChatHeader(
-            title = conversation?.displayTitle?.ifBlank { "新对话" } ?: "新对话",
-            badge = if (provider?.type == ProviderType.DSH_SERVER) "远程" else "本机",
-            remote = provider?.type == ProviderType.DSH_SERVER,
-            modelLabel = modelLabel,
-            onMenu = { showMenu = true },
-            onNewChat = {
-                scope.launch { engine.newConversation(settings, scene = Scenes.of(settings.useScene)) }
-            },
-            onModel = { showModelPicker = true },
-        )
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) addUri(uri)
+    }
 
-        if (provider == null) {
-            NoProviderHint(onOpenProviders = { nav.open(Screen.Providers) })
-            return@Column
+    /*
+     * 相册走系统照片选择器（Android 13 起是进程外的那一个）。
+     *
+     * 好处是**不申请读存储权限**：用户选哪张，我们只拿到那一张的 uri。
+     * 老系统上这个 contract 会自动退化成 `ACTION_OPEN_DOCUMENT`，
+     * 所以低版本也能用，不需要 `if (SDK >= 33)` 分支。
+     */
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) addUri(uri)
+    }
+
+    /*
+     * 拍照：把相机的输出写到缓存目录，再用 FileProvider 换一个可写的 uri。
+     *
+     * 不用 `TakePicturePreview` —— 那个只回一张缩略图（一百多 dp 的位图），
+     * 发给模型等于把照片糊成马赛克。也不用自己申请 CAMERA 权限：
+     * `ACTION_IMAGE_CAPTURE` 由相机 App 拍，本进程一行权限都不用加。
+     */
+    val cameraDir = remember { File(context.cacheDir, "camera").apply { mkdirs() } }
+    var pendingPhoto by remember { mutableStateOf<File?>(null) }
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val file = pendingPhoto
+        pendingPhoto = null
+        if (ok && file != null) {
+            val uri = runCatching {
+                FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+            }.getOrNull()
+            if (uri != null) addUri(uri) else attachNote = "照片没存下来，换个方式再试"
         }
+    }
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (messages.isEmpty()) {
-                GreetingHome(
-                    agentMode = settings.agentMode,
-                    scene = settings.useScene,
-                    showMascot = settings.showMascot,
-                    onPickMode = { showModeSheet = true },
-                    onPickScene = { showSceneSheet = true },
-                    onSeed = { text -> engine.send(text) },
-                )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(turns.size, key = { turns[it].key }) { index ->
-                        val turn = turns[index]
-                        val msgs = turn.messages
-                        val last = msgs.last()
-                        PhoneTurn(
-                            messages = msgs,
-                            live = if (live?.messageId == last.id) live else null,
-                            settings = settings,
-                            showWork = codingScene,
-                            canPick = index == turns.lastIndex,
-                            onChoose = { c ->
-                                if (c.custom) {
-                                    input = ""
-                                } else {
-                                    engine.send(c.raw)
-                                }
-                            },
-                            onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
-                            onRegenerate = { engine.regenerate(last.id) },
-                            onDelete = { pendingDelete = last },
-                            container = container,
-                            onOpenArtifact = { path -> nav.open(Screen.WorkspacePreview(path)) },
-                            onOpenHtml = { html -> nav.open(Screen.HtmlView(html)) },
-                            onScrollBy = { d -> listState.dispatchRawDelta(d) },
-                        )
+    fun shoot() {
+        val file = File(cameraDir, "IMG_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg")
+        val uri = runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        }.getOrNull()
+        if (uri == null) {
+            attachNote = "这台设备没有可用的相机"
+            return
+        }
+        pendingPhoto = file
+        val ok = runCatching { takePicture.launch(uri) }.isSuccess
+        if (!ok) {
+            pendingPhoto = null
+            attachNote = "这台设备没有相机应用"
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            PhoneHistoryDrawer(
+                conversations = history,
+                currentId = conversation?.id,
+                sceneLabel = "模式：${Scenes.label(settings.useScene)}",
+                modelLabel = listOf(provider?.name.orEmpty(), modelName)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                    .ifBlank { "未配置供应商" },
+                onOpen = { conv ->
+                    scope.launch {
+                        drawerState.close()
+                        engine.open(conv.id)
+                        /*
+                         * 酒馆 / 写作的会话必须交给角色扮演页渲染：它们带角色卡、
+                         * 开场白、剧情开关，手机对话页不认识这些，硬塞进去等于
+                         * 把一段对话剥掉上下文展示。
+                         */
+                        if (Scenes.of(conv.scene) != Scenes.CODING) nav.open(Screen.RoleplayChat)
+                    }
+                },
+                onNewChat = {
+                    scope.launch {
+                        drawerState.close()
+                        engine.newConversation(settings, scene = Scenes.of(settings.useScene))
+                        historyVersion++
+                    }
+                },
+                onPickScene = {
+                    scope.launch {
+                        drawerState.close()
+                        showSceneSheet = true
+                    }
+                },
+                onSettings = {
+                    scope.launch {
+                        drawerState.close()
+                        nav.select(PhoneTab.Settings)
+                    }
+                },
+                onRename = { conv ->
+                    scope.launch { drawerState.close() }
+                    renameText = conv.displayTitle
+                    renameTarget = conv
+                },
+                onTogglePin = { conv ->
+                    scope.launch {
+                        container.conversationStore.setPinned(conv.id, !conv.pinned)
+                        historyVersion++
+                    }
+                },
+                onAbout = { conv -> infoTarget = conv },
+                onDelete = { conv -> deleteTarget = conv },
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .imePadding(),
+        ) {
+            PhoneChatHeader(
+                title = conversation?.displayTitle?.ifBlank { "新对话" } ?: "新对话",
+                badge = if (provider?.type == ProviderType.DSH_SERVER) "远程" else "本机",
+                remote = provider?.type == ProviderType.DSH_SERVER,
+                modelLabel = modelLabel,
+                onMenu = { scope.launch { drawerState.open() } },
+                onNewChat = {
+                    scope.launch {
+                        engine.newConversation(settings, scene = Scenes.of(settings.useScene))
+                        historyVersion++
+                    }
+                },
+                onModel = { showModelPicker = true },
+            )
+
+            if (provider == null) {
+                NoProviderHint(onOpenProviders = { nav.open(Screen.Providers) })
+                return@Column
+            }
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (messages.isEmpty()) {
+                    GreetingHome(
+                        agentMode = settings.agentMode,
+                        scene = settings.useScene,
+                        showMascot = settings.showMascot,
+                        onPickMode = { showModeSheet = true },
+                        onPickScene = { showSceneSheet = true },
+                        onSeed = { text -> engine.send(text) },
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        items(turns.size, key = { turns[it].key }) { index ->
+                            val turn = turns[index]
+                            val msgs = turn.messages
+                            val last = msgs.last()
+                            PhoneTurn(
+                                messages = msgs,
+                                live = if (live?.messageId == last.id) live else null,
+                                settings = settings,
+                                showWork = codingScene,
+                                canPick = index == turns.lastIndex,
+                                onChoose = { c ->
+                                    if (c.custom) {
+                                        input = ""
+                                    } else {
+                                        engine.send(c.raw)
+                                    }
+                                },
+                                onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
+                                onRegenerate = { engine.regenerate(last.id) },
+                                onDelete = { pendingDelete = last },
+                                container = container,
+                                onOpenArtifact = { path -> nav.open(Screen.WorkspacePreview(path)) },
+                                onOpenHtml = { html -> nav.open(Screen.HtmlView(html)) },
+                                onScrollBy = { d -> listState.dispatchRawDelta(d) },
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        banner?.let { b ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.tertiaryContainer)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = b.text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { engine.dismissBanner() }) { Text("知道了") }
+            banner?.let { b ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = b.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { engine.dismissBanner() }) { Text("知道了") }
+                }
             }
-        }
 
-        PhoneComposer(
-            input = input,
-            onInput = { input = it },
-            streaming = streaming,
-            busy = attachBusy || streaming,
-            note = attachNote,
-            attachments = attachments,
-            onRemove = { attachments.remove(it) },
-            onPickFile = { runCatching { picker.launch(arrayOf("*/*")) } },
-            onSend = { submit() },
-            onStop = { engine.stop() },
-            onVoice = { startVoice() },
-        )
+            PhoneComposer(
+                input = input,
+                onInput = { input = it },
+                streaming = streaming,
+                busy = attachBusy || streaming,
+                note = attachNote,
+                attachments = attachments,
+                onRemove = { attachments.remove(it) },
+                onAttach = { showAttach = true },
+                onSend = { submit() },
+                onStop = { engine.stop() },
+            )
+        }
     }
 
     // ---------------- 弹窗 ----------------
 
+    if (showAttach) {
+        PhoneAttachSheet(
+            onCamera = { showAttach = false; shoot() },
+            onGallery = {
+                showAttach = false
+                runCatching {
+                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+            },
+            onFile = { showAttach = false; runCatching { pickFile.launch(arrayOf("*/*")) } },
+            onDismiss = { showAttach = false },
+        )
+    }
+
+    infoTarget?.let { conv ->
+        ConversationInfoDialog(
+            conversation = conv,
+            isCurrent = conv.id == conversation?.id,
+            onOpenContext = {
+                infoTarget = null
+                showContext = true
+            },
+            onCutContext = {
+                infoTarget = null
+                scope.launch { engine.markContextCut() }
+            },
+            onDismiss = { infoTarget = null },
+        )
+    }
+
+    renameTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("重命名") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.isNotBlank(),
+                    onClick = {
+                        scope.launch {
+                            container.conversationStore.rename(target.id, renameText.trim())
+                            renameTarget = null
+                            historyVersion++
+                        }
+                    },
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除这条对话？") },
+            text = { Text("「${target.displayTitle}」里的消息会一起删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        runCatching { container.conversationStore.delete(target.id) }
+                        deleteTarget = null
+                        historyVersion++
+                    }
+                }) { Text(s.delete) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text(s.cancel) }
+            },
+        )
+    }
+
     pendingDelete?.let { target ->
-        androidx.compose.material3.AlertDialog(
-                onDismissRequest = { pendingDelete = null },
-                title = { Text(s.deleteMessage) },
-                text = { Text(com.dshwatch.util.Fmt.preview(target.content, 120)) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        scope.launch { engine.deleteMessage(target.id) }
-                        pendingDelete = null
-                    }) { Text(s.delete) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDelete = null }) { Text(s.cancel) }
-                },
-            )
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(s.deleteMessage) },
+            text = { Text(com.dshwatch.util.Fmt.preview(target.content, 120)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch { engine.deleteMessage(target.id) }
+                    pendingDelete = null
+                }) { Text(s.delete) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text(s.cancel) }
+            },
+        )
     }
 
     approval?.let { pending ->
@@ -393,24 +591,6 @@ fun PhoneChatScreen(
             question = q,
             onAnswer = { engine.answerQuestion(it) },
             onSkip = { engine.skipQuestion() },
-        )
-    }
-
-    if (showMenu) {
-        PhoneMenuSheet(
-            scene = settings.useScene,
-            onNewChat = {
-                showMenu = false
-                scope.launch { engine.newConversation(settings, scene = Scenes.of(settings.useScene)) }
-            },
-            onOpenSessions = { showMenu = false; nav.select(PhoneTab.Sessions) },
-            onPickScene = { showMenu = false; showSceneSheet = true },
-            onContext = { showMenu = false; showContext = true },
-            onCutContext = { showMenu = false; scope.launch { engine.markContextCut() } },
-            onOpenProviders = { showMenu = false; nav.open(Screen.Providers) },
-            onOpenSettings = { showMenu = false; nav.select(PhoneTab.Settings) },
-            onOpenHelp = { showMenu = false; nav.open(Screen.Help) },
-            onDismiss = { showMenu = false },
         )
     }
 
@@ -473,7 +653,7 @@ fun PhoneChatScreen(
                 onDismiss = { showContext = false },
             )
         } else {
-            androidx.compose.material3.AlertDialog(
+            AlertDialog(
                 onDismissRequest = { showContext = false },
                 title = { Text(s.ctxTitle) },
                 text = { Text("这条会话的上下文构成会在下一次发送时计算") },
@@ -483,6 +663,91 @@ fun PhoneChatScreen(
             )
         }
     }
+}
+
+/**
+ * 「关于对话」。
+ *
+ * 从抽屉里长按一条会话打开。放的是**这条对话自己的账**：多少条消息、
+ * 累计用了多少 token、什么模型、什么时候建的 —— 也就是被点名的那个
+ * 「关于对话 token」。
+ *
+ * 上下文占用（这一轮会带多少进窗口）只能算**当前打开的**那条：
+ * 它依赖引擎里的会话状态，翻了别人那条就算不出来。所以那两个按钮只在
+ * 当前会话上出现，其余情况给一句说明，而不是摆一个按下去没反应的键。
+ */
+@Composable
+private fun ConversationInfoDialog(
+    conversation: Conversation,
+    isCurrent: Boolean,
+    onOpenContext: () -> Unit,
+    onCutContext: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val usage = conversation.usage
+    val rows = buildList {
+        add("消息" to "${conversation.messageCount} 条")
+        add("模型" to conversation.model.ifBlank { "默认模型" })
+        add("输入 token" to usage.prompt.toString())
+        add("输出 token" to usage.completion.toString())
+        if (usage.reasoning > 0) add("思考 token" to usage.reasoning.toString())
+        add("合计" to usage.total.toString())
+        add("场景" to Scenes.label(conversation.scene))
+        add("更新于" to dateLabel(conversation.updatedAt))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = conversation.displayTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                rows.forEach { (k, v) ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = k,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.widthIn(min = 76.dp),
+                        )
+                        Text(
+                            text = v,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                if (isCurrent) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = onOpenContext) { Text("上下文占用") }
+                        TextButton(onClick = onCutContext) { Text("清空这轮上下文") }
+                    }
+                } else {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "上下文占用只能看当前打开的那条对话",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+private fun dateLabel(ts: Long): String {
+    if (ts <= 0L) return "—"
+    val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+    return fmt.format(Date(ts))
 }
 
 /** 没有供应商时整屏只剩一件事可做：去配一个 */

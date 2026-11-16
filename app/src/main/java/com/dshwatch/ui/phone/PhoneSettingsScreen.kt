@@ -51,6 +51,7 @@ import com.dshwatch.domain.model.DeviceKinds
 import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
+import com.dshwatch.ui.theme.ThemeSeeds
 import com.dshwatch.ui.screens.settings.SettingsGroups
 import kotlinx.coroutines.launch
 
@@ -85,6 +86,9 @@ fun PhoneSettingsScreen(
     fun update(block: (AppSettings) -> AppSettings) {
         scope.launch { container.settingsRepo.update(block) }
     }
+
+    // 手表版的外观分组不在这里出：手机有自己的一页（见 PhoneAppearanceScreen）
+    val groups = SettingsGroups.all.filter { it != SettingsGroups.APPEARANCE }
 
     Column(modifier = Modifier.fillMaxSize()) {
         LargeTopAppBar(
@@ -121,8 +125,16 @@ fun PhoneSettingsScreen(
 
             // ---------------- 设置分组 ----------------
             item { SectionTitle("偏好") }
-            items(SettingsGroups.all.size) { index ->
-                val id = SettingsGroups.all[index]
+            /*
+             * 外观不在这张列表里走共用分组页。
+             *
+             * `SettingsGroups.APPEARANCE` 那一页是为手表写的（界面体系 / 玻璃材质 /
+             * 屏幕形状 / 整体缩放 / 看板娘），手机主题一项都不读。留在列表里，
+             * 用户点进去会看到一屏「调了没反应」的开关 —— 所以由下面那张
+             * 「界面」卡片单独入口，走手机自己的外观页。
+             */
+            items(groups.size) { index ->
+                val id = groups[index]
                 SettingsRow(
                     icon = groupIcon(id),
                     title = SettingsGroups.title(id, s),
@@ -134,32 +146,27 @@ fun PhoneSettingsScreen(
             // ---------------- 手机版独有 ----------------
             item { SectionTitle("界面") }
             item {
+                SettingsRow(
+                    icon = Icons.Outlined.Palette,
+                    title = "外观",
+                    summary = appearanceSummary(settings),
+                    onClick = { nav.open(Screen.SettingsGroup(SettingsGroups.APPEARANCE)) },
+                )
+            }
+            item {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = "明暗",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(
-                                ThemeMode.SYSTEM to "跟随系统",
-                                ThemeMode.LIGHT to "浅色",
-                                ThemeMode.DARK to "深色",
-                            ).forEach { (mode, label) ->
-                                FilterChip(
-                                    selected = settings.themeMode == mode,
-                                    onClick = { update { it.copy(themeMode = mode) } },
-                                    label = { Text(label) },
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
+                        /*
+                         * 设备类型留在一级页。
+                         *
+                         * 它决定的不是「颜色」而是**这一整套界面**，判错的设备
+                         * （方表、平板）需要一条最短的回头路 —— 藏进二级页
+                         * 就变成「得先找到外观，才知道界面能换」。
+                         */
                         Text(
                             text = "设备类型",
                             style = MaterialTheme.typography.titleSmall,
@@ -295,6 +302,21 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
     SettingsGroups.RUNTIME -> Icons.Outlined.Memory
     else -> Icons.Outlined.Wifi
+}
+
+/** 外观那一行的摘要：明暗 + 颜色是从哪来的（取色 / 自己挑的 / 默认） */
+private fun appearanceSummary(settings: AppSettings): String {
+    val dark = when (settings.themeMode) {
+        ThemeMode.SYSTEM -> "跟随系统"
+        ThemeMode.DARK -> "深色"
+        ThemeMode.LIGHT -> "浅色"
+    }
+    val color = when {
+        settings.dynamicColor -> "跟随壁纸取色"
+        settings.seedColor.isBlank() -> "默认配色"
+        else -> ThemeSeeds.byHex(settings.seedColor)?.labelZh?.plus("配色") ?: "自定义配色"
+    }
+    return "$dark · $color"
 }
 
 /** 一级页的摘要。只挑手机用户最关心的那一项，多了反而看不见 */

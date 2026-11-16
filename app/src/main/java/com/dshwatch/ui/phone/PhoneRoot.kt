@@ -25,6 +25,7 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.ui.ScreenHost
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.theme.LocalDeviceProfile
 
 /**
@@ -87,13 +88,27 @@ fun PhoneRoot(
                 // 少数页面值得单独做手机版：模型列表是首次配置的必经之路，
                 // 用一条条全宽行摆出「名字 / 有没有填 Key / 用哪个模型」比卡片好用。
                 // 其余次级页（表单、插件、配对、酒馆…）复用现有实现。
-                when (nav.current) {
-                    com.dshwatch.ui.nav.Screen.Providers ->
+                val page = nav.current
+                val appearance = page is Screen.SettingsGroup &&
+                    page.id == com.dshwatch.ui.screens.settings.SettingsGroups.APPEARANCE
+                when {
+                    page == Screen.Providers ->
                         PhoneProvidersScreen(container = container, settings = settings, nav = nav)
+
+                    /*
+                     * 外观单独一页。
+                     *
+                     * 共用的 `SettingsGroupScreen` 里那张外观卡是**为手表写的**：
+                     * 界面体系、玻璃材质、屏幕形状、整体缩放、看板娘 —— 这五项
+                     * 手机主题一项都不读，摆出来就是五个按下去没反应的开关。
+                     * 手机只看颜色（明暗 / 取色 / 种子色）与语言，所以另画一页。
+                     */
+                    appearance ->
+                        PhoneAppearanceScreen(container = container, settings = settings, nav = nav)
 
                     else -> WatchStyledPage(bottomInset = true) {
                         ScreenHost(
-                            page = nav.current,
+                            page = page,
                             container = container,
                             settings = settings,
                             profile = profile,
