@@ -48,4 +48,23 @@ class DeviceKindsTest {
         assertThat(DeviceKinds.isPhone(DeviceKinds.AUTO, isWatchUi = true)).isFalse()
         assertThat(DeviceKinds.isPhone(DeviceKinds.PHONE, isWatchUi = true)).isTrue()
     }
+
+    /**
+     * 手表设置里必须有出口。
+     *
+     * 1.23.9 只在手机版设置页与引导页放了这个开关，于是已经在用手表界面的用户
+     * **永远切不到手机布局** —— 引导页走过了，设置里没有，只剩清数据重装。
+     * 这条测试盯的是「出口存在」，不是「选得对」。
+     */
+    @Test
+    fun `手表设置页能切设备类型`() {
+        val file = java.io.File(
+            "src/main/java/com/dshwatch/ui/screens/settings/SettingsGroupScreen.kt"
+        )
+        assertThat(file.isFile).isTrue()
+        val body = file.readText()
+        assertThat(body).contains("设备类型")
+        assertThat(body).contains("DeviceKinds.PHONE")
+        assertThat(body).contains("DeviceKinds.WATCH")
+    }
 }

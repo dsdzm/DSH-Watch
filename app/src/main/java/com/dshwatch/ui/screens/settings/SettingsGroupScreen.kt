@@ -407,6 +407,47 @@ private fun AppearanceGroup(
     val layouts = ChatLayouts.available(profile.isRound)
 
     SettingCard {
+        /*
+         * 设备类型排在最前：它决定的不是「颜色」，而是**这一整套界面**。
+         *
+         * 之前只有手机版设置页和引导页有这个开关，手表用户改不了 ——
+         * 引导页选过「手表」之后就没有出口了，表现为「这个 App 永远是手表布局」。
+         * 一个影响整棵界面树的开关，必须能在设置里找到。
+         */
+        Text(
+            text = "设备类型",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(4.dp))
+        SegmentedRow(
+            options = listOf("自动", "手表", "手机"),
+            selectedIndex = when (com.dshwatch.domain.model.DeviceKinds.of(settings.deviceKind)) {
+                com.dshwatch.domain.model.DeviceKinds.WATCH -> 1
+                com.dshwatch.domain.model.DeviceKinds.PHONE -> 2
+                else -> 0
+            },
+            onSelect = { index ->
+                update {
+                    it.copy(
+                        deviceKind = when (index) {
+                            1 -> com.dshwatch.domain.model.DeviceKinds.WATCH
+                            2 -> com.dshwatch.domain.model.DeviceKinds.PHONE
+                            else -> com.dshwatch.domain.model.DeviceKinds.AUTO
+                        }
+                    )
+                }
+            },
+        )
+        Text(
+            text = "切换后界面立刻换成另一套。手机布局是独立的底部导航界面，" +
+                "这里的主题、缩放、玻璃材质都不会跟过去。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Spacer(Modifier.height(10.dp))
         Text(
             text = s.theme,
             style = MaterialTheme.typography.bodyMedium,

@@ -23,6 +23,16 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.0",
+            date = "2026-11-16",
+            highlights = listOf(
+                "重做 手机对话页：顶栏换成「菜单 + 会话 + 模型」三颗药丸，空状态改成问候语 + 快捷起点，输入栏改成悬浮胶囊",
+                "重做 手机模型选择：供应商 / 模型 / 思考深度分三层摆开，带「管理模型」入口",
+                "修复 手表界面切不到手机布局：外观设置里补上「设备类型」三档",
+                "修复 手机版进不去酒馆与写作：菜单与空状态都能切场景，记录页里的角色会话也能正确打开",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.23.9",
             date = "2026-11-16",
             highlights = listOf(

@@ -16,33 +16,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,8 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,6 +54,8 @@ import com.dshwatch.domain.model.AttachmentKinds
 import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.MediaRef
 import com.dshwatch.domain.model.MessageStatus
+import com.dshwatch.domain.model.ProviderType
+import com.dshwatch.domain.model.ReasoningEffort
 import com.dshwatch.domain.model.Role
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.AskUserDialog
@@ -137,6 +120,8 @@ fun PhoneChatScreen(
 
     var input by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
+    var showSceneSheet by remember { mutableStateOf(false) }
+    var showModeSheet by remember { mutableStateOf(false) }
     var showModelPicker by remember { mutableStateOf(false) }
     var showContext by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
@@ -161,6 +146,70 @@ fun PhoneChatScreen(
         if (!settings.autoScroll) return@LaunchedEffect
         if (turns.isEmpty()) return@LaunchedEffect
         runCatching { listState.animateScrollToItem(turns.lastIndex) }
+    }
+
+    /*
+     * 顶栏那颗模型药丸的文案：模型名 + 思考强度。
+     *
+     * 强度必须出现在这里，不能只藏在模型弹窗里 —— 用户调成「高」之后，
+     * 看到的每一条回复都更慢更长，需要有个地方能解释「为什么今天这么慢」。
+     */
+    val modelName = conversation?.model?.ifBlank { provider?.defaultModel.orEmpty() }.orEmpty()
+    val effortLabel = when (provider?.reasoningEffort ?: ReasoningEffort.DEFAULT) {
+        ReasoningEffort.LOW -> "低"
+        ReasoningEffort.MEDIUM -> "中"
+        ReasoningEffort.HIGH -> "高"
+        else -> ""
+    }
+    val modelLabel = listOf(modelName.ifBlank { s.switchModel }, effortLabel)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+
+    /*
+     * 换场景：只落盘 `useScene`，然后把栈收回根。
+     *
+     * 不在手机版里直接 push 酒馆首页 —— 根屏本来就按 `useScene` 分发
+     * （见 `PhoneRoot`），push 上去会变成「同一页叠了两层」，
+     * 返回键按一次毫无变化，第二次直接退出 App。
+     */
+    fun switchScene(id: String) {
+        if (id != Scenes.of(settings.useScene)) {
+            scope.launch { container.settingsRepo.update { it.copy(useScene = id) } }
+        }
+        nav.popToRoot()
+    }
+
+    /*
+     * 语音输入走系统的识别界面（`ACTION_RECOGNIZE_SPEECH`），不在本进程录音。
+     *
+     * 这样做的好处是**不需要任何权限**：录音与识别都在识别器 App 里完成，
+     * 我们只拿到一行文本。代价是部分精简 ROM 没有识别器 —— 那时 launch
+     * 会抛 ActivityNotFoundException，接住并给一句人话，比一个按下去没反应的
+     * 麦克风键好。
+     */
+    val voice = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val text = result.data
+            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            .orEmpty()
+        if (result.resultCode == android.app.Activity.RESULT_OK && text.isNotBlank()) {
+            input = (input + " " + text).trim()
+        }
+    }
+
+    fun startVoice() {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "说点什么")
+        }
+        val ok = runCatching { voice.launch(intent) }.isSuccess
+        if (!ok) attachNote = "这台设备没有语音输入，装一个语音助手或者直接打字"
     }
 
     fun submit() {
@@ -198,60 +247,16 @@ fun PhoneChatScreen(
             .fillMaxSize()
             .imePadding(),
     ) {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text = conversation?.displayTitle?.ifBlank { s.appName } ?: s.appName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val model = conversation?.model?.ifBlank { provider?.defaultModel.orEmpty() }.orEmpty()
-                    if (model.isNotBlank()) {
-                        Text(
-                            text = if (streaming) "$model · ${s.generating}" else model,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+        PhoneChatHeader(
+            title = conversation?.displayTitle?.ifBlank { "新对话" } ?: "新对话",
+            badge = if (provider?.type == ProviderType.DSH_SERVER) "远程" else "本机",
+            remote = provider?.type == ProviderType.DSH_SERVER,
+            modelLabel = modelLabel,
+            onMenu = { showMenu = true },
+            onNewChat = {
+                scope.launch { engine.newConversation(settings, scene = Scenes.of(settings.useScene)) }
             },
-            actions = {
-                IconButton(onClick = {
-                    scope.launch { engine.newConversation(settings, scene = Scenes.CODING) }
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = s.newChat)
-                }
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = s.more)
-                }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(s.switchModel) },
-                        onClick = { showMenu = false; showModelPicker = true },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(s.ctxTitle) },
-                        onClick = { showMenu = false; showContext = true },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("清空这一轮上下文") },
-                        onClick = { showMenu = false; scope.launch { engine.markContextCut() } },
-                    )
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text(s.navSettings) },
-                        onClick = { showMenu = false; nav.select(PhoneTab.Settings) },
-                    )
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ),
+            onModel = { showModelPicker = true },
         )
 
         if (provider == null) {
@@ -261,8 +266,12 @@ fun PhoneChatScreen(
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty()) {
-                EmptyChat(
-                    codingScene = codingScene,
+                GreetingHome(
+                    agentMode = settings.agentMode,
+                    scene = settings.useScene,
+                    showMascot = settings.showMascot,
+                    onPickMode = { showModeSheet = true },
+                    onPickScene = { showSceneSheet = true },
                     onSeed = { text -> engine.send(text) },
                 )
             } else {
@@ -331,6 +340,7 @@ fun PhoneChatScreen(
             onPickFile = { runCatching { picker.launch(arrayOf("*/*")) } },
             onSend = { submit() },
             onStop = { engine.stop() },
+            onVoice = { startVoice() },
         )
     }
 
@@ -377,14 +387,71 @@ fun PhoneChatScreen(
         )
     }
 
+    if (showMenu) {
+        PhoneMenuSheet(
+            scene = settings.useScene,
+            onNewChat = {
+                showMenu = false
+                scope.launch { engine.newConversation(settings, scene = Scenes.of(settings.useScene)) }
+            },
+            onOpenSessions = { showMenu = false; nav.select(PhoneTab.Sessions) },
+            onPickScene = { showMenu = false; showSceneSheet = true },
+            onContext = { showMenu = false; showContext = true },
+            onCutContext = { showMenu = false; scope.launch { engine.markContextCut() } },
+            onOpenProviders = { showMenu = false; nav.open(Screen.Providers) },
+            onOpenSettings = { showMenu = false; nav.select(PhoneTab.Settings) },
+            onOpenHelp = { showMenu = false; nav.open(Screen.Help) },
+            onDismiss = { showMenu = false },
+        )
+    }
+
+    if (showSceneSheet) {
+        PhoneSceneSheet(
+            current = settings.useScene,
+            onPick = { id ->
+                showSceneSheet = false
+                switchScene(id)
+            },
+            onDismiss = { showSceneSheet = false },
+        )
+    }
+
+    if (showModeSheet) {
+        PhoneModeSheet(
+            current = settings.agentMode,
+            onPick = { mode ->
+                showModeSheet = false
+                scope.launch { container.settingsRepo.update { it.copy(agentMode = mode) } }
+            },
+            onDismiss = { showModeSheet = false },
+        )
+    }
+
     if (showModelPicker) {
-        PhoneModelPicker(
-            models = provider?.models.orEmpty(),
-            current = conversation?.model.orEmpty(),
-            onPick = { model ->
+        PhoneModelSheet(
+            providers = settings.providers,
+            activeProviderId = settings.activeProviderId,
+            currentModel = conversation?.model?.ifBlank { provider?.defaultModel.orEmpty() }.orEmpty(),
+            onPickProvider = { p ->
+                scope.launch { container.settingsRepo.update { it.copy(activeProviderId = p.id) } }
+            },
+            onPickModel = { model ->
                 showModelPicker = false
                 scope.launch { engine.overrideModel(model) }
             },
+            onPickEffort = { effort ->
+                scope.launch {
+                    container.settingsRepo.update { st ->
+                        // 强度是**供应商**上的字段（同一个模型在两条通道上限速不同），
+                        // 所以改的是 providers 里那一项，不是全局设置。
+                        val list = st.providers.map {
+                            if (it.id == st.activeProviderId) it.copy(reasoningEffort = effort) else it
+                        }
+                        st.copy(providers = list)
+                    }
+                }
+            },
+            onManage = { showModelPicker = false; nav.open(Screen.Providers) },
             onDismiss = { showModelPicker = false },
         )
     }
@@ -431,147 +498,6 @@ private fun NoProviderHint(onOpenProviders: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         androidx.compose.material3.FilledTonalButton(onClick = onOpenProviders) {
             Text("去配置")
-        }
-    }
-}
-
-@Composable
-private fun EmptyChat(codingScene: Boolean, onSeed: (String) -> Unit) {
-    val s = LocalStrings.current
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = if (codingScene) s.chatEmptyTitle else s.roleplayEmptyTitle,
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = if (codingScene) s.chatEmptyHint else s.roleplayEmptyHint,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(22.dp))
-        listOf(
-            "帮我写一个能跑的网页小工具",
-            "把这个仓库的结构讲清楚",
-            "查一下今天的天气，用一句话说",
-        ).forEach { seed ->
-            Surface(
-                onClick = { onSeed(seed) },
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            ) {
-                Text(
-                    text = seed,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
-            }
-        }
-    }
-}
-
-/**
- * 输入栏。
- *
- * 常驻底部、多行、回车发送（`ImeAction.Send`）。生成中把右侧按钮换成「停止」——
- * 位置不变，拇指不用找。
- */
-@Composable
-private fun PhoneComposer(
-    input: String,
-    onInput: (String) -> Unit,
-    streaming: Boolean,
-    busy: Boolean,
-    note: String,
-    attachments: List<Attachment>,
-    onRemove: (Attachment) -> Unit,
-    onPickFile: () -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-) {
-    val s = LocalStrings.current
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 0.dp,
-    ) {
-        Column {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            if (note.isNotBlank()) {
-                Text(
-                    text = note,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 18.dp, top = 8.dp, end = 18.dp),
-                )
-            }
-            if (attachments.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    attachments.forEach { att ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "📄 ${att.name}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (att.ok) {
-                                    MaterialTheme.colorScheme.onSurface
-                                } else {
-                                    MaterialTheme.colorScheme.error
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(onClick = { onRemove(att) }) {
-                                Text("移除", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                IconButton(onClick = onPickFile, enabled = !busy, modifier = Modifier.size(44.dp)) {
-                    Icon(
-                        Icons.Filled.AttachFile,
-                        contentDescription = "附件",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = onInput,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(s.inputHint) },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(22.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                )
-                Spacer(Modifier.width(6.dp))
-                FilledIconButton(
-                    onClick = { if (streaming) onStop() else onSend() },
-                    enabled = streaming || input.isNotBlank() || attachments.isNotEmpty(),
-                    modifier = Modifier.size(44.dp),
-                ) {
-                    Icon(
-                        imageVector = if (streaming) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (streaming) s.stop else s.send,
-                    )
-                }
-            }
         }
     }
 }
@@ -762,42 +688,4 @@ private fun PhoneTurn(
             MediaViewer(ref = ref, onClose = { viewingMedia = null })
         }
     }
-}
-
-/** 模型列表：手机上就是一张居中的单选列表，比手表的横向翻页好点得多 */
-@Composable
-private fun PhoneModelPicker(
-    models: List<String>,
-    current: String,
-    onPick: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val s = LocalStrings.current
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(s.switchModel) },
-        text = {
-            if (models.isEmpty()) {
-                Text(s.none, style = MaterialTheme.typography.bodyMedium)
-            } else {
-                LazyColumn {
-                    items(models.size) { i ->
-                        val model = models[i]
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = model,
-                                    fontWeight = if (model == current) FontWeight.Bold else FontWeight.Normal,
-                                )
-                            },
-                            onClick = { onPick(model) },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(s.cancel) }
-        },
-    )
 }

@@ -20,10 +20,17 @@ class PhoneUiStructureTest {
         return f.readText()
     }
 
-    /** 去注释：注释里会提到这些名字（解释「为什么不用」），不能算违规 */
+    /**
+     * 去注释：注释里会提到这些名字（解释「为什么不用」），不能算违规。
+     *
+     * 两条 lookbehind 是必需的：附件选择器传的 MIME 通配符（星号 斜杠 星号）
+     * 里含有块注释的开头，会被当成注释起点一路吞到下一个注释结尾 ——
+     * 第一次写这层过滤时它把整段输入栏代码吃掉了，于是「有 PhoneSceneSheet 调用」
+     * 这条断言莫名其妙地失败。`://` 同理，URL 里的双斜杠不是注释。
+     */
     private fun code(text: String): String = text
-        .replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
-        .replace(Regex("//[^\\n]*"), "")
+        .replace(Regex("(?<=\\s|^)\\Q/*\\E[\\s\\S]*?\\Q*/\\E"), "")
+        .replace(Regex("(?<!:)//[^\\n]*"), "")
 
     @Test
     fun `手机主题不读手表的外观字段`() {
@@ -57,8 +64,16 @@ class PhoneUiStructureTest {
     @Test
     fun `手机主页面走官方 Material3 组件`() {
         val chat = code(src("PhoneChatScreen.kt"))
-        assertThat(chat).contains("TopAppBar(")
-        assertThat(chat).contains("OutlinedTextField(")
+        // 顶栏、输入栏按参考图重做过：一颗圆形菜单键 + 两个药丸 + 悬浮输入胶囊。
+        // 不用 TopAppBar —— 它的标题区容不下「药丸套药丸」，硬塞只能往 title 里
+        // 再堆一个 Row。组件本身仍是 M3 的（Surface / TextField / FilledIconButton）。
+        assertThat(chat).contains("PhoneChatHeader(")
+        assertThat(chat).contains("PhoneComposer(")
+        assertThat(chat).contains("GreetingHome(")
+
+        val chrome = code(src("PhoneChatChrome.kt"))
+        assertThat(chrome).contains("TextField(")
+        assertThat(chrome).contains("ModalBottomSheet(")
 
         val sessions = code(src("PhoneSessionsScreen.kt"))
         assertThat(sessions).contains("LargeTopAppBar(")
@@ -67,6 +82,47 @@ class PhoneUiStructureTest {
         val root = code(src("PhoneRoot.kt"))
         assertThat(root).contains("NavigationBar(")
         assertThat(root).contains("NavigationBarItem(")
+    }
+
+    @Test
+    fun `手机版能进酒馆与写作`() {
+        // 之前只把 PhoneChatScreen 写死在「对话」tab 上，场景切换只存在于手表界面，
+        // 手机用户根本进不去这两个模式。三处都必须有出口，缺一处就断链。
+        val root = code(src("PhoneRoot.kt"))
+        assertThat(root).contains("Scenes.of(settings.useScene)")
+        assertThat(root).contains("TavernScreen(")
+        assertThat(root).contains("WritingScreen(")
+
+        val chrome = code(src("PhoneChatChrome.kt"))
+        assertThat(chrome).contains("fun PhoneSceneSheet(")
+        assertThat(chrome).contains("Scenes.all.forEach")
+
+        val chat = code(src("PhoneChatScreen.kt"))
+        assertThat(chat).contains("PhoneSceneSheet(")
+    }
+
+    @Test
+    fun `酒馆会话由角色扮演页打开而不是手机对话页`() {
+        // 手机对话页不认识角色卡与剧情开关，把酒馆会话塞进去等于剥掉上下文展示
+        val sessions = code(src("PhoneSessionsScreen.kt"))
+        assertThat(sessions).contains("Screen.RoleplayChat")
+        assertThat(sessions).contains("Scenes.CODING")
+    }
+
+    @Test
+    fun `手机界面的页面容器补状态栏内边距`() {
+        // 手机是 edge-to-edge 的，手表骨架不知道有状态栏：不补这一层，
+        // 酒馆 / 写作 / 插件这些页面的标题会压在系统时钟下面。
+        assertThat(code(src("PhoneRoot.kt"))).contains("statusBarsPadding()")
+        assertThat(code(src("PhoneChatChrome.kt"))).contains("statusBarsPadding()")
+    }
+
+    @Test
+    fun `语音输入走系统识别器并兜住缺失`() {
+        val chat = code(src("PhoneChatScreen.kt"))
+        assertThat(chat).contains("ACTION_RECOGNIZE_SPEECH")
+        // 精简 ROM 上没有识别器，launch 会抛；不接住就是一个按下去没反应的麦克风
+        assertThat(chat).contains("runCatching { voice.launch(intent) }")
     }
 
     @Test

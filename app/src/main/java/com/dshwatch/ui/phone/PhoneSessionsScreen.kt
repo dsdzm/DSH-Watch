@@ -162,7 +162,22 @@ fun PhoneSessionsScreen(
                         onClick = {
                             scope.launch {
                                 container.engine.open(conv.id)
-                                nav.select(PhoneTab.Chat)
+                                /*
+                                 * 酒馆 / 写作的会话必须交给角色扮演页渲染。
+                                 *
+                                 * 它们带角色卡、开场白、剧情开关，手机对话页不认识这些，
+                                 * 硬塞进去等于把一段对话剥掉上下文展示。
+                                 * 之前所有会话都 `nav.select(Chat)`，于是手机用户点开
+                                 * 一条酒馆记录，看到的是一个陌生的编程界面 —— 这也是
+                                 * 「手机上进不去酒馆」的另一半原因。
+                                 */
+                                if (com.dshwatch.domain.roleplay.Scenes.of(conv.scene) ==
+                                    com.dshwatch.domain.roleplay.Scenes.CODING
+                                ) {
+                                    nav.select(PhoneTab.Chat)
+                                } else {
+                                    nav.open(Screen.RoleplayChat)
+                                }
                             }
                         },
                         onRename = {

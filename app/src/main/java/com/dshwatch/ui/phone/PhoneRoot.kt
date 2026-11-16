@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.List
@@ -16,6 +18,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
@@ -58,6 +61,18 @@ fun PhoneRoot(
     val nav = rememberPhoneNavigator()
     val profile = LocalDeviceProfile.current
 
+    /*
+     * 共用页面（酒馆、写作、插件…）内部会直接 `nav.push(Screen.Settings)`。
+     *
+     * 它们不知道自己在手机版里，于是会出现「压了一层手表设置页」：
+     * 底部导航消失、返回键回不到刚才那一页。这里做一次收敛 ——
+     * 如果栈顶其实是某个 tab 的根页，就当成切 tab 处理（清栈 + 选中）。
+     */
+    LaunchedEffect(nav.current, nav.canGoBack) {
+        val owner = PhoneTab.of(nav.current)
+        if (nav.canGoBack && owner != null) nav.select(owner)
+    }
+
     BackHandler(enabled = nav.canGoBack) {
         nav.pop()
     }
@@ -75,17 +90,49 @@ fun PhoneRoot(
                 when (nav.current) {
                     com.dshwatch.ui.nav.Screen.Providers ->
                         PhoneProvidersScreen(container = container, settings = settings, nav = nav)
-                    else -> ScreenHost(
-                        page = nav.current,
-                        container = container,
-                        settings = settings,
-                        profile = profile,
-                        nav = nav.watchStack,
-                    )
+
+                    else -> WatchStyledPage(bottomInset = true) {
+                        ScreenHost(
+                            page = nav.current,
+                            container = container,
+                            settings = settings,
+                            profile = profile,
+                            nav = nav.watchStack,
+                        )
+                    }
                 }
             } else {
                 when (nav.tab) {
-                    PhoneTab.Chat -> PhoneChatScreen(container = container, settings = settings, nav = nav)
+                    /*
+                     * 「对话」这个 tab 按场景分发 —— 和手表那套同一套规则
+                     * （见 `ScreenHost` 里 `Screen.Chat` 那条）。
+                     *
+                     * 之前这里写死 `PhoneChatScreen`，于是手机版只有编程一个模式：
+                     * 设置里把场景切成酒馆，回到对话页仍然是编程界面，
+                     * 而酒馆首页只能从手表界面进 —— 手机上等于不存在。
+                     */
+                    PhoneTab.Chat -> when (com.dshwatch.domain.roleplay.Scenes.of(settings.useScene)) {
+                        com.dshwatch.domain.roleplay.Scenes.TAVERN ->
+                            WatchStyledPage {
+                                com.dshwatch.ui.screens.tavern.TavernScreen(
+                                    container = container,
+                                    settings = settings,
+                                    nav = nav.watchStack,
+                                )
+                            }
+
+                        com.dshwatch.domain.roleplay.Scenes.WRITING ->
+                            WatchStyledPage {
+                                com.dshwatch.ui.screens.writing.WritingScreen(
+                                    container = container,
+                                    settings = settings,
+                                    nav = nav.watchStack,
+                                )
+                            }
+
+                        else -> PhoneChatScreen(container = container, settings = settings, nav = nav)
+                    }
+
                     PhoneTab.Sessions -> PhoneSessionsScreen(container = container, settings = settings, nav = nav)
                     PhoneTab.Settings -> PhoneSettingsScreen(container = container, settings = settings, nav = nav)
                 }
@@ -94,6 +141,28 @@ fun PhoneRoot(
         if (!nav.canGoBack) {
             PhoneBottomBar(nav)
         }
+    }
+}
+
+/**
+ * 手表那套骨架的落地容器。
+ *
+ * 手机是 edge-to-edge 的（`enableEdgeToEdge`），而 `WatchScaffold` / `WatchTopBar`
+ * 不知道有状态栏 —— 它们是为「表盘上没有状态栏」写的。不补这一层，
+ * 酒馆 / 写作 / 插件这些页面的标题会正好压在系统时钟下面。
+ *
+ * 底部那一条只在**没有底部导航**时补：有导航时导航栏自己带了导航条内边距，
+ * 再补一次会在最后一条内容下面多出十几 dp 的空白。
+ */
+@Composable
+private fun WatchStyledPage(bottomInset: Boolean = false, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .then(if (bottomInset) Modifier.navigationBarsPadding() else Modifier),
+    ) {
+        content()
     }
 }
 
