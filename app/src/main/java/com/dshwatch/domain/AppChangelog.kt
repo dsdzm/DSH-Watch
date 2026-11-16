@@ -23,6 +23,18 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.27.0",
+            date = "2026-11-16",
+            highlights = listOf(
+                "新增 多版本回答：重新生成不再丢掉上一版，回答下面可以 ‹ 1/2 › 来回翻",
+                "新增 继续写：回答说到一半停了，接着往下写，不用重新提问",
+                "新增 编辑已发提问：改完直接重跑这一轮，后面的回答按新问题重来",
+                "新增 服务端标题：DeepSeek 第一轮结束后顺带给会话起个短标题，比截前 18 字准",
+                "新增 DeepSeek 官方搜索：当前供应商是 DeepSeek 时，联网搜索走官方接口，结果带长摘要",
+                "新增 历史记录多选：长按进入，批量置顶 / 取消置顶 / 删除",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.26.0",
             date = "2026-11-16",
             highlights = listOf(

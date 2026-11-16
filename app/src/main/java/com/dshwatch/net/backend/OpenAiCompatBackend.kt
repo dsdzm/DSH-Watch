@@ -337,6 +337,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
 
             val choice = chunk.choices.firstOrNull() ?: continue
             val delta = choice.delta ?: choice.message
+            delta?.title?.takeIf { it.isNotBlank() }?.let { emit(ChatEvent.Title(it)) }
             delta?.reasoningText()?.takeIf { it.isNotEmpty() }
                 ?.let { emit(ChatEvent.Reasoning(it)) }
             delta?.content?.takeIf { it.isNotEmpty() }
@@ -370,6 +371,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         chunk.error?.let { throw DshError.Server(it.message ?: "未知错误") }
         val choice = chunk.choices.firstOrNull()
         val msg = choice?.message
+        msg?.title?.takeIf { it.isNotBlank() }?.let { emit(ChatEvent.Title(it)) }
         msg?.reasoningText()?.takeIf { it.isNotEmpty() }?.let { emit(ChatEvent.Reasoning(it)) }
         msg?.content?.takeIf { it.isNotEmpty() }?.let { emit(ChatEvent.Text(it)) }
         msg?.toolCalls?.forEach { tc ->
@@ -393,6 +395,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
             withUsage = withUsage,
             tools = r.tools,
             toolChoice = r.toolChoice,
+            withTitle = r.titleRequested,
         )
         return Request.Builder()
             .url(endpoint)
@@ -415,6 +418,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         withUsage: Boolean,
         tools: List<JsonObject> = emptyList(),
         toolChoice: String = "auto",
+        withTitle: Boolean = false,
     ): String {
         val payload: JsonObject = buildJsonObject {
             put("model", model)
@@ -439,6 +443,15 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
             if (tools.isNotEmpty()) {
                 putJsonArray("tools") { tools.forEach { add(it) } }
                 put("tool_choice", toolChoice)
+            }
+            /*
+             * DeepSeek 扩展字段。只有它认，别的兼容端点会：
+             *  - 直接忽略（多数），或
+             *  - 400 拒绝未知字段（少数严格网关）。
+             * 所以这个字段只在供应商判定为 DeepSeek 时才会为 true，见 ChatRequest.titleRequested。
+             */
+            if (withTitle) {
+                putJsonObject("title") { put("enabled", true) }
             }
         }
         return json.encodeToString(JsonObject.serializer(), payload)

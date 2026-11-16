@@ -205,6 +205,7 @@ class AppContainer(private val app: Context) {
         github = githubApi,
         // B站 Cookie 同样是现取：用户刚粘完就要能发评论
         biliCookie = { keyStore.getBiliCookie().orEmpty() },
+        apiKeyOf = { id -> keyStore.getApiKey(id).orEmpty() },
     )
 
     /** agent 工具集；ToolContext 通过 lambda 拿实时设备画像 */

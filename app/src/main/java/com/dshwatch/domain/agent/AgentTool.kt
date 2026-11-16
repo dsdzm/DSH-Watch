@@ -99,6 +99,14 @@ class ToolContext(
      * 而 [ToolContext] 是构造时快照的。匿名时返回空串。
      */
     val biliCookie: () -> String = { "" },
+    /**
+     * 按供应商 id 取 API Key。
+     *
+     * 同样是 lambda：Key 存在加密存储里，改完立刻生效；也让工具不必认识
+     * [com.dshwatch.core.SecureKeyStore]。目前只有 DeepSeek 官方搜索用它 ——
+     * 走模型自己的账号，按次计费，比第三方抓 HTML 稳。
+     */
+    val apiKeyOf: (String) -> String = { "" },
 ) {
     fun requireContext(): Context =
         appContext ?: error("该工具需要 Android Context，当前运行环境没有提供")
@@ -127,6 +135,7 @@ class ToolContext(
         cloudRuns = cloudRuns,
         github = github,
         biliCookie = biliCookie,
+        apiKeyOf = apiKeyOf,
     )
 
     /** 模型给的路径 → 工作空间内的全局相对路径（落在本会话目录之下）。null = 路径非法 */

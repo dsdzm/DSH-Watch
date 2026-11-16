@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.ManageSearch
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
@@ -84,6 +85,8 @@ internal fun PhoneHistoryDrawer(
     onNewChat: () -> Unit,
     onPickScene: () -> Unit,
     onSettings: () -> Unit,
+    /** 去记录页整理（多选在那里做，抽屉里放不下两个模式） */
+    onManage: () -> Unit,
     onRename: (Conversation) -> Unit,
     onTogglePin: (Conversation) -> Unit,
     onAbout: (Conversation) -> Unit,
@@ -170,6 +173,12 @@ internal fun PhoneHistoryDrawer(
                 title = sceneLabel,
                 trailing = "切换 ›",
                 onClick = onPickScene,
+            )
+            DrawerAction(
+                icon = Icons.Outlined.ManageSearch,
+                title = "全部记录",
+                trailing = "整理 ›",
+                onClick = onManage,
             )
 
             Spacer(Modifier.height(6.dp))

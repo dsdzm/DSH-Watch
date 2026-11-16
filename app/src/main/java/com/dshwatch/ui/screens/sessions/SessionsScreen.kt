@@ -15,13 +15,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -106,6 +110,13 @@ fun SessionsScreen(
     var exportTarget by remember { mutableStateOf<Conversation?>(null) }
     var showImport by remember { mutableStateOf(false) }
     var cardTitle by remember { mutableStateOf("") }
+    /*
+     * 多选。手表上没有「拖框」，也不适合常驻复选框 —— 列表平时是拿来点开的。
+     * 所以做成一个模式：从 ⋯ 菜单进去，选中后批量置顶 / 删除，完成后退出。
+     */
+    var selecting by remember { mutableStateOf(false) }
+    val selectedIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey, filterScene, filterCardId) {
         conversations = if (filtered) {
@@ -123,7 +134,12 @@ fun SessionsScreen(
         title = if (filtered && cardTitle.isNotBlank()) cardTitle else s.sessionsTitle,
         onBack = { nav.pop() },
         actions = {
-            IconTap(Icons.Filled.Add, s.newChat) {
+            if (selecting) {
+                IconTap(Icons.Filled.Done, "完成") {
+                    selecting = false
+                    selectedIds.clear()
+                }
+            } else IconTap(Icons.Filled.Add, s.newChat) {
                 scope.launch {
                     // 过滤模式下「新建」必须落在同一张卡上，
                     // 否则从角色的历史页点新建，会得到一个编程场景的空会话
@@ -163,27 +179,60 @@ fun SessionsScreen(
                     EmptyState(title = if (filtered) "还没有对话" else s.noSessions)
                 }
             }
+            if (selecting) {
+                item(key = "__select_bar__") {
+                    SelectionBar(
+                        count = selectedIds.size,
+                        total = conversations.size,
+                        onSelectAll = {
+                            if (selectedIds.size == conversations.size) {
+                                selectedIds.clear()
+                            } else {
+                                selectedIds.clear()
+                                selectedIds.addAll(conversations.map { it.id })
+                            }
+                        },
+                        onPin = {
+                            scope.launch {
+                                selectedIds.forEach { id ->
+                                    container.conversationStore.setPinned(id, true)
+                                }
+                                selectedIds.clear()
+                                selecting = false
+                                reloadKey++
+                            }
+                        },
+                        onDelete = { confirmBatchDelete = true },
+                    )
+                }
+            }
             items(conversations.size, key = { conversations[it].id }) { index ->
                 val conv = conversations[index]
                 ConversationRow(
                     conversation = conv,
+                    selecting = selecting,
+                    selected = conv.id in selectedIds,
                     onClick = {
-                        scope.launch {
-                            container.engine.open(conv.id)
-                            /*
-                             * 打开之后回到哪个页面，由会话自己的场景决定，
-                             * 而不是由「从哪进来」决定 —— 在全局列表里点开一个
-                             * 酒馆会话，以前会跳进编程对话页，那里没有角色名、
-                             * 也没有记忆入口，看起来像内容丢了。
-                             */
-                            if (filtered ||
-                                (conv.scene.isNotBlank() &&
-                                    conv.scene != com.dshwatch.domain.roleplay.Scenes.CODING)
-                            ) {
-                                nav.pop()
-                                nav.push(Screen.RoleplayChat)
-                            } else {
-                                nav.toChat()
+                        if (selecting) {
+                            if (!selectedIds.remove(conv.id)) selectedIds.add(conv.id)
+                        } else {
+                            scope.launch {
+                                container.engine.open(conv.id)
+                                /*
+                                 * 打开之后回到哪个页面，由会话自己的场景决定，
+                                 * 而不是由「从哪进来」决定 —— 在全局列表里点开一个
+                                 * 酒馆会话，以前会跳进编程对话页，那里没有角色名、
+                                 * 也没有记忆入口，看起来像内容丢了。
+                                 */
+                                if (filtered ||
+                                    (conv.scene.isNotBlank() &&
+                                        conv.scene != com.dshwatch.domain.roleplay.Scenes.CODING)
+                                ) {
+                                    nav.pop()
+                                    nav.push(Screen.RoleplayChat)
+                                } else {
+                                    nav.toChat()
+                                }
                             }
                         }
                     },
@@ -201,6 +250,25 @@ fun SessionsScreen(
         }
     }
 
+    if (confirmBatchDelete) {
+        ConfirmDialog(
+            title = "删除 ${selectedIds.size} 个对话",
+            text = "删除后无法恢复。正在生成的那条如果被选中，也会一起停掉。",
+            confirmText = "删除",
+            onConfirm = {
+                confirmBatchDelete = false
+                val doomed = selectedIds.toList()
+                scope.launch {
+                    doomed.forEach { id -> container.conversationStore.delete(id) }
+                    selectedIds.clear()
+                    selecting = false
+                    reloadKey++
+                }
+            },
+            onDismiss = { confirmBatchDelete = false },
+        )
+    }
+
     menuTarget?.let { conv ->
         GlassDialog(
             onDismissRequest = { menuTarget = null },
@@ -215,6 +283,12 @@ fun SessionsScreen(
                     MenuItem("导出对话") {
                         menuTarget = null
                         exportTarget = conv
+                    }
+                    MenuItem("多选") {
+                        menuTarget = null
+                        selecting = true
+                        selectedIds.clear()
+                        selectedIds.add(conv.id)
                     }
                     MenuItem(s.sessionWorkDir) {
                         menuTarget = null
@@ -346,6 +420,8 @@ private fun ConversationRow(
     conversation: Conversation,
     onClick: () -> Unit,
     onMore: () -> Unit,
+    selecting: Boolean = false,
+    selected: Boolean = false,
 ) {
     val s = LocalStrings.current
     Row(
@@ -359,6 +435,18 @@ private fun ConversationRow(
             .padding(start = 14.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selecting) {
+            androidx.compose.material3.Icon(
+                imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outline
+                },
+                modifier = Modifier.padding(end = 8.dp).size(18.dp),
+            )
+        }
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (conversation.pinned) {
@@ -397,8 +485,10 @@ private fun ConversationRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Box {
-            IconTap(Icons.Filled.MoreVert, s.more, onClick = onMore)
+        if (!selecting) {
+            Box {
+                IconTap(Icons.Filled.MoreVert, s.more, onClick = onMore)
+            }
         }
     }
 }
@@ -987,4 +1077,53 @@ private fun safeFileName(raw: String): String {
     val cleaned = raw.replace(Regex("[\\\\/:*?\"<>|\\n\\r\\t]"), "_").trim()
     val short = if (cleaned.length > 20) cleaned.take(20) else cleaned
     return short.ifBlank { "对话" }
+}
+
+/**
+ * 多选时的操作条。
+ *
+ * 放在列表**最上面**而不是底部：手表滚动位置常常停在中间，,
+ * 底部的浮动条会盖住最后几条；而这一段跟列表一起滚，位置可预期。
+ */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    total: Int,
+    onSelectAll: () -> Unit,
+    onPin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = "已选 $count / $total",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            androidx.compose.material3.TextButton(onClick = onSelectAll) {
+                Text(
+                    text = if (count == total) "取消全选" else "全选",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            WatchGhostButton(
+                text = "置顶",
+                enabled = count > 0,
+                modifier = Modifier.weight(1f),
+                onClick = onPin,
+            )
+            WatchGhostButton(
+                text = "删除",
+                enabled = count > 0,
+                modifier = Modifier.weight(1f),
+                onClick = onDelete,
+            )
+        }
+    }
 }

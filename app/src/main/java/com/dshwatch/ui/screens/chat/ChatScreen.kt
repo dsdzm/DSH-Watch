@@ -662,6 +662,8 @@ fun ChatScreen(
                                 isRound = round,
                                 onCopy = copyText,
                                 onRegenerate = { engine.regenerate(message.id) },
+                                onContinue = { engine.continueGeneration(message.id) },
+                                onSwitchVersion = { i -> engine.switchVersion(message.id, i) },
                                 onDelete = { pendingDelete = message },
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
@@ -683,6 +685,7 @@ fun ChatScreen(
                                 isRound = round,
                                 onCopy = copyText,
                                 onRegenerate = { engine.regenerate(msgs.last().id) },
+                                onContinue = { engine.continueGeneration(msgs.last().id) },
                                 onDelete = { pendingDelete = msgs.last() },
                                 sizeOf = sizeOf,
                                 onOpenArtifact = openArtifact,
@@ -1146,6 +1149,8 @@ private fun MessageItem(
     isRound: Boolean,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
+    onContinue: () -> Unit,
+    onSwitchVersion: (Int) -> Unit,
     onDelete: () -> Unit,
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
@@ -1354,6 +1359,15 @@ private fun MessageItem(
             )
         }
 
+        if (!isStreaming && message.hasVersions) {
+            Spacer(Modifier.height(6.dp))
+            VersionChip(
+                index = message.versionIndex,
+                total = message.versions.size,
+                onPick = onSwitchVersion,
+            )
+        }
+
         // 操作行常显：复制 / 重试 / 删除不该藏在「先点一下消息」后面。
         // 纯媒体消息（出图 / 出视频）没有正文，但「重新生成」恰恰是它最常用的操作。
         if (!isStreaming && (body.isNotBlank() || message.hasMedia)) {
@@ -1365,6 +1379,7 @@ private fun MessageItem(
                 if (body.isNotBlank()) MsgAction(text = s.copy) { onCopy(body) }
                 if (!isUser) {
                     MsgAction(text = s.regenerate) { onRegenerate() }
+                    MsgAction(text = "续写") { onContinue() }
                     MsgAction(text = s.delete) { onDelete() }
                 }
             }
@@ -1385,6 +1400,7 @@ private fun AgentTurnItem(
     isRound: Boolean,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
+    onContinue: () -> Unit,
     onDelete: () -> Unit,
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
@@ -1523,6 +1539,7 @@ private fun AgentTurnItem(
             ) {
                 MsgAction(text = s.copy) { onCopy(answer) }
                 MsgAction(text = s.regenerate) { onRegenerate() }
+                MsgAction(text = "续写") { onContinue() }
                 MsgAction(text = s.delete) { onDelete() }
             }
         }
@@ -2066,4 +2083,26 @@ internal fun rememberTokensPerSecond(
         }
     }
     return tps
+}
+
+/**
+ * 版本切换（手表版）。
+ *
+ * 只用一行字，不套胶囊：手表上一屏只有两百来 dp，一个胶囊会占掉半条消息的宽度。
+ * `‹ 2/3 ›` 本身就是聊天应用里最通用的写法，不需要再解释。
+ */
+@Composable
+private fun VersionChip(index: Int, total: Int, onPick: (Int) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MsgAction(text = "‹") { if (index > 0) onPick(index - 1) }
+        Text(
+            text = "${index + 1}/$total",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        MsgAction(text = "›") { if (index < total - 1) onPick(index + 1) }
+    }
 }

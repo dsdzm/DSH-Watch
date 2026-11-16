@@ -20,12 +20,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -87,6 +91,20 @@ fun PhoneSessionsScreen(
     var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
     var renameText by remember { mutableStateOf("") }
 
+    /*
+     * 多选。
+     *
+     * 手机上「整理记录」几乎从来不是一条一条来的 —— 上周那批调试会话、
+     * 导入进来重复的那几十条，用户想的是「把这几条一起删了」。
+     * 一条条点 ⋯ 再点删除，删十条要二十几次点击，中间必错。
+     *
+     * 长按进入（和微信、Telegram 一致），点一下切换选中；顶部换成计数，
+     * 底部浮出操作条。退出用左上角的 ✕，不占返回键。
+     */
+    var selecting by remember { mutableStateOf(false) }
+    val selected = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var confirmDelete by remember { mutableStateOf(false) }
+
     LaunchedEffect(reloadKey) {
         conversations = runCatching { container.conversationStore.index() }.getOrDefault(emptyList())
     }
@@ -105,23 +123,60 @@ fun PhoneSessionsScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         LargeTopAppBar(
             title = {
-                Column {
-                    Text(s.sessionsTitle, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "${conversations.size} 条记录",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (selecting) {
+                    Column {
+                        Text("已选 ${selected.size} 条", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "点一条切换选中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Column {
+                        Text(s.sessionsTitle, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "${conversations.size} 条记录",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            navigationIcon = {
+                if (selecting) {
+                    IconButton(onClick = {
+                        selecting = false
+                        selected.clear()
+                    }) {
+                        Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                    }
                 }
             },
             actions = {
-                IconButton(onClick = {
-                    scope.launch {
-                        container.engine.newConversation(settings)
-                        nav.select(PhoneTab.Chat)
+                if (selecting) {
+                    IconButton(onClick = {
+                        if (selected.size == shown.size) {
+                            selected.clear()
+                        } else {
+                            selected.clear()
+                            selected.addAll(shown.map { it.id })
+                        }
+                    }) {
+                        Icon(
+                            Icons.Outlined.SelectAll,
+                            contentDescription = if (selected.size == shown.size) "取消全选" else "全选",
+                        )
                     }
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = s.newChat)
+                } else {
+                    IconButton(onClick = {
+                        scope.launch {
+                            container.engine.newConversation(settings)
+                            nav.select(PhoneTab.Chat)
+                        }
+                    }) {
+                        Icon(Icons.Filled.Add, contentDescription = s.newChat)
+                    }
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -152,31 +207,37 @@ fun PhoneSessionsScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(shown, key = { it.id }) { conv ->
                     ConversationCard(
                         conversation = conv,
+                        selecting = selecting,
+                        selected = conv.id in selected,
                         onClick = {
-                            scope.launch {
-                                container.engine.open(conv.id)
-                                /*
-                                 * 酒馆 / 写作的会话必须交给角色扮演页渲染。
-                                 *
-                                 * 它们带角色卡、开场白、剧情开关，手机对话页不认识这些，
-                                 * 硬塞进去等于把一段对话剥掉上下文展示。
-                                 * 之前所有会话都 `nav.select(Chat)`，于是手机用户点开
-                                 * 一条酒馆记录，看到的是一个陌生的编程界面 —— 这也是
-                                 * 「手机上进不去酒馆」的另一半原因。
-                                 */
-                                if (com.dshwatch.domain.roleplay.Scenes.of(conv.scene) ==
-                                    com.dshwatch.domain.roleplay.Scenes.CODING
-                                ) {
-                                    nav.select(PhoneTab.Chat)
-                                } else {
-                                    nav.open(Screen.RoleplayChat)
+                            if (selecting) {
+                                if (!selected.remove(conv.id)) selected.add(conv.id)
+                            } else {
+                                scope.launch {
+                                    container.engine.open(conv.id)
+                                    /*
+                                     * 酒馆 / 写作的会话必须交给角色扮演页渲染。
+                                     *
+                                     * 它们带角色卡、开场白、剧情开关，手机对话页不认识这些，
+                                     * 硬塞进去等于把一段对话剥掉上下文展示。
+                                     * 之前所有会话都 `nav.select(Chat)`，于是手机用户点开
+                                     * 一条酒馆记录，看到的是一个陌生的编程界面 —— 这也是
+                                     * 「手机上进不去酒馆」的另一半原因。
+                                     */
+                                    if (com.dshwatch.domain.roleplay.Scenes.of(conv.scene) ==
+                                        com.dshwatch.domain.roleplay.Scenes.CODING
+                                    ) {
+                                        nav.select(PhoneTab.Chat)
+                                    } else {
+                                        nav.open(Screen.RoleplayChat)
+                                    }
                                 }
                             }
                         },
@@ -191,11 +252,65 @@ fun PhoneSessionsScreen(
                             }
                         },
                         onDelete = { deleteTarget = conv },
+                        onLongPress = {
+                            selecting = true
+                            if (conv.id !in selected) selected.add(conv.id)
+                        },
                     )
                 }
                 item { Spacer(Modifier.height(12.dp)) }
             }
         }
+
+        if (selecting) {
+            SelectionActions(
+                count = selected.size,
+                onPin = {
+                    scope.launch {
+                        selected.toList().forEach { id ->
+                            container.conversationStore.setPinned(id, true)
+                        }
+                        selected.clear()
+                        selecting = false
+                        reloadKey++
+                    }
+                },
+                onUnpin = {
+                    scope.launch {
+                        selected.toList().forEach { id ->
+                            container.conversationStore.setPinned(id, false)
+                        }
+                        selected.clear()
+                        selecting = false
+                        reloadKey++
+                    }
+                },
+                onDelete = { confirmDelete = true },
+            )
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("删除 ${selected.size} 条记录？") },
+            text = { Text("里边的消息会一起删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    val doomed = selected.toList()
+                    scope.launch {
+                        doomed.forEach { id -> runCatching { container.conversationStore.delete(id) } }
+                        selected.clear()
+                        selecting = false
+                        reloadKey++
+                    }
+                }) { Text(s.delete) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text(s.cancel) }
+            },
+        )
     }
 
     renameTarget?.let { target ->
@@ -257,6 +372,9 @@ private fun ConversationCard(
     onRename: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
+    selecting: Boolean = false,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(
@@ -267,10 +385,31 @@ private fun ConversationCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                .combinedClickable(
+                    onClick = onClick,
+                    // 选择模式下长按不再弹菜单：这时用户是在挑东西，不是想操作一条
+                    onLongClick = { if (selecting) onClick() else onLongPress() },
+                )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (selecting) {
+                Icon(
+                    imageVector = if (selected) {
+                        Icons.Filled.CheckCircle
+                    } else {
+                        Icons.Outlined.RadioButtonUnchecked
+                    },
+                    contentDescription = null,
+                    tint = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outline
+                    },
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (conversation.pinned) {
@@ -303,7 +442,7 @@ private fun ConversationCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = { menu = true }) {
+            if (!selecting) IconButton(onClick = { menu = true }) {
                 Icon(
                     Icons.Filled.MoreVert,
                     contentDescription = "更多",
@@ -347,4 +486,56 @@ private fun timeLabel(ts: Long): String {
         else -> SimpleDateFormat("yyyy-MM", Locale.getDefault())
     }
     return fmt.format(Date(ts))
+}
+
+/**
+ * 多选时的底部操作条。
+ *
+ * 浮在列表上方而不是塞进列表：手机上用户刚点完的那几条可能在任意位置，
+ * 底部固定条始终在拇指够得到的地方。
+ */
+@Composable
+private fun SelectionActions(
+    count: Int,
+    onPin: () -> Unit,
+    onUnpin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        color = scheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            SelectionAction("置顶", count > 0, onPin)
+            SelectionAction("取消置顶", count > 0, onUnpin)
+            SelectionAction("删除", count > 0, onDelete, danger = true)
+        }
+    }
+}
+
+@Composable
+private fun SelectionAction(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+) {
+    TextButton(onClick = onClick, enabled = enabled) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                danger -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.primary
+            },
+        )
+    }
 }

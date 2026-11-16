@@ -17,6 +17,8 @@ data class OaiDelta(
     @SerialName("reasoning_content") val reasoningContent: String? = null,
     @SerialName("reasoning") val reasoning: String? = null,
     @SerialName("tool_calls") val toolCalls: List<OaiToolCall>? = null,
+    /** DeepSeek 扩展：title.enabled=true 时，服务端顺带给这一轮起个短标题 */
+    val title: String? = null,
 ) {
     /** 兼容不同厂商对思维链字段的命名 */
     fun reasoningText(): String? = reasoningContent ?: reasoning

@@ -491,7 +491,15 @@ class ChatEngine(
         return MediaModels.kindOf(model)
     }
 
-    /** 重新生成某条助手消息（丢弃它及其之后的消息，用它的父消息再跑一遍） */
+    /**
+     * 重新生成某条助手消息。
+     *
+     * 旧回答不丢：它被存成这一轮的一个版本，生成完可以 `‹ 1/3 ›` 翻回去。
+     * 之前是直接 `take(index)` 把它连同之后的消息一起扔掉 —— 用户想问
+     * 「还是上一个说法好」，只能再生成一次碰运气。
+     *
+     * 「之后的消息」仍然丢弃：重新生成改变了下文的前提，留着会接不上。
+     */
     fun regenerate(assistantMessageId: String) {
         if (job?.isActive == true) {
             _banner.value = Banner("正在生成中")
@@ -503,6 +511,8 @@ class ChatEngine(
         val target = list[index]
         val parent = target.parentId
         val kept = list.take(index)
+        // 已有的版本在前，当前内容在后 —— 第一次重新生成时 versions 是空的
+        val versions = target.versions.ifEmpty { listOf(target.snapshot()) }
         val media = target.media.firstOrNull()
         job = appScope.launch {
             guardedRun {
@@ -512,10 +522,110 @@ class ChatEngine(
                     _messages.value = kept
                     runMediaSend(media.prompt, media.kind, reuseUserMessage = true)
                 } else {
-                    runSend(regenerateOf = parent, existingHistory = kept)
+                    runSend(
+                        regenerateOf = parent,
+                        existingHistory = kept,
+                        branchVersions = versions,
+                    )
                 }
             }
         }
+    }
+
+    /**
+     * 继续生成：把最后一条回答接着往下写。
+     *
+     * 协议上就是「历史停在一条 assistant 消息上」—— 模型看到的最后一句话是
+     * 自己说的半截内容，自然会接着说。不需要额外的 prefix 字段，OpenAI 兼容
+     * 端点与 DeepSeek 都接受这种写法。
+     *
+     * 只允许最后一条：中间那条「继续」会让它后面的问答全部作废，
+     * 用户点的是续写，不该顺手删掉半段对话。
+     */
+    fun continueGeneration(messageId: String) {
+        if (job?.isActive == true) {
+            _banner.value = Banner("正在生成中")
+            return
+        }
+        val list = _messages.value
+        val index = list.indexOfFirst { it.id == messageId }
+        if (index < 0 || index != list.lastIndex) {
+            _banner.value = Banner("只能续写最后一条回答")
+            return
+        }
+        val target = list[index]
+        if (target.role != Role.ASSISTANT || target.isStreaming) return
+        if (target.content.isBlank() && target.reasoning.isBlank()) return
+        job = appScope.launch {
+            guardedRun {
+                runSend(
+                    existingHistory = list.dropLast(1),
+                    regenerateOf = target.parentId,
+                    continuation = target,
+                )
+            }
+        }
+    }
+
+    /**
+     * 编辑一条已发出的提问，然后用它重跑。
+     *
+     * 语义与重新生成一致：这条提问之后的内容全部作废（它们回答的是旧问题）。
+     * 提问本身留着原 id，用户那条消息不会在列表里跳位置。
+     */
+    fun editMessage(messageId: String, newText: String) {
+        val text = newText.trim()
+        if (text.isEmpty()) return
+        if (job?.isActive == true) {
+            _banner.value = Banner("正在生成中")
+            return
+        }
+        val list = _messages.value
+        val index = list.indexOfFirst { it.id == messageId }
+        if (index < 0) return
+        val target = list[index]
+        if (target.role != Role.USER) return
+        val edited = target.copy(
+            content = text,
+            createdAt = System.currentTimeMillis(),
+        )
+        val kept = list.take(index) + edited
+        job = appScope.launch {
+            guardedRun {
+                runSend(regenerateOf = edited.id, existingHistory = kept)
+            }
+        }
+    }
+
+    /**
+     * 切到某一版回答。
+     *
+     * 只换内容、思考与用量，不动消息 id 与位置 —— 版本是同一条消息的几种说法，
+     * 切完继续提问，上下文用的就是切过去的那一版。
+     */
+    fun switchVersion(messageId: String, index: Int) {
+        if (job?.isActive == true) {
+            _banner.value = Banner("正在生成中")
+            return
+        }
+        val conv = _conversation.value ?: return
+        val list = _messages.value
+        val pos = list.indexOfFirst { it.id == messageId }
+        if (pos < 0) return
+        val msg = list[pos]
+        val version = msg.versions.getOrNull(index) ?: return
+        if (index == msg.versionIndex) return
+        val updated = msg.copy(
+            content = version.content,
+            reasoning = version.reasoning,
+            usage = version.usage,
+            status = version.status,
+            model = version.model.ifBlank { msg.model },
+            versionIndex = index,
+            error = if (version.status == MessageStatus.ERROR) msg.error else "",
+        )
+        _messages.value = list.toMutableList().also { it[pos] = updated }
+        appScope.launch { runCatching { persist(conv, _messages.value) } }
     }
 
     /** 用户主动点「停止」 */
@@ -804,6 +914,13 @@ class ChatEngine(
         regenerateOf: String,
         existingHistory: List<ChatMessage>? = null,
         attachments: List<com.dshwatch.domain.model.Attachment> = emptyList(),
+        /**
+         * 续写目标：历史里**不含**它，请求时作为最后一条 assistant 补进去，
+         * 生成结果写回同一个消息 id，界面上是「这段话接着变长」而不是新冒出一条。
+         */
+        continuation: ChatMessage? = null,
+        /** 重新生成时已有的历史版本，成功后连同新回答一起写进消息 */
+        branchVersions: List<com.dshwatch.domain.model.MessageVersion> = emptyList(),
     ) {
         val settings = settingsRepo.current()
         val provider = settings.activeProvider
@@ -981,6 +1098,16 @@ class ChatEngine(
             .filter { it.ok && it.kind != com.dshwatch.domain.model.AttachmentKinds.IMAGE }
             .associate { it.id to com.dshwatch.data.attachment.AttachmentStore.readText(it) }
         var turns: List<ChatTurn> = fullSeq.drop(fromIndex).flatMap { it.toTurns(attachTexts) }
+        /*
+         * 续写：把那条半截回答作为最后一条 assistant 补进请求。
+         *
+         * 它不在 workingList 里（列表里由 placeholder 顶替同一个 id，界面上才会
+         * 接着变长而不是多一条），但模型必须看见「自己刚才说到哪」，
+         * 否则它会从头再答一遍。
+         */
+        if (continuation != null && continuation.content.isNotBlank()) {
+            turns = turns + ChatTurn(role = "assistant", content = continuation.content)
+        }
         // 供应商不支持图片输入时，图仍留在会话里可回看，但不进请求
         if (!provider.visionInput) {
             turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
@@ -1007,6 +1134,10 @@ class ChatEngine(
         var denialFedBack = false
 
         if (settings.foregroundService) setStreaming(true)
+
+        // 这一轮里有几条用户消息：等于 1 才是「第一轮」，服务端标题只在第一轮要
+        val conversationUserTurns = workingList.count { it.role == Role.USER }
+        var titleAsked = false
 
         var failure: DshError? = null
         var usedSteps = 0
@@ -1133,17 +1264,26 @@ class ChatEngine(
                 base.map(ToolRegistry::specOf)
             }
 
-            val placeholder = ChatMessage(
-                id = Ids.new(),
-                role = Role.ASSISTANT,
-                content = "",
-                createdAt = System.currentTimeMillis(),
-                status = MessageStatus.STREAMING,
-                model = model,
-                providerId = provider.id,
-                parentId = newUserMessage?.id ?: regenerateOf,
-                stepIndex = if (agentOn) step else 0,
-            )
+            val placeholder = if (continuation != null && step == 1) {
+                // 续写：沿用原消息的 id 与创建时间，正文从已有内容起算
+                continuation.copy(
+                    status = MessageStatus.STREAMING,
+                    stepIndex = 0,
+                    error = "",
+                )
+            } else {
+                ChatMessage(
+                    id = Ids.new(),
+                    role = Role.ASSISTANT,
+                    content = "",
+                    createdAt = System.currentTimeMillis(),
+                    status = MessageStatus.STREAMING,
+                    model = model,
+                    providerId = provider.id,
+                    parentId = newUserMessage?.id ?: regenerateOf,
+                    stepIndex = if (agentOn) step else 0,
+                )
+            }
             lastMessageId = placeholder.id
             _messages.value = _messages.value + placeholder
             _live.value = LiveDelta(placeholder.id, step = if (agentOn) step else 0)
@@ -1199,9 +1339,32 @@ class ChatEngine(
                 usageInStream = provider.requestUsageInStream,
                 remoteSessionId = conv.remoteSessionId,
                 tools = roundSpecs,
+                /*
+                 * 服务端起标题：只在第一轮问一次。
+                 *
+                 * 本地已经有自动标题（截前 18 字），但「帮我看看这段代码为什么崩」
+                 * 截出来是半句话。DeepSeek 的 title 扩展是模型读完这一轮后给的短标题，
+                 * 质量高得多，而且不额外计一次请求 —— 它挂在正常回答的响应里。
+                 * 第二轮起再要就是白花 token，所以条件里带 user 消息条数。
+                 */
+                titleRequested = !titleAsked && (conversationUserTurns == 1) &&
+                    runCatching {
+                        com.dshwatch.domain.DeepSeekPricing.isDeepSeek(
+                            provider.normalizedBaseUrl(),
+                            model,
+                            provider.name,
+                        )
+                    }.getOrDefault(false),
             )
 
-            val result = streamStep(request, placeholder, perf)
+            titleAsked = true
+            val result = streamStep(
+                request = request,
+                placeholder = placeholder,
+                perf = perf,
+                // 续写时把已有正文作为起点：否则界面会先清空再长回来
+                initialText = if (continuation != null && step == 1) continuation.content else "",
+            )
             _live.value = LiveDelta()
 
             val estimated = result.usage == null
@@ -1259,6 +1422,7 @@ class ChatEngine(
                     model = model,
                     estimated = estimated,
                     toolCalls = emptyList(),
+                    previousVersions = branchVersions,
                 )
                 recordUsage(effectiveUsage, provider, model, conv.id, estimated)
                 conv = _conversation.value ?: conv
@@ -1424,8 +1588,10 @@ class ChatEngine(
         request: ChatRequest,
         placeholder: ChatMessage,
         perf: PerfProfile,
+        /** 续写时的已有正文，结果里一并带回，避免调用方再拼一次 */
+        initialText: String = "",
     ): StepResult {
-        val textBuf = StringBuilder()
+        val textBuf = StringBuilder(initialText)
         val reasonBuf = StringBuilder()
         val calls = LinkedHashMap<Int, PartialCall>()
         var usage: TokenUsage? = null
@@ -1753,6 +1919,11 @@ class ChatEngine(
         titleOverride: String? = null,
         remoteSessionId: String? = null,
         toolCalls: List<ToolCallRecord> = emptyList(),
+        /**
+         * 重新生成时传入的历史版本。非空才写回 —— 工具轮的中途定稿不能碰它，
+         * 否则同一轮会重复追加好几个版本。
+         */
+        previousVersions: List<com.dshwatch.domain.model.MessageVersion> = emptyList(),
     ) {
         ioMutex.withLock {
             val current = _messages.value
@@ -1760,6 +1931,18 @@ class ChatEngine(
             val updated = if (idx >= 0) {
                 current.toMutableList().also {
                     val existing = it[idx]
+                    val versions = if (previousVersions.isEmpty()) {
+                        existing.versions
+                    } else {
+                        previousVersions + com.dshwatch.domain.model.MessageVersion(
+                            content = text,
+                            reasoning = reasoning,
+                            usage = usage,
+                            createdAt = existing.createdAt,
+                            status = status,
+                            model = model.ifBlank { existing.model },
+                        )
+                    }
                     it[idx] = existing.copy(
                         content = text,
                         reasoning = reasoning,
@@ -1768,6 +1951,8 @@ class ChatEngine(
                         error = error,
                         // 工具卡片在 executeTools 期间会被逐步更新，这里不能覆盖掉
                         toolCalls = if (existing.toolCalls.isNotEmpty()) existing.toolCalls else toolCalls,
+                        versions = versions,
+                        versionIndex = if (versions.isEmpty()) 0 else versions.lastIndex,
                     )
                 }.toList()
             } else {

@@ -29,6 +29,11 @@ data class ChatRequest(
     val tools: List<kotlinx.serialization.json.JsonObject> = emptyList(),
     /** auto / none / required */
     val toolChoice: String = "auto",
+    /**
+     * 请服务端顺带给一个会话标题（DeepSeek 的 `title.enabled`）。
+     * 只有第一轮且供应商支持时才开 —— 每轮都带是一份白送的 token 与延迟。
+     */
+    val titleRequested: Boolean = false,
 ) {
     val agentEnabled: Boolean get() = tools.isNotEmpty()
     val displayModel: String get() = model.ifBlank { "default" }

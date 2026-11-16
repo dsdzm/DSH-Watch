@@ -123,12 +123,22 @@ data class ChatTurn(
     val isEmpty: Boolean get() = content.isBlank() && toolCalls.isEmpty() && images.isEmpty()
 }
 
+/** 一条回答的某一版，字段与 [ChatMessage] 里参与「那一版内容」的部分一一对应 */
+@Serializable
+data class MessageVersion(
+    val content: String = "",
+    val reasoning: String = "",
+    val usage: TokenUsage? = null,
+    val createdAt: Long = 0L,
+    val status: MessageStatus = MessageStatus.DONE,
+    val model: String = "",
+)
+
 @Serializable
 data class ChatMessage(
     val id: String,
     val role: Role,
-    val content: String = "",
-    /** DeepSeek-R1 / o 系列的思维链内容，单独存放便于折叠展示 */
+    val content: String = "",    /** DeepSeek-R1 / o 系列的思维链内容，单独存放便于折叠展示 */
     val reasoning: String = "",
     val createdAt: Long = 0L,
     val status: MessageStatus = MessageStatus.DONE,
@@ -157,11 +167,40 @@ data class ChatMessage(
      * 只在用户消息上有值。正文不进 JSON，见 [Attachment] 的说明。
      */
     val attachments: List<Attachment> = emptyList(),
+
+    /**
+     * 这一轮回答的历史版本。
+     *
+     * 重新生成时旧回答**不删**，而是往这里追加一份快照 —— 用户在界面上
+     * 可以 `‹ 2/3 ›` 来回翻。之前是直接丢掉重来，问一句「还是上一个说法好」
+     * 就只能再生成一次碰运气。
+     *
+     * 存快照而不是在消息列表里长出一条并列的消息：列表是线性的，
+     * 多一条会同时出现在上下文、搜索、导出和计数里；版本只是同一条
+     * 消息的几种说法，不该改变「这个会话说了几句话」。
+     */
+    val versions: List<MessageVersion> = emptyList(),
+
+    /** 当前显示第几版，对应 [versions] 的下标；列表为空时无意义 */
+    val versionIndex: Int = 0,
 ) {
     val isStreaming: Boolean get() = status == MessageStatus.STREAMING
     val hasReasoning: Boolean get() = reasoning.isNotBlank()
     val hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
     val hasMedia: Boolean get() = media.isNotEmpty()
+
+    /** 有多个版本时才值得显示切换器 */
+    val hasVersions: Boolean get() = versions.size > 1
+
+    /** 把当前内容存成一份快照（重新生成前调用） */
+    fun snapshot(): MessageVersion = MessageVersion(
+        content = content,
+        reasoning = reasoning,
+        usage = usage,
+        createdAt = createdAt,
+        status = status,
+        model = model,
+    )
 
     /** 还在生成中的媒体（界面据此显示进度而不是空图） */
     val pendingMedia: MediaRef? get() = media.firstOrNull { it.isBusy }

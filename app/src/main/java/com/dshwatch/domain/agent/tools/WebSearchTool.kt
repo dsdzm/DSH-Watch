@@ -12,8 +12,13 @@ import com.dshwatch.net.CustomHeaders
 import com.dshwatch.net.Http
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -106,6 +111,22 @@ object WebSearchTool : AgentTool {
         val limit = (args.intOf("max_results") ?: 6).coerceIn(1, 10)
         val custom = CustomHeaders.sanitize(args.stringMapOf("headers"))
 
+        /*
+         * 优先走 DeepSeek 官方搜索接口。
+         *
+         * 为什么把它放第一位：这是**模型自己那家**的搜索，返回的是已经排好序的
+         * 结构化结果（标题 / 链接 / 600~800 字的长摘要 / 发布时间 / 权威度），
+         * 而下面那两条路抓的是搜索页 HTML，解析器一遇到改版就空手而归。
+         * 按次计费（约 0.005 元/次），比省下来的失败重试便宜。
+         *
+         * 三个前提缺一不可：当前供应商是 DeepSeek、有它的 Key、用户没自带请求头
+         * （带了 headers 说明他要的是「原样抓某个源」，不该被换掉）。
+         */
+        if (custom.values.isEmpty()) {
+            val viaDeepSeek = runCatching { searchDeepSeek(query, limit, ctx) }.getOrNull()
+            if (viaDeepSeek != null) return viaDeepSeek
+        }
+
         val failures = ArrayList<String>()
         var emptySource: String? = null
 
@@ -154,6 +175,86 @@ object WebSearchTool : AgentTool {
 
     override fun summarize(args: JsonObject) = "搜 ${args.strOf("query")}"
 
+    // ------------------------------------------------------------------
+    // DeepSeek 官方搜索
+    // ------------------------------------------------------------------
+
+    /**
+     * 调 `POST /v1/tools/search`。
+     *
+     * 返回 null 表示「这次不该走它」（不是 DeepSeek、没有 Key、没结果），
+     * 由调用方原样回落到 HTML 源 —— 搜索失败不该让整个工具报错，
+     * 那会让模型以为「这台设备不能联网」。
+     */
+    private suspend fun searchDeepSeek(query: String, limit: Int, ctx: ToolContext): ToolResult? =
+        withContext(Dispatchers.IO) {
+            val provider = ctx.settings().activeProvider ?: return@withContext null
+            if (!com.dshwatch.domain.DeepSeekPricing.isDeepSeek(
+                    provider.normalizedBaseUrl(),
+                    provider.defaultModel,
+                    provider.name,
+                )
+            ) {
+                return@withContext null
+            }
+            val key = ctx.apiKeyOf(provider.id)
+            if (key.isBlank()) return@withContext null
+
+            val base = provider.normalizedBaseUrl().trimEnd('/')
+            val endpoint = if (base.endsWith("/v1")) "$base/tools/search" else "$base/v1/tools/search"
+            val body = buildJsonObject {
+                put("query", query)
+                put("count", limit)
+                // 打开正文会把整页塞进结果，token 立刻翻十倍；摘要已经够模型判断相关性
+                put("need_content", false)
+            }
+            val request = Request.Builder()
+                .url(endpoint)
+                .header("Authorization", "Bearer $key")
+                .header("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(Http.JSON_MEDIA))
+                .build()
+
+            val text = client.newCall(request).execute().use { resp ->
+                val raw = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    // 402 余额、429 限流、401 换 Key —— 都不该打断对话，交给 HTML 源接手
+                    throw IOException("HTTP ${resp.code} ${raw.take(120)}")
+                }
+                raw
+            }
+            val root = runCatching {
+                com.dshwatch.core.Jsonx.lenient.parseToJsonElement(text).jsonObject
+            }.getOrNull() ?: return@withContext null
+            val items = (root["results"] as? JsonArray).orEmpty()
+                .mapNotNull { it as? JsonObject }
+            if (items.isEmpty()) return@withContext null
+
+            ToolResult.ok(
+                buildString {
+                    append("搜索「").append(query).append("」的结果（DeepSeek 搜索）：\n")
+                    items.forEachIndexed { i, item ->
+                        val title = item.str("title").orEmpty()
+                        val url = item.str("url").orEmpty()
+                        if (url.isBlank()) return@forEachIndexed
+                        append(i + 1).append(". ").append(title).append('\n')
+                        append("   ").append(url).append('\n')
+                        val site = item.str("site_name").orEmpty()
+                        val date = item.str("date").orEmpty().take(10)
+                        val meta = listOf(site, date).filter { it.isNotBlank() }.joinToString(" · ")
+                        if (meta.isNotBlank()) append("   ").append(meta).append('\n')
+                        // summary 是给模型读的长摘要；没有就退回 snippet
+                        val digest = item.str("summary")?.takeIf { it.isNotBlank() }
+                            ?: item.str("snippet").orEmpty()
+                        if (digest.isNotBlank()) {
+                            append("   ").append(digest.take(600)).append('\n')
+                        }
+                    }
+                    append("（如需完整内容，用 http_fetch 抓上面某个链接）")
+                }
+            )
+        }
+
     private fun fetch(engine: Engine, query: String, headers: Map<String, String>): String {
         val builder = Request.Builder()
             .url(engine.buildUrl(query))
@@ -168,6 +269,12 @@ object WebSearchTool : AgentTool {
     }
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
+
+    /** 取字符串字段；非字符串或缺失都当空 */
+    private fun JsonObject.str(key: String): String? =
+        (this[key] as? kotlinx.serialization.json.JsonPrimitive)
+            ?.takeIf { it.isString }
+            ?.content
 
     // ------------------------------------------------------------------
     // Bing

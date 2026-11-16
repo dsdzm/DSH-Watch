@@ -139,6 +139,8 @@ fun PhoneChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var showContext by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
+    // 编辑：改完直接重跑这一轮，后面的回答按「提问变了」作废
+    var editing by remember { mutableStateOf<ChatMessage?>(null) }
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachBusy by remember { mutableStateOf(false) }
     var attachNote by remember { mutableStateOf("") }
@@ -349,6 +351,12 @@ fun PhoneChatScreen(
                         nav.select(PhoneTab.Settings)
                     }
                 },
+                onManage = {
+                    scope.launch {
+                        drawerState.close()
+                        nav.select(PhoneTab.Sessions)
+                    }
+                },
                 onRename = { conv ->
                     scope.launch { drawerState.close() }
                     renameText = conv.displayTitle
@@ -427,6 +435,9 @@ fun PhoneChatScreen(
                                 },
                                 onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
                                 onRegenerate = { engine.regenerate(last.id) },
+                                onContinue = { engine.continueGeneration(last.id) },
+                                onEdit = { editing = last },
+                                onSwitchVersion = { i -> engine.switchVersion(last.id, i) },
                                 onDelete = { pendingDelete = last },
                                 container = container,
                                 onOpenArtifact = { path -> nav.open(Screen.WorkspacePreview(path)) },
@@ -549,6 +560,17 @@ fun PhoneChatScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text(s.cancel) }
+            },
+        )
+    }
+
+    editing?.let { target ->
+        PhoneEditDialog(
+            original = target.content,
+            onDismiss = { editing = null },
+            onConfirm = { text ->
+                engine.editMessage(target.id, text)
+                editing = null
             },
         )
     }
@@ -793,6 +815,9 @@ private fun PhoneTurn(
     onChoose: (Choices.Choice) -> Unit,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
+    onContinue: () -> Unit,
+    onEdit: () -> Unit,
+    onSwitchVersion: (Int) -> Unit,
     onDelete: () -> Unit,
     container: AppContainer,
     onOpenArtifact: (String) -> Unit,
@@ -868,6 +893,7 @@ private fun PhoneTurn(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 TextButton(onClick = { onCopy(body) }) { Text(s.copy, style = MaterialTheme.typography.labelSmall) }
+                TextButton(onClick = onEdit) { Text("编辑", style = MaterialTheme.typography.labelSmall) }
                 TextButton(onClick = onDelete) { Text(s.delete, style = MaterialTheme.typography.labelSmall) }
             }
         }
@@ -950,10 +976,23 @@ private fun PhoneTurn(
             )
         }
 
+        if (!isStreaming && last.hasVersions) {
+            Spacer(Modifier.height(6.dp))
+            PhoneVersionBar(
+                index = last.versionIndex,
+                total = last.versions.size,
+                onPick = onSwitchVersion,
+            )
+        }
+
         if (!isStreaming && bodyText.isNotBlank()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = { onCopy(body) }) { Text(s.copy, style = MaterialTheme.typography.labelSmall) }
                 TextButton(onClick = onRegenerate) { Text(s.regenerate, style = MaterialTheme.typography.labelSmall) }
+                TextButton(onClick = onContinue) { Text("继续写", style = MaterialTheme.typography.labelSmall) }
                 TextButton(onClick = onDelete) { Text(s.delete, style = MaterialTheme.typography.labelSmall) }
             }
         }
@@ -962,4 +1001,91 @@ private fun PhoneTurn(
             MediaViewer(ref = ref, onClose = { viewingMedia = null })
         }
     }
+}
+
+/**
+ * 版本切换条。
+ *
+ * 只在真有多版时出现。放在操作行的上面而不是塞进操作行：它是「你现在看的是哪一版」
+ * 的状态，不是又一次操作 —— 和下面那排「复制 / 重生成 / 删除」混在一起会被忽略。
+ */
+@Composable
+private fun PhoneVersionBar(index: Int, total: Int, onPick: (Int) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = scheme.surfaceContainerHighest,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = { onPick(index - 1) },
+                enabled = index > 0,
+                modifier = Modifier.size(width = 44.dp, height = 34.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) { Text("‹", style = MaterialTheme.typography.titleMedium) }
+            Text(
+                text = "${index + 1} / $total",
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            TextButton(
+                onClick = { onPick(index + 1) },
+                enabled = index < total - 1,
+                modifier = Modifier.size(width = 44.dp, height = 34.dp),
+                contentPadding = PaddingValues(0.dp),
+            ) { Text("›", style = MaterialTheme.typography.titleMedium) }
+        }
+    }
+}
+
+/**
+ * 编辑已发出的提问。
+ *
+ * 用整屏对话框而不是就地编辑：就地编辑要处理「输入框撑开、列表跟着跳、
+ * 键盘遮住这条消息」三件事，而编辑本身是个低频动作 —— 弹出来改完就走更省事。
+ *
+ * 底下那句警告必须留：改提问 = 这条之后的回答全部作废，用户按下去之前
+ * 得知道自己在丢东西。
+ */
+@Composable
+private fun PhoneEditDialog(
+    original: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(original) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑这条提问") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 8,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "改完会重新回答；这条之后的对话会被清掉。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank() && text != original,
+            ) { Text("重新回答") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }

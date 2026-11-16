@@ -886,4 +886,161 @@ class ChatEngineTest {
         assertThat(turn.toolCallId).isEqualTo("call_9")
         assertThat(turn.role).isEqualTo("tool")
     }
+
+    // ================= 多版本 / 续写 / 编辑 =================
+
+    private fun oneTurn(text: String) = listOf(
+        ChatEvent.Text(text),
+        ChatEvent.Usage(TokenUsage(prompt = 3, completion = 2)),
+        ChatEvent.Completed,
+    )
+
+    @Test
+    fun `regenerate keeps the previous answer as a version`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("第一版"), oneTurn("第二版")))
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("问题")
+        advanceUntilIdle()
+        val id = engine.messages.value.last().id
+        assertThat(engine.messages.value.last().content).isEqualTo("第一版")
+
+        engine.regenerate(id)
+        advanceUntilIdle()
+
+        // 列表还是一条提问 + 一条回答：版本不该改变「这个会话说了几句话」
+        assertThat(engine.messages.value).hasSize(2)
+        val answer = engine.messages.value.last()
+        assertThat(answer.content).isEqualTo("第二版")
+        assertThat(answer.versions).hasSize(2)
+        assertThat(answer.versions[0].content).isEqualTo("第一版")
+        assertThat(answer.versionIndex).isEqualTo(1)
+
+        // 切回第一版：内容、用量一起换，消息位置不动
+        engine.switchVersion(answer.id, 0)
+        advanceUntilIdle()
+        val shown = engine.messages.value.last()
+        assertThat(shown.content).isEqualTo("第一版")
+        assertThat(shown.versionIndex).isEqualTo(0)
+        assertThat(shown.usage?.completion).isEqualTo(2)
+    }
+
+    @Test
+    fun `continue sends the half answer as the last assistant turn`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("前半句，"), oneTurn("后半句。")))
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("讲个故事")
+        advanceUntilIdle()
+        val first = engine.messages.value.last()
+
+        engine.continueGeneration(first.id)
+        advanceUntilIdle()
+
+        // 续写的关键：模型看到的最后一句话是自己说的半截内容
+        val history = backend.requests.last().history
+        assertThat(history.last().role).isEqualTo("assistant")
+        assertThat(history.last().content).isEqualTo("前半句，")
+
+        // 结果拼回同一条消息，不是新冒出来一条
+        assertThat(engine.messages.value).hasSize(2)
+        val merged = engine.messages.value.last()
+        assertThat(merged.id).isEqualTo(first.id)
+        assertThat(merged.content).isEqualTo("前半句，后半句。")
+    }
+
+    @Test
+    fun `continue refuses when the answer is not the last message`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("第一轮"), oneTurn("第二轮")))
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("第一问")
+        advanceUntilIdle()
+        val firstAnswer = engine.messages.value.last().id
+        engine.send("第二问")
+        advanceUntilIdle()
+
+        engine.continueGeneration(firstAnswer)
+        advanceUntilIdle()
+
+        assertThat(engine.banner.value?.text).contains("只能续写最后一条")
+        assertThat(backend.calls).isEqualTo(2)
+    }
+
+    @Test
+    fun `edit replaces the prompt and drops everything after it`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("旧回答"), oneTurn("新回答")))
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("旧问题")
+        advanceUntilIdle()
+        val userId = engine.messages.value.first().id
+
+        engine.editMessage(userId, "新问题")
+        advanceUntilIdle()
+
+        val messages = engine.messages.value
+        assertThat(messages).hasSize(2)
+        assertThat(messages[0].id).isEqualTo(userId)
+        assertThat(messages[0].content).isEqualTo("新问题")
+        assertThat(messages[1].content).isEqualTo("新回答")
+        // 请求里的历史也只能有改写后的那一句
+        assertThat(backend.requests.last().history.first().content).isEqualTo("新问题")
+    }
+
+    // ================= 服务端标题 =================
+
+    private fun deepSeekSettings(): AppSettings {
+        val ds = provider.copy(
+            id = "ds",
+            name = "DeepSeek",
+            baseUrl = "https://api.deepseek.com/v1",
+        )
+        return AppSettings(providers = listOf(ds), activeProviderId = ds.id)
+    }
+
+    @Test
+    fun `title is requested on the first turn only`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("一"), oneTurn("二")))
+        val (engine, _) = buildEngine(this, deepSeekSettings(), backend)
+
+        engine.send("第一个问题")
+        advanceUntilIdle()
+        assertThat(backend.requests.first().titleRequested).isTrue()
+
+        engine.send("第二个问题")
+        advanceUntilIdle()
+        // 第二轮再要标题就是白花 token
+        assertThat(backend.requests.last().titleRequested).isFalse()
+    }
+
+    @Test
+    fun `non deepseek provider never asks for a title`() = runTest {
+        val backend = ScriptedBackend(listOf(oneTurn("答")))
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("问题")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().titleRequested).isFalse()
+    }
+
+    @Test
+    fun `server title updates the conversation`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Title("周报里那三个指标"),
+                    ChatEvent.Text("好的"),
+                    ChatEvent.Completed,
+                ),
+            ),
+        )
+        val (engine, _) = buildEngine(this, deepSeekSettings(), backend)
+
+        engine.send("帮我看下这份周报，第三段那几个指标怎么算")
+        advanceUntilIdle()
+
+        assertThat(engine.conversation.value?.title).isEqualTo("周报里那三个指标")
+    }
 }
