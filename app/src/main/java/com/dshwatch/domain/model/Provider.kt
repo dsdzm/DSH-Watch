@@ -361,6 +361,19 @@ data class AppSettings(
     /** 屏幕形状：`auto` 跟随系统 / `round` 圆屏 / `square` 方屏 */
     val screenShape: String = ScreenShapes.AUTO,
 
+    /**
+     * 用哪一套界面：`auto` 跟随检测 / `watch` 手表 / `phone` 手机。
+     *
+     * 引导页第一屏会问一次，默认选中检测结果；设置里也能改。
+     * 手机布局是完全独立的一套（MD3 底部导航），不复用手表的圆屏骨架，
+     * 两者的主题也互不影响 —— 见 [com.dshwatch.ui.phone.PhoneTheme]。
+     *
+     * 只在这里存一个值、不存「手机主题配色」是有意的：手机界面只有明暗两档，
+     * 跟着系统走就够；给它再配一套调色板，只会让「同一个 App 两台设备上颜色不同」
+     * 变成一件没人能解释的事。
+     */
+    val deviceKind: String = DeviceKinds.AUTO,
+
     /** 对话页布局 id，见 [ChatLayouts] */
     val chatLayout: String = ChatLayouts.BUBBLE,
 

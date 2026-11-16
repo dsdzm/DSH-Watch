@@ -22,6 +22,15 @@ data class ChangelogEntry(
 object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.23.9",
+            date = "2026-11-16",
+            highlights = listOf(
+                "新增 手机版界面：Material 3 底部导航布局，对话 / 记录 / 设置各占一页，与手表主题完全独立",
+                "新增 引导页的设备类型选择：手表 / 手机 / 自动，随时可在设置里切换",
+                "新增 手机版模型列表：一行看清名字、有没有填 Key、用哪个模型",
+            ),
+        ),
         // 1.23.8 是纯修复版本（崩溃与兼容性），按约定不写进「新增能力」
         ChangelogEntry(
             version = "1.23.8",

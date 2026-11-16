@@ -184,105 +184,7 @@ fun AppRoot(
                 ) {
                     return@GlassBackdropHost
                 }
-                when (page) {
-                    // 根屏按「用户的主要使用场景」分发：编程进工作台，酒馆/写作进各自的列表。
-                    // 这样用户选了"角色扮演"，进 App 直接看到角色，而不是先看一张编程界面。
-                    Screen.Chat -> when (Scenes.of(settings.useScene)) {
-                        Scenes.TAVERN -> TavernScreen(container = container, settings = settings, nav = nav)
-                        Scenes.WRITING -> WritingScreen(container = container, settings = settings, nav = nav)
-                        else -> ChatScreen(container = container, settings = settings, nav = nav)
-                    }
-                    Screen.Sessions -> SessionsScreen(container = container, nav = nav)
-                    is Screen.HtmlView -> com.dshwatch.ui.screens.html.HtmlScreen(
-                        nav = nav,
-                        html = page.html,
-                    )
-                    is Screen.SceneSessions -> SessionsScreen(
-                        container = container,
-                        nav = nav,
-                        filterScene = page.scene,
-                        filterCardId = page.cardId,
-                    )
-                    Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)
-                    Screen.Providers -> ProvidersScreen(container = container, settings = settings, nav = nav)
-                    Screen.Usage -> UsageScreen(container = container, nav = nav)
-                    Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)
-                    Screen.Remote -> com.dshwatch.ui.screens.pair.RemotePairScreen(
-                        container = container,
-                        settings = settings,
-                        nav = nav,
-                    )
-                    Screen.About -> AboutScreen(container = container, nav = nav)
-                    Screen.Update -> com.dshwatch.ui.screens.update.UpdateScreen(
-                        container = container,
-                        nav = nav,
-                    )
-                    Screen.Help -> com.dshwatch.ui.screens.help.HelpListScreen(nav = nav)
-                    is Screen.HelpTopic -> com.dshwatch.ui.screens.help.HelpTopicScreen(
-                        topicId = page.id,
-                        nav = nav,
-                    )
-                    Screen.GroupChat -> GroupChatScreen(nav = nav)
-                    Screen.Donate -> DonateScreen(nav = nav)
-                    Screen.Thanks -> ThanksScreen(nav = nav)
-                    Screen.Diagnostics -> DiagnosticsScreen(container = container, settings = settings, nav = nav)
-                    Screen.Workspace -> WorkspaceScreen(container = container, nav = nav)
-                    Screen.BiliLogin -> BiliLoginScreen(
-                        container = container,
-                        nav = nav,
-                    )
-                    Screen.ExecSettings -> ExecSettingsScreen(
-                        container = container,
-                        settings = settings,
-                        nav = nav,
-                    )
-                    Screen.DeviceControl -> com.dshwatch.ui.screens.settings.DeviceControlScreen(
-                        container = container,
-                        settings = settings,
-                        nav = nav,
-                    )
-                    is Screen.SettingsGroup -> SettingsGroupScreen(
-                        groupId = page.id,
-                        container = container,
-                        settings = settings,
-                        profile = profile,
-                        nav = nav,
-                    )
-
-                    is Screen.WorkspacePreview -> WorkspacePreviewScreen(
-                        container = container,
-                        path = page.path,
-                        nav = nav,
-                    )
-                    is Screen.ProviderEdit -> ProviderEditScreen(
-                        container = container,
-                        settings = settings,
-                        providerId = page.providerId,
-                        nav = nav,
-                    )
-
-                    is Screen.Input -> InputScreen(
-                        container = container,
-                        nav = nav,
-                        initial = page.initial,
-                    )
-
-                    // ---------------- 场景（v1.13） ----------------
-                    Screen.TavernHome -> TavernScreen(container = container, settings = settings, nav = nav)
-                    Screen.WritingHome -> WritingScreen(container = container, settings = settings, nav = nav)
-                    Screen.RoleplayChat -> RoleplayChatScreen(container = container, settings = settings, nav = nav)
-                    is Screen.CardEdit -> CardEditScreen(
-                        container = container,
-                        nav = nav,
-                        kind = page.kind,
-                        cardId = page.cardId,
-                    )
-                    is Screen.MemoryDoc -> MemoryDocScreen(
-                        container = container,
-                        cardId = page.cardId,
-                        nav = nav,
-                    )
-                }
+                ScreenHost(page = page, container = container, settings = settings, profile = profile, nav = nav)
             }
         }
 
@@ -384,4 +286,123 @@ internal fun compareVersion(a: String, b: String): Int {
         if (d != 0) return d
     }
     return 0
+}
+
+/**
+ * 一个 Screen 该渲染成什么。
+ *
+ * 抽出来是因为**手机版也要用它**：手机会话页、记录页、设置页是自己画的，
+ * 但「配对」「插件」「酒馆」「帮助」这二十来个次级页没有必要各做两套 ——
+ * 它们在手机上走同一套页面，外壳（顶栏、返回）由各自的骨架负责。
+ *
+ * 这样做的前提是这些页面**不假设自己在圆屏上**：`WatchScaffold` 在没有
+ * `LocalCircle` 时会走普通 Column 分支，全宽、可滚动，在手机上能用。
+ */
+@Composable
+internal fun ScreenHost(
+    page: Screen,
+    container: AppContainer,
+    settings: AppSettings,
+    profile: com.dshwatch.domain.DeviceProfile,
+    nav: WatchNavigator,
+) {
+    when (page) {
+        // 根屏按「用户的主要使用场景」分发：编程进工作台，酒馆/写作进各自的列表。
+        // 这样用户选了"角色扮演"，进 App 直接看到角色，而不是先看一张编程界面。
+        Screen.Chat -> when (Scenes.of(settings.useScene)) {
+            Scenes.TAVERN -> TavernScreen(container = container, settings = settings, nav = nav)
+            Scenes.WRITING -> WritingScreen(container = container, settings = settings, nav = nav)
+            else -> ChatScreen(container = container, settings = settings, nav = nav)
+        }
+        Screen.Sessions -> SessionsScreen(container = container, nav = nav)
+        is Screen.HtmlView -> com.dshwatch.ui.screens.html.HtmlScreen(
+            nav = nav,
+            html = page.html,
+        )
+        is Screen.SceneSessions -> SessionsScreen(
+            container = container,
+            nav = nav,
+            filterScene = page.scene,
+            filterCardId = page.cardId,
+        )
+        Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)
+        Screen.Providers -> ProvidersScreen(container = container, settings = settings, nav = nav)
+        Screen.Usage -> UsageScreen(container = container, nav = nav)
+        Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)
+        Screen.Remote -> com.dshwatch.ui.screens.pair.RemotePairScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
+        Screen.About -> AboutScreen(container = container, nav = nav)
+        Screen.Update -> com.dshwatch.ui.screens.update.UpdateScreen(
+            container = container,
+            nav = nav,
+        )
+        Screen.Help -> com.dshwatch.ui.screens.help.HelpListScreen(nav = nav)
+        is Screen.HelpTopic -> com.dshwatch.ui.screens.help.HelpTopicScreen(
+            topicId = page.id,
+            nav = nav,
+        )
+        Screen.GroupChat -> GroupChatScreen(nav = nav)
+        Screen.Donate -> DonateScreen(nav = nav)
+        Screen.Thanks -> ThanksScreen(nav = nav)
+        Screen.Diagnostics -> DiagnosticsScreen(container = container, settings = settings, nav = nav)
+        Screen.Workspace -> WorkspaceScreen(container = container, nav = nav)
+        Screen.BiliLogin -> BiliLoginScreen(
+            container = container,
+            nav = nav,
+        )
+        Screen.ExecSettings -> ExecSettingsScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
+        Screen.DeviceControl -> com.dshwatch.ui.screens.settings.DeviceControlScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
+        is Screen.SettingsGroup -> SettingsGroupScreen(
+            groupId = page.id,
+            container = container,
+            settings = settings,
+            profile = profile,
+            nav = nav,
+        )
+
+        is Screen.WorkspacePreview -> WorkspacePreviewScreen(
+            container = container,
+            path = page.path,
+            nav = nav,
+        )
+        is Screen.ProviderEdit -> ProviderEditScreen(
+            container = container,
+            settings = settings,
+            providerId = page.providerId,
+            nav = nav,
+        )
+
+        is Screen.Input -> InputScreen(
+            container = container,
+            nav = nav,
+            initial = page.initial,
+        )
+
+        // ---------------- 场景（v1.13） ----------------
+        Screen.TavernHome -> TavernScreen(container = container, settings = settings, nav = nav)
+        Screen.WritingHome -> WritingScreen(container = container, settings = settings, nav = nav)
+        Screen.RoleplayChat -> RoleplayChatScreen(container = container, settings = settings, nav = nav)
+        is Screen.CardEdit -> CardEditScreen(
+            container = container,
+            nav = nav,
+            kind = page.kind,
+            cardId = page.cardId,
+        )
+        is Screen.MemoryDoc -> MemoryDocScreen(
+            container = container,
+            cardId = page.cardId,
+            nav = nav,
+        )
+    }
 }

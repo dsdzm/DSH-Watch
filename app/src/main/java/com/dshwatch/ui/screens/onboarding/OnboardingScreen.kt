@@ -61,6 +61,8 @@ import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.Watch
 import androidx.compose.material3.Icon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -115,11 +117,11 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
     }
 
     fun goNext() {
-        if (step >= 3) {
+        if (step >= 4) {
             update { it.copy(onboardingDone = true) }
             return
         }
-        if (step == 0 && settings.screenShape == ScreenShapes.AUTO) {
+        if (step == 1 && settings.screenShape == ScreenShapes.AUTO) {
             // 用户什么都没点就直接下一步：把他看到的这个形状落成显式选择，
             // 否则进到布局页时，可用布局列表可能因为系统检测值而变。
             update { it.copy(screenShape = if (detectedRound) ScreenShapes.ROUND else ScreenShapes.SQUARE) }
@@ -181,14 +183,14 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 )
             }
             Text(
-                text = "${step + 1} / 4",
+                text = "${step + 1} / 5",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.outline,
             )
         }
         Spacer(Modifier.height(4.dp))
         PageDots(
-            count = 4,
+            count = 5,
             current = step,
             activeColor = MaterialTheme.colorScheme.primary,
             inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
@@ -202,13 +204,23 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 .wearVerticalScroll(rememberScrollState()),
         ) {
             when (step) {
-                0 -> ShapeStep(
+                0 -> DeviceStep(
+                    current = if (com.dshwatch.domain.model.DeviceKinds.of(settings.deviceKind) ==
+                        com.dshwatch.domain.model.DeviceKinds.AUTO
+                    ) {
+                        com.dshwatch.domain.model.DeviceKinds.WATCH
+                    } else {
+                        com.dshwatch.domain.model.DeviceKinds.of(settings.deviceKind)
+                    },
+                    onPick = { kind -> update { it.copy(deviceKind = kind) } },
+                )
+                1 -> ShapeStep(
                     round = round,
                     detectedRound = detectedRound,
                     selected = settings.screenShape,
                     onPick = { choice -> update { it.copy(screenShape = choice) } },
                 )
-                1 -> SceneStep(
+                2 -> SceneStep(
                     selected = settings.useScene,
                     onPick = { id ->
                         // 场景顺便影响"进 App 看到什么"，所以立刻落盘；
@@ -216,7 +228,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                         update { it.copy(useScene = id) }
                     },
                 )
-                2 -> LayoutStep(
+                3 -> LayoutStep(
                     layouts = layouts,
                     selected = ChatLayouts.of(settings.chatLayout),
                     onPick = { id -> update { it.copy(chatLayout = id) } },
@@ -272,7 +284,7 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                 )
             }
             PrimaryButton(
-                text = if (step >= 3) s.onboardingStart else s.onboardingNext,
+                text = if (step >= 4) s.onboardingStart else s.onboardingNext,
                 modifier = Modifier.weight(if (step > 0 && circle == null) 1.4f else 1f),
                 onClick = ::goNext,
             )
@@ -849,6 +861,82 @@ private fun AppearanceCard(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 第一步：这套界面给谁用。
+ *
+ * 手表引导页里放这一屏，默认选中「手表」—— 能走到这里本身就说明系统报的是表盘。
+ * 选「手机」之后整个界面会立刻换成手机版（[com.dshwatch.ui.phone.PhoneTheme]），
+ * 连带引导页也换成手机那一套 —— 这正是要让用户看到的：一次点击就能对比两套界面。
+ */
+@Composable
+private fun DeviceStep(current: String, onPick: (String) -> Unit) {
+    StepHeader("你在什么设备上？", "手表与手机是两套独立界面，随时能在设置里改。")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        DeviceCard(
+            modifier = Modifier.weight(1f),
+            icon = Icons.Outlined.Watch,
+            label = "手表",
+            active = current == com.dshwatch.domain.model.DeviceKinds.WATCH,
+            onClick = { onPick(com.dshwatch.domain.model.DeviceKinds.WATCH) },
+        )
+        DeviceCard(
+            modifier = Modifier.weight(1f),
+            icon = Icons.Outlined.Smartphone,
+            label = "手机",
+            active = current == com.dshwatch.domain.model.DeviceKinds.PHONE,
+            onClick = { onPick(com.dshwatch.domain.model.DeviceKinds.PHONE) },
+        )
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "选错的代价只是界面不合手，不会影响数据。",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+    )
+}
+
+@Composable
+private fun DeviceCard(
+    modifier: Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .tap(onClick = withHaptic(onClick))
+            .background(
+                if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                RoundedCornerShape(18.dp),
+            )
+            .border(
+                1.dp,
+                if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                RoundedCornerShape(18.dp),
+            )
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(34.dp),
+            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

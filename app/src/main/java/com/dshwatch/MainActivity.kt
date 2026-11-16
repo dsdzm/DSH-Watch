@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -62,6 +63,45 @@ class MainActivity : ComponentActivity() {
                 widthDp = profile.screenWidthDp,
             )
 
+            /*
+             * 设备类型决定用哪一整套界面。
+             *
+             * 检测只看 uiMode —— 手表系统会报 `UI_MODE_TYPE_WATCH`。
+             * 用户可以在引导页和设置里覆盖它：方形表和「装在平板上」的设备
+             * 检测不出来，而判错的代价是「整个界面根本不是他要的那套」。
+             *
+             * 两条分支**不共用任何主题代码**：手机版有自己的色板、字号与骨架，
+             * 手表那套的界面缩放、圆角安全区、玻璃材质、主题预设一律不参与。
+             */
+            val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+            val isWatchUi = (configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK) ==
+                android.content.res.Configuration.UI_MODE_TYPE_WATCH
+            val phoneUi = com.dshwatch.domain.model.DeviceKinds.isPhone(settings.deviceKind, isWatchUi)
+
+            if (phoneUi) {
+                com.dshwatch.ui.phone.PhoneTheme(
+                    settings = settings,
+                    perf = perf,
+                    profile = profile,
+                ) {
+                    if (settingsReady) {
+                        LaunchMarker()
+                        if (!settings.onboardingDone) {
+                            com.dshwatch.ui.phone.PhoneOnboarding(
+                                container = container,
+                                settings = settings,
+                            )
+                        } else {
+                            com.dshwatch.ui.phone.PhoneRoot(
+                                container = container,
+                                settings = settings,
+                            )
+                        }
+                    }
+                }
+                return@setContent
+            }
+
             DshWatchTheme(
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,
@@ -81,42 +121,7 @@ class MainActivity : ComponentActivity() {
                 // 设置没读出来之前什么都不画：否则 onboardingDone 的默认 false
                 // 会让老用户每次启动都闪一帧引导页。
                 if (settingsReady) {
-                    /*
-                     * 启动完成的判定点就放在这里，**不再放 AppRoot 里**。
-                     *
-                     * 原先写在 AppRoot 的第一帧，但 AppRoot 开头有一段
-                     * `if (!onboardingDone) { 引导页; return }` —— 新用户装完
-                     * 先看到的是 4 步引导，压根走不到那行 `endLaunch`。
-                     * 于是他中途退出（很常见），标记留着，下次启动就报
-                     * 「上次没能启动完成」。
-                     *
-                     * 这个假阳性最坏的地方在于：用户报的是「装上就闪退」，
-                     * 而我们看到的也是「上次没走完」—— 两条错的信息撞在一起，
-                     * 会直接把排查带偏。所以判定点必须前移到「只要能画出内容」。
-                     *
-                     * 写文件是同步 IO，挪到 IO 线程：手表上主线程一卡就是
-                     * 掉帧，没必要为了写几 KB 的文本赌这一下。
-                     */
-                    LaunchedEffect(Unit) {
-                        // 用 markFirstFrame 而不是 mark：这个 LaunchedEffect 会在
-                        // Activity 被系统回收重建后再跑一次，mark 会把第二次也写成
-                        // 「首帧组合完成」，报告里就出现两条一样的时间，看起来像启动花了
-                        // 两次那么久。markFirstFrame 只在第一次定格启动耗时，
-                        // 之后写「界面重建」。
-                        CrashLog.markFirstFrame()
-                        /*
-                         * 收尾交给**进程级**协程，不在这里 `withContext(IO)`。
-                         *
-                         * 原因：这个 LaunchedEffect 的生命周期跟着 Activity 走。
-                         * 收尾要落两次盘（私有目录 + Android/data），只要 Activity
-                         * 在这段时间里被销毁重建，协程就被取消，「抹掉启动标记」那一步
-                         * 永远不执行 —— 下次启动就会报「上次没能启动完成」。
-                         *
-                         * 实测设备（412×502、192MB 堆、低内存）20 分钟重建了 5 次，
-                         * 用户每开一次就被这张卡片拦一次，而他什么都没遇到。
-                         */
-                        CrashLog.finishLaunchAsync(applicationContext, perf.tier.name)
-                    }
+                    LaunchMarker()
                     /*
                      * 圆屏几何在这里算一次，往下整棵树共享。
                      *
@@ -141,6 +146,32 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * 启动完成的判定点。
+     *
+     * 为什么放在「能画出内容」这一层，而不是 AppRoot 的第一帧：AppRoot 开头有一段
+     * `if (!onboardingDone) { 引导页; return }` —— 新用户装完先看到的是引导页，
+     * 压根走不到那里。他中途退出（很常见），标记留着，下次启动就报
+     * 「上次没能启动完成」。这个假阳性最坏的地方在于：用户报的是「装上就闪退」，
+     * 而我们看到的也是「上次没走完」—— 两条错的信息撞在一起，会把排查带偏。
+     *
+     * 收尾交给**进程级**协程（`finishLaunchAsync`），不在这里 `withContext(IO)`：
+     * 这个 LaunchedEffect 的生命周期跟着 Activity 走，Activity 一旦被销毁重建，
+     * 协程即被取消，「抹掉启动标记」那一步永远不执行，用户每开一次就被
+     * 「上次没能启动完成」拦一次。实测设备 20 分钟重建了 5 次。
+     *
+     * 用 markFirstFrame 而不是 mark：重建后再跑一次时，报告里不该出现两条
+     * 一样的「首帧组合完成」。
+     */
+    @Composable
+    private fun LaunchMarker() {
+        val perf = com.dshwatch.ui.theme.LocalPerf.current
+        LaunchedEffect(Unit) {
+            CrashLog.markFirstFrame()
+            CrashLog.finishLaunchAsync(applicationContext, perf.tier.name)
         }
     }
 
