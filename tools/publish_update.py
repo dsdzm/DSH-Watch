@@ -90,11 +90,12 @@ def notes_from_changelog(version: str) -> list:
     if not CHANGELOG.exists():
         return []
     text = CHANGELOG.read_text(encoding="utf-8")
-    # 版本名可能带通道后缀（`1.23.9-beta.1`），而 AppChangelog 里只记 `1.23.9`。
-    # 之前没做这一步，测试版发出去的 release 正文永远是空的 —— 而测试版恰恰
-    # 是最需要说明「这版改了什么」的通道。
+    # 版本名可能带通道后缀（`1.24.1-beta.1`）。先按完整版本名找 —— 测试版条目
+    # 现在也带后缀（用户要在「关于」里看见自己在 beta 通道上）；找不到再退回
+    # 只有版本号的那份，兼容之前写成 `1.23.9` 的老条目。
     base = version.split("-")[0].strip()
-    head = re.search(r'version\s*=\s*"' + re.escape(base) + r'"', text)
+    head = re.search(r'version\s*=\s*"' + re.escape(version) + r'"', text) \
+        or re.search(r'version\s*=\s*"' + re.escape(base) + r'"', text)
     if not head:
         return []
     tail = text[head.end(): head.end() + 1500]
