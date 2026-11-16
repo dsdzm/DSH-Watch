@@ -516,8 +516,9 @@ fun ProviderEditScreen(
             SettingCard {
                 SettingRow(
                     title = s.preset,
-                    subtitle = PromptPresets.byId(draft.presetId).description,
-                    trailing = PromptPresets.byId(draft.presetId).name,
+                    subtitle = PromptPresets.byId(draft.presetId, settings).description
+                        .ifBlank { PromptPresets.byId(draft.presetId, settings).sourceName },
+                    trailing = PromptPresets.byId(draft.presetId, settings).name,
                     showDivider = true,
                     onClick = { showPresetPicker = true },
                 )
@@ -604,10 +605,23 @@ fun ProviderEditScreen(
             title = s.preset,
             maxContentHeight = 240,
             content = {
-                PromptPresets.all.forEach { preset ->
+                /*
+                 * 插件预设也列在这里。
+                 *
+                 * 标出来源不是礼貌问题：插件关掉之后这几条会消失，
+                 * 用户得能对上号「是那个插件带的」，而不是以为 App 弄丢了他的预设。
+                 */
+                PromptPresets.available(settings).forEach { preset ->
                     GlassDialogRow(
                         title = preset.name,
-                        subtitle = preset.description,
+                        subtitle = if (preset.fromPlugin) {
+                            listOfNotNull(
+                                preset.description.takeIf { it.isNotBlank() },
+                                "来自 ${preset.sourceName}",
+                            ).joinToString(" · ")
+                        } else {
+                            preset.description
+                        },
                         selected = preset.id == draft.presetId,
                         onClick = {
                             draft = draft.copy(presetId = preset.id)

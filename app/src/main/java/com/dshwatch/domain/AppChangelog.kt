@@ -26,6 +26,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.1-beta.1",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 插件可以自带对话预设：装进来后在「提示词 → 预设」里多出几条，标着来源插件，关掉插件时一起消失",
+                "新增 预设开场白：选中的预设带开场白时，新建对话自动先说出这句",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.0",
             date = "2026-11-16",
             highlights = listOf(

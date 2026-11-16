@@ -1,5 +1,8 @@
 package com.dshwatch.domain
 
+import com.dshwatch.domain.model.AppSettings
+import com.dshwatch.domain.plugin.PluginPresets
+
 /**
  * 系统提示词预设。
  * 「vibe coding」的核心诉求是：少废话、直接给能跑的东西、改动尽量整块给出。
@@ -10,7 +13,25 @@ data class PromptPreset(
     val name: String,
     val description: String,
     val systemPrompt: String,
-)
+    /**
+     * 提供这条预设的插件 id；空串 = 内置。
+     *
+     * 有了它，选择器里才能标出「这条是某个插件带进来的」——
+     * 用户关掉插件之后预设消失，得能一眼看出是插件的事，而不是 App 丢了他的设置。
+     */
+    val source: String = "",
+    /** 来源插件的展示名，用于选择器里的「来自 …」；空串 = 内置 */
+    val sourceName: String = "",
+    /**
+     * 新建会话时自动插入的开场白；空串 = 不插入。
+     *
+     * 只对编程场景生效：酒馆与写作的开场由角色卡 / 写作卡决定，
+     * 两边同时插等于一次新建冒出两句开场。
+     */
+    val opening: String = "",
+) {
+    val fromPlugin: Boolean get() = source.isNotBlank()
+}
 
 object PromptPresets {
 
@@ -90,9 +111,21 @@ object PromptPresets {
 
     fun byId(id: String?): PromptPreset = all.firstOrNull { it.id == id } ?: all.first()
 
+    /**
+     * 内置 + 当前启用的插件带进来的预设。
+     *
+     * 插件预设排在后面：列表按「你自己选的 → 出厂就有的 → 装进来的」排列，
+     * 用户最常用的那几条不会被一串插件条目挤到下面。
+     */
+    fun available(settings: AppSettings): List<PromptPreset> =
+        all + PluginPresets.of(settings)
+
+    fun byId(id: String?, settings: AppSettings): PromptPreset =
+        available(settings).firstOrNull { it.id == id } ?: all.first()
+
     /** 组合预设 + 自定义补充，得到最终 system prompt */
-    fun compose(presetId: String, customPrompt: String): String {
-        val base = byId(presetId).systemPrompt
+    fun compose(presetId: String, customPrompt: String, settings: AppSettings?): String {
+        val base = if (settings == null) byId(presetId).systemPrompt else byId(presetId, settings).systemPrompt
         val extra = customPrompt.trim()
         return when {
             base.isBlank() -> extra
@@ -100,4 +133,6 @@ object PromptPresets {
             else -> base + "\n\n补充要求：\n" + extra
         }
     }
+
+    fun compose(presetId: String, customPrompt: String): String = compose(presetId, customPrompt, null)
 }

@@ -397,7 +397,7 @@ class ChatEngine(
         // 真正落盘的时机是**第一条消息写下来的时候**（见 runSend 的持久化点），
         // 一个没说过话的会话本来也不该在列表里占位置。
         _conversation.value = conv
-        _messages.value = emptyList()
+        _messages.value = openingMessages(conv, settings)
         droppedPrefix = emptyList()
         // 新会话从头开始算上下文，否则上一轮的记忆压缩点会带着走
         contextStart = 0
@@ -408,8 +408,36 @@ class ChatEngine(
         return conv
     }
 
-    suspend fun deleteConversation(id: String) {
-        if (_conversation.value?.id == id) {
+    /**
+     * 新会话的初始消息：插件预设可能带来一句开场白，其余情况是空列表。
+     *
+     * 它是一条**真实的 assistant 消息** —— 进上下文、进导出、进搜索。
+     * 做成真实消息而不是界面上的假气泡，是为了让模型在下一轮看得见
+     * 「自己刚才说过什么」；假气泡会让它显得失忆，用户一问「你刚才说的
+     * 第二点是什么」就露馅。
+     *
+     * 只在编程场景插：酒馆与写作的开场由角色卡 / 写作卡决定，
+     * 两边都插会让一次新建冒出两句开场。
+     */
+    private fun openingMessages(conv: Conversation, settings: AppSettings): List<ChatMessage> {
+        if (conv.scene != com.dshwatch.domain.roleplay.Scenes.CODING) return emptyList()
+        val opening = com.dshwatch.domain.plugin.PluginPresets
+            .openingOf(conv.presetId, settings)
+            .trim()
+        if (opening.isEmpty()) return emptyList()
+        return listOf(
+            ChatMessage(
+                id = Ids.new(),
+                role = Role.ASSISTANT,
+                content = opening,
+                createdAt = System.currentTimeMillis(),
+                model = conv.model,
+                providerId = conv.providerId,
+            ),
+        )
+    }
+
+    suspend fun deleteConversation(id: String) {        if (_conversation.value?.id == id) {
             _conversation.value = null
             _messages.value = emptyList()
             droppedPrefix = emptyList()
@@ -2045,6 +2073,7 @@ class ChatEngine(
             PromptPresets.compose(
                 presetId = provider.presetId.ifBlank { settings.activePresetId },
                 customPrompt = provider.customPrompt,
+                settings = settings,
             )
         }
         // Agent 模式下追加一段工具使用约定：

@@ -43,6 +43,9 @@ class ManifestPlugin(val manifest: PluginManifest) : PromptPlugin, GuardPlugin {
                 if (t.only.isNotEmpty()) impacts += "只保留 ${t.only.size} 个工具"
                 if (t.confirm.isNotEmpty()) impacts += "${t.confirm.size} 个改为每次确认"
             }
+            if (manifest.presets.isNotEmpty()) {
+                impacts += "带 ${manifest.presets.size} 条对话预设"
+            }
             if (impacts.isEmpty()) return base.takeIf { it.isNotEmpty() }
             val tail = impacts.joinToString("、")
             return if (base.isEmpty()) tail else "$base · $tail"

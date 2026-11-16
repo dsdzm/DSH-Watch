@@ -1103,4 +1103,64 @@ class ChatEngineTest {
 
         assertThat(engine.conversation.value?.title).isEqualTo("周报里那三个指标")
     }
+
+    // ================= 插件预设 =================
+
+    private val pluginPresetJson = """
+        {
+          "schema": 3,
+          "id": "dsh-plugin-purge",
+          "name": "Purge 预设",
+          "presets": [
+            {
+              "id": "unrestricted",
+              "name": "连续执行",
+              "systemPrompt": "你处在连续执行模式。",
+              "opening": "已进入连续执行模式，直接说做什么。"
+            }
+          ]
+        }
+    """.trimIndent()
+
+    @Test
+    fun `plugin preset opening is inserted into a new conversation`() = runTest {
+        val manifest = (com.dshwatch.domain.plugin.PluginLoader.parse(pluginPresetJson)
+            as com.dshwatch.domain.plugin.PluginLoader.Parsed.Ok).manifest
+        val tagged = provider.copy(presetId = "dsh-plugin-purge/unrestricted")
+        val settings = AppSettings(
+            providers = listOf(tagged),
+            activeProviderId = tagged.id,
+            enabledPlugins = setOf(manifest.id),
+            pluginsCustomized = true,
+            importedPlugins = listOf(manifest),
+        )
+        val (engine, _) = buildEngine(this, settings, ScriptedBackend(emptyList()))
+
+        engine.startNew(settings)
+
+        val messages = engine.messages.value
+        assertThat(messages).hasSize(1)
+        assertThat(messages[0].role).isEqualTo(Role.ASSISTANT)
+        assertThat(messages[0].content).contains("连续执行模式")
+    }
+
+    @Test
+    fun `no opening when the plugin is disabled`() = runTest {
+        val manifest = (com.dshwatch.domain.plugin.PluginLoader.parse(pluginPresetJson)
+            as com.dshwatch.domain.plugin.PluginLoader.Parsed.Ok).manifest
+        val tagged = provider.copy(presetId = "dsh-plugin-purge/unrestricted")
+        val settings = AppSettings(
+            providers = listOf(tagged),
+            activeProviderId = tagged.id,
+            // 插件关着：预设失效，开场白也不该出现
+            enabledPlugins = emptySet(),
+            pluginsCustomized = true,
+            importedPlugins = listOf(manifest),
+        )
+        val (engine, _) = buildEngine(this, settings, ScriptedBackend(emptyList()))
+
+        engine.startNew(settings)
+
+        assertThat(engine.messages.value).isEmpty()
+    }
 }

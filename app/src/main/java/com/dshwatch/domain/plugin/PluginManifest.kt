@@ -68,6 +68,18 @@ data class PluginManifest(
 
     /** schema 2 新增。没有这一段的就是纯提示词插件 */
     val tools: ToolsPart? = null,
+
+    /**
+     * schema 3 新增：随插件带进来的**对话预设**。
+     *
+     * 对应 dsh-purge 的 `preset install` —— 那边是把一整套提示词写进宿主的
+     * profile，这边没有 profile 可写，所以做成「插件自带几条预设，
+     * 用户在预设选择器里选」。区别是可见、可撤销：关掉插件，预设就一起消失。
+     *
+     * 与 [prompt] 是两个作用面：[prompt] 是「只要你开了插件就一直生效」，
+     * 预设是「我选中它才生效」。前者是常驻修改，后者是可选项。
+     */
+    val presets: List<PresetPart> = emptyList(),
 ) {
 
     /**
@@ -92,8 +104,8 @@ data class PluginManifest(
         if (description.length > MAX_DESC) return "description 太长（最多 $MAX_DESC 字）。"
         if (author.length > MAX_AUTHOR) return "author 太长（最多 $MAX_AUTHOR 字）。"
 
-        if (prompt == null && tools == null) {
-            return "prompt 和 tools 两段都是空的，装进来什么都不会发生。"
+        if (prompt == null && tools == null && presets.isEmpty()) {
+            return "prompt、tools、presets 三段都是空的，装进来什么都不会发生。"
         }
 
         prompt?.let { p ->
@@ -102,7 +114,7 @@ data class PluginManifest(
              * 用户会以为它生效了，然后在别处找原因 —— 这种「装了像没装」
              * 的状态比报错更难排查。
              */
-            if (p.append.isBlank() && p.identity.isBlank() && tools == null) {
+            if (p.append.isBlank() && p.identity.isBlank() && tools == null && presets.isEmpty()) {
                 return "prompt.identity 和 prompt.append 都是空的，插件不会产生任何效果。"
             }
             if (p.append.length > MAX_PROMPT) {
@@ -144,6 +156,41 @@ data class PluginManifest(
                 if (c.model.length > 64) return "tools.when.model 太长（上限 64 字符）。"
             }
         }
+
+        if (presets.size > MAX_PRESETS) {
+            return "presets 最多 $MAX_PRESETS 条 —— 再多，选择器要翻三屏，用户就不看了。"
+        }
+        if (presets.sumOf { it.systemPrompt.length } > MAX_PRESET_TOTAL) {
+            return "presets 里的提示词加一起超过 $MAX_PRESET_TOTAL 字符。" +
+                "预设每次被选中都要整段发出去，太长会明显拖慢首字。"
+        }
+        val seen = mutableSetOf<String>()
+        presets.forEachIndexed { i, p ->
+            val at = "presets[$i]"
+            if (!PRESET_ID.matches(p.id)) {
+                return "$at.id「${p.id}」不合法：小写字母或数字开头，" +
+                    "只含小写字母、数字、下划线与短横线，2–24 个字符（例如 purge-unrestricted）。"
+            }
+            /*
+             * 同一份清单里重名，装的顺序一变，用户选中的那条就跟着变 ——
+             * 而界面上两条长得一模一样，他根本看不出自己选的是哪一条。
+             */
+            if (!seen.add(p.id)) return "$at.id「${p.id}」和本插件里前面的预设重名了。"
+            if (p.name.isBlank()) return "$at.name 不能为空 —— 选择器靠它显示。"
+            if (p.name.length > MAX_PRESET_NAME) return "$at.name 太长（最多 $MAX_PRESET_NAME 字）。"
+            if (p.description.length > MAX_DESC) return "$at.description 太长（最多 $MAX_DESC 字）。"
+            if (p.systemPrompt.isBlank()) {
+                return "$at.systemPrompt 不能为空 —— 一条不改变任何东西的预设，" +
+                    "选中的效果是「和没选一样」，用户只会以为它坏了。"
+            }
+            if (p.systemPrompt.length > MAX_PRESET_PROMPT) {
+                return "$at.systemPrompt 太长（${p.systemPrompt.length} 字符，上限 $MAX_PRESET_PROMPT）。"
+            }
+            if (p.opening.length > MAX_PRESET_OPENING) {
+                return "$at.opening 太长（${p.opening.length} 字符，上限 $MAX_PRESET_OPENING）。" +
+                    "开场白会作为一条真实消息留在会话里，太长等于每条新对话都先烧一笔 token。"
+            }
+        }
         return null
     }
 
@@ -151,21 +198,47 @@ data class PluginManifest(
     val touchesTools: Boolean
         get() = tools != null && (tools.hide.isNotEmpty() || tools.only.isNotEmpty())
 
+    /** 这份清单带了几条对话预设 —— 设置页与选择器都要显示 */
+    val presetCount: Int get() = presets.size
+
     companion object {
         /** 当前最高版本。新清单写这个数 */
-        const val SCHEMA_MAX = 2
+        const val SCHEMA_MAX = 3
 
         /** 能读的版本。老的必须一直能读，见类注释 */
-        val SUPPORTED = setOf(1, 2)
+        val SUPPORTED = setOf(1, 2, 3)
 
-        /** 一份清单的字符上限。超过这个数就不像「声明」而像「塞进来的一篇文章」了 */
-        const val MAX_CHARS = 8_000
+        /**
+         * 一份清单的字符上限。
+         *
+         * schema 3 把它从 8 000 提到 16 000：一条预设的提示词上限是 2 000，
+         * 六条就是 12 000，再加上 prompt 与 tools 段，8 000 明显不够。
+         * 再大就不像「声明」而像「塞进来的一篇文章」了 —— 而且它要跟着
+         * AppSettings 整块序列化进 DataStore。
+         */
+        const val MAX_CHARS = 16_000
 
         const val MAX_PROMPT = 4_000
         const val MAX_NAME = 40
         const val MAX_DESC = 120
         const val MAX_AUTHOR = 40
         const val MAX_TOOLS = 64
+
+        /** 一个插件最多带几条预设。再多，选择器就要翻好几屏 */
+        const val MAX_PRESETS = 6
+
+        /** 一个插件所有预设的提示词总量 */
+        const val MAX_PRESET_TOTAL = 8_000
+
+        const val MAX_PRESET_PROMPT = 2_000
+        const val MAX_PRESET_OPENING = 600
+        const val MAX_PRESET_NAME = 20
+
+        /**
+         * 预设 id。只在插件内部唯一 —— 全局唯一性由「插件 id + 预设 id」拼出来，
+         * 见 [com.dshwatch.domain.plugin.PluginPresets]，用户不用自己保证不撞名。
+         */
+        val PRESET_ID = Regex("^[a-z0-9][a-z0-9_-]{1,23}$")
 
         /**
          * id 前缀是硬约束，不是风格建议。
@@ -244,6 +317,40 @@ data class ToolsPart(
 
     @SerialName("when")
     val condition: Condition? = null,
+)
+
+/**
+ * 一条对话预设。schema 3 新增。
+ *
+ * 它是「一整套设定」的打包单位：[systemPrompt] 决定它怎么说话，[opening]
+ * 决定它先开口说什么。分成两个字段而不是揉成一段文本，是因为它们在协议里
+ * 落在完全不同的位置 —— 一个进 system，一个是真实的 assistant 消息。
+ *
+ * ## 为什么需要预置的发言
+ *
+ * 手表上新建一条对话，用户要敲的第一句往往是最难的：他不知道这个预设
+ * 会怎么表现。开场白把「它会怎么跟你说话」直接展示出来，用户看一眼就知道
+ * 要不要继续，省掉一次试错。
+ */
+@Serializable
+data class PresetPart(
+    /** 插件内唯一。最终 id 是「插件 id/预设 id」，见 PluginPresets */
+    val id: String = "",
+
+    val name: String = "",
+
+    val description: String = "",
+
+    /** 选中这条预设后作为系统提示的主体 */
+    val systemPrompt: String = "",
+
+    /**
+     * 新建会话时自动插入的一条助手消息。空 = 不插。
+     *
+     * 它是**真实消息**：会进上下文、会出现在导出里。所以长度有硬上限，
+     * 且只在编程场景插入 —— 酒馆与写作的开场归角色卡管。
+     */
+    val opening: String = "",
 )
 
 /**
