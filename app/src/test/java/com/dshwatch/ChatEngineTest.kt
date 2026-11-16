@@ -1025,6 +1025,66 @@ class ChatEngineTest {
         assertThat(backend.requests.first().titleRequested).isFalse()
     }
 
+    // ================= 思考模式的思维链回传 =================
+
+    /**
+     * DeepSeek 的 thinking 模式在多轮对话里会把整单请求 400 掉：
+     * `The 'reasoning_content' in the thinking mode must be passed back to the API.`
+     * 所以历史里的 assistant 消息必须带着上一轮的思维链原文。
+     */
+    @Test
+    fun `deepseek history carries the previous reasoning back`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Reasoning("先拆一下问题"),
+                    ChatEvent.Text("答案一"),
+                    ChatEvent.Completed,
+                ),
+                oneTurn("答案二"),
+            )
+        )
+        val (engine, _) = buildEngine(this, deepSeekSettings(), backend)
+
+        engine.send("第一问")
+        advanceUntilIdle()
+        engine.send("第二问")
+        advanceUntilIdle()
+
+        val second = backend.requests[1]
+        assertThat(second.echoReasoning).isTrue()
+        val answer = second.history.last { it.role == "assistant" }
+        assertThat(answer.content).isEqualTo("答案一")
+        assertThat(answer.reasoning).isEqualTo("先拆一下问题")
+    }
+
+    @Test
+    fun `other providers do not send reasoning back`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Reasoning("内部推理"),
+                    ChatEvent.Text("答案一"),
+                    ChatEvent.Completed,
+                ),
+                oneTurn("答案二"),
+            )
+        )
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        engine.send("第一问")
+        advanceUntilIdle()
+        engine.send("第二问")
+        advanceUntilIdle()
+
+        val second = backend.requests[1]
+        assertThat(second.echoReasoning).isFalse()
+        // 字段仍然不发：非 DeepSeek 网关见到未知的 reasoning_content 会 400
+        val assistantTurns = second.history.filter { it.role == "assistant" }
+        assertThat(assistantTurns).isNotEmpty()
+        assistantTurns.forEach { assertThat(it.reasoning).isEmpty() }
+    }
+
     @Test
     fun `server title updates the conversation`() = runTest {
         val backend = ScriptedBackend(

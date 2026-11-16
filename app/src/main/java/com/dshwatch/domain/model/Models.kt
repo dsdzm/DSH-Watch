@@ -119,6 +119,17 @@ data class ChatTurn(
      * 提前塞进内存会让长会话把整段历史都钉在堆里。
      */
     val images: List<String> = emptyList(),
+    /**
+     * 这条助手消息的思维链原文。
+     *
+     * DeepSeek 的 thinking 模式要求**多轮对话把上一轮的 reasoning_content 原样带回**，
+     * 少了它整个请求会被 400 拒绝：
+     * `The 'reasoning_content' in the thinking mode must be passed back to the API.`
+     * 所以它不是「展示用的附属信息」，而是协议的一部分。
+     * 非 DeepSeek 供应商不读它（部分严格网关见到未知字段会 400），
+     * 是否真的发出去由 `ChatRequest.echoReasoning` 决定。
+     */
+    val reasoning: String = "",
 ) {
     val isEmpty: Boolean get() = content.isBlank() && toolCalls.isEmpty() && images.isEmpty()
 }

@@ -1106,7 +1106,11 @@ class ChatEngine(
          * 否则它会从头再答一遍。
          */
         if (continuation != null && continuation.content.isNotBlank()) {
-            turns = turns + ChatTurn(role = "assistant", content = continuation.content)
+            turns = turns + ChatTurn(
+                role = "assistant",
+                content = continuation.content,
+                reasoning = continuation.reasoning,
+            )
         }
         // 供应商不支持图片输入时，图仍留在会话里可回看，但不进请求
         if (!provider.visionInput) {
@@ -1301,7 +1305,32 @@ class ChatEngine(
             // 旧屏既没用（屏幕早就变了）又危险（模型会照着旧编号点），
             // 所以只保留最近几条全文，更早的压成一行「做过什么」。
             // 这不是「省钱技巧」—— 不折叠时模型反而更容易被过时编号带偏。
+            /*
+             * DeepSeek 的体检结果，两个扩展能力都要用：
+             *  - 服务端起标题（title.enabled）
+             *  - 思考模式回传思维链（reasoning_content）
+             */
+            val deepSeekProvider = runCatching {
+                com.dshwatch.domain.DeepSeekPricing.isDeepSeek(
+                    provider.normalizedBaseUrl(),
+                    model,
+                    provider.name,
+                )
+            }.getOrDefault(false)
+
             val sendTurns = com.dshwatch.domain.agent.DeviceTurnPruner.prune(turns)
+                /*
+                 * 非 DeepSeek 供应商：把思维链从请求里剔掉。
+                 *
+                 * `ChatTurn.reasoning` 是给 DeepSeek thinking 模式回传用的字段，
+                 * 别的端点既读不懂也不会用；留着它只会让上下文计量虚高
+                 * （思考内容往往比正文长好几倍），把本来装得下的历史裁掉。
+                 */
+                .let { list ->
+                    if (deepSeekProvider) list else list.map { t ->
+                        if (t.reasoning.isEmpty()) t else t.copy(reasoning = "")
+                    }
+                }
             val trimmed = TokenEstimator.trimToBudget(
                 systemTokens = TokenEstimator.estimate(roundPrompt),
                 history = sendTurns,
@@ -1347,14 +1376,13 @@ class ChatEngine(
                  * 质量高得多，而且不额外计一次请求 —— 它挂在正常回答的响应里。
                  * 第二轮起再要就是白花 token，所以条件里带 user 消息条数。
                  */
-                titleRequested = !titleAsked && (conversationUserTurns == 1) &&
-                    runCatching {
-                        com.dshwatch.domain.DeepSeekPricing.isDeepSeek(
-                            provider.normalizedBaseUrl(),
-                            model,
-                            provider.name,
-                        )
-                    }.getOrDefault(false),
+                titleRequested = !titleAsked && (conversationUserTurns == 1) && deepSeekProvider,
+                /*
+                 * 思考模式的多轮对话必须把上一轮的 reasoning_content 带回，
+                 * 少一条就整单 400。非 DeepSeek 不开：OpenAI 官方与部分严格网关
+                 * 见到这个未知字段会反过来拒绝。
+                 */
+                echoReasoning = deepSeekProvider,
             )
 
             titleAsked = true
@@ -1458,7 +1486,14 @@ class ChatEngine(
             conv = _conversation.value ?: conv
 
             turns = turns +
-                ChatTurn(role = "assistant", content = result.text, toolCalls = result.toolCalls)
+                ChatTurn(
+                    role = "assistant",
+                    content = result.text,
+                    toolCalls = result.toolCalls,
+                    // thinking 模式的下一步请求里，这一条同样是「历史 assistant 消息」，
+                    // 不带思维链会被 DeepSeek 直接 400
+                    reasoning = result.reasoning,
+                )
 
             val executed = executeTools(
                 calls = result.toolCalls,
@@ -2083,7 +2118,14 @@ class ChatEngine(
                 }
             }
             return buildList {
-                add(ChatTurn(role = "assistant", content = content, toolCalls = settled))
+                add(
+                    ChatTurn(
+                        role = "assistant",
+                        content = content,
+                        toolCalls = settled,
+                        reasoning = reasoning,
+                    )
+                )
                 settled.forEach { call ->
                     add(
                         ChatTurn(
@@ -2138,7 +2180,14 @@ class ChatEngine(
         } else {
             emptyList()
         }
-        return listOf(ChatTurn(role = role.wire, content = mergedContent, images = images))
+        return listOf(
+            ChatTurn(
+                role = role.wire,
+                content = mergedContent,
+                images = images,
+                reasoning = if (role == Role.ASSISTANT) reasoning else "",
+            )
+        )
     }
 
     private fun setStreaming(value: Boolean) {

@@ -20,6 +20,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
@@ -63,21 +64,43 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
 
         val endpoint = endpointOf(request.baseUrl, "chat/completions")
         var withUsage = request.usageInStream && request.stream
-        var attempt = 0
+        var withReasoning = request.echoReasoning
+        var usageRetried = false
+        var reasoningRetried = false
 
         while (true) {
-            val call = Http.client.newCall(buildChatRequest(endpoint, request, withUsage))
+            val call = Http.client.newCall(buildChatRequest(endpoint, request, withUsage, withReasoning))
             activeCall = call
             var retryWithoutUsage = false
+            var retryWithReasoning = false
             try {
                 call.execute().use { resp ->
                     if (!resp.isSuccessful) {
                         val text = runCatching { resp.body?.string() }.getOrNull().orEmpty()
-                        if (resp.code == 400 && attempt == 0 && withUsage) {
-                            retryWithoutUsage = true
-                        } else {
-                            emit(ChatEvent.Failure(DshError.Http(resp.code, text)))
-                            return@flow
+                        /*
+                         * 两类「请求体不合口味」导致的 400，都是同一种处理：换个形状重发一次。
+                         *
+                         * 1. 服务端不认 `stream_options` → 去掉；
+                         * 2. DeepSeek thinking 模式要求回传 `reasoning_content`，而我们没开
+                         *    （比如换了中转站，供应商判定没认出来）→ 打开后重发一次。
+                         *    报错的 error.message 里带着字段名，用它来判断比猜供应商可靠。
+                         */
+                        when {
+                            resp.code == 400 && withUsage && !usageRetried -> {
+                                usageRetried = true
+                                retryWithoutUsage = true
+                            }
+
+                            resp.code == 400 && !withReasoning && !reasoningRetried &&
+                                text.contains("reasoning_content") -> {
+                                reasoningRetried = true
+                                retryWithReasoning = true
+                            }
+
+                            else -> {
+                                emit(ChatEvent.Failure(DshError.Http(resp.code, text)))
+                                return@flow
+                            }
                         }
                     } else {
                         if (request.stream) emitStreaming(resp) else emitWhole(resp)
@@ -95,10 +118,19 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
                 activeCall = null
             }
 
-            if (!retryWithoutUsage) return@flow
-            Logx.w(TAG, "服务端拒绝 stream_options，去掉后重试")
-            withUsage = false
-            attempt++
+            when {
+                retryWithoutUsage -> {
+                    Logx.w(TAG, "服务端拒绝 stream_options，去掉后重试")
+                    withUsage = false
+                }
+
+                retryWithReasoning -> {
+                    Logx.w(TAG, "服务端要求回传 reasoning_content，打开后重试")
+                    withReasoning = true
+                }
+
+                else -> return@flow
+            }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -382,7 +414,12 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         emit(ChatEvent.Completed)
     }
 
-    private fun buildChatRequest(endpoint: String, r: ChatRequest, withUsage: Boolean): Request {
+    private fun buildChatRequest(
+        endpoint: String,
+        r: ChatRequest,
+        withUsage: Boolean,
+        withReasoning: Boolean = r.echoReasoning,
+    ): Request {
         val payload = buildBody(
             model = r.model,
             systemPrompt = r.systemPrompt,
@@ -396,6 +433,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
             tools = r.tools,
             toolChoice = r.toolChoice,
             withTitle = r.titleRequested,
+            withReasoning = withReasoning,
         )
         return Request.Builder()
             .url(endpoint)
@@ -419,6 +457,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         tools: List<JsonObject> = emptyList(),
         toolChoice: String = "auto",
         withTitle: Boolean = false,
+        withReasoning: Boolean = false,
     ): String {
         val payload: JsonObject = buildJsonObject {
             put("model", model)
@@ -430,7 +469,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
                     }
                 }
                 // 出站前强制修复序列，保证 tool_calls 后面一定跟着配对的 tool 消息
-                TurnSanitizer.sanitize(history).forEach { turn -> addTurn(turn) }
+                TurnSanitizer.sanitize(history).forEach { turn -> addTurn(turn, withReasoning) }
             }
             put("temperature", temperature.toDouble())
             put("top_p", topP.toDouble())
@@ -458,12 +497,25 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
     }
 
     /**
+     * 回传思维链（DeepSeek thinking 模式的硬要求）。
+     *
+     * 三个条件同时成立才写字段：
+     *  - 调用方开了 `echoReasoning`（非 DeepSeek 不写，严格网关会 400 未知字段）；
+     *  - 是 assistant 消息（user 消息上的 reasoning 永远是空的）；
+     *  - 内容非空 —— 空字符串会被当成「思维链是空的」，不如干脆不写这个键。
+     */
+    private fun JsonObjectBuilder.putReasoning(turn: ChatTurn, enabled: Boolean) {
+        if (!enabled || turn.role != "assistant" || turn.reasoning.isBlank()) return
+        put("reasoning_content", turn.reasoning)
+    }
+
+    /**
      * 把一条历史翻译成协议消息。三种形态：
      *  - 工具结果：role=tool + tool_call_id
      *  - 带工具调用的助手消息：content 可为 null，必须带 tool_calls 数组
      *  - 普通消息：role + content
      */
-    private fun JsonArrayBuilder.addTurn(turn: ChatTurn) {
+    private fun JsonArrayBuilder.addTurn(turn: ChatTurn, withReasoning: Boolean = false) {
         when {
             turn.toolCallId.isNotBlank() -> addJsonObject {
                 put("role", "tool")
@@ -474,6 +526,12 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
             turn.toolCalls.isNotEmpty() -> addJsonObject {
                 put("role", turn.role)
                 put("content", if (turn.content.isBlank()) JsonNull else JsonPrimitive(turn.content))
+                /*
+                 * thinking 模式下，带 tool_calls 的这一轮同样要回传思维链。
+                 * DeepSeek 的校验是按「每一条 assistant 消息」来的，只要有一条缺字段，
+                 * 整个请求 400 —— 不是只看最后一条。
+                 */
+                putReasoning(turn, withReasoning)
                 putJsonArray("tool_calls") {
                     turn.toolCalls.forEach { call ->
                         addJsonObject {
@@ -490,6 +548,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
 
             else -> addJsonObject {
                 put("role", turn.role)
+                putReasoning(turn, withReasoning)
                 /*
                  * 多模态：有图时 content 必须是数组，纯文本时仍用字符串。
                  *

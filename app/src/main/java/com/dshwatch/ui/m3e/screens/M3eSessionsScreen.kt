@@ -1,5 +1,6 @@
 package com.dshwatch.ui.m3e.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -21,15 +25,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.CardDefaults
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.IconButton
 import androidx.wear.compose.material3.MaterialTheme as W3
@@ -38,6 +45,7 @@ import com.dshwatch.domain.model.Conversation
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.ContextUsageDialog
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.m3e.M3eChip
 import com.dshwatch.ui.m3e.M3eConfirmDialog
 import com.dshwatch.ui.m3e.M3eDialog
 import com.dshwatch.ui.m3e.M3eDialogAction
@@ -99,6 +107,16 @@ fun M3eSessionsScreen(
     var exportTarget by remember { mutableStateOf<Conversation?>(null) }
     var showImport by remember { mutableStateOf(false) }
     var cardTitle by remember { mutableStateOf("") }
+    /*
+     * 多选。
+     *
+     * 入口放在会话菜单里，而不是顶栏再挂一颗图标：顶栏现在是「返回 + 新建」，
+     * 加第三颗会把标题挤成两三个字。和经典页一样，多选是低频动作，
+     * 不值得常驻。
+     */
+    var selecting by remember { mutableStateOf(false) }
+    val selectedIds = remember { mutableStateListOf<String>() }
+    var confirmBatchDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey, filterScene, filterCardId) {
         conversations = if (filtered) {
@@ -118,25 +136,32 @@ fun M3eSessionsScreen(
         // 列表自己带横向内边距（TransformingLazyColumn 的 6dp），骨架不再叠加
         horizontalInset = 0.dp,
         actions = {
-            M3eIconTap(icon = Icons.Filled.Add, contentDescription = s.newChat, onClick = {
-                scope.launch {
-                    if (filtered) {
-                        container.engine.startNew(
-                            settings = container.settings.value.copy(
-                                agentMode = com.dshwatch.domain.model.AgentMode.OFF,
-                            ),
-                            scene = filterScene,
-                            roleCardId = filterCardId,
-                            title = cardTitle,
-                        )
-                        nav.pop()
-                        nav.push(Screen.RoleplayChat)
-                    } else {
-                        container.engine.newConversation(container.settings.value)
-                        nav.toChat()
+            if (selecting) {
+                M3eIconTap(icon = Icons.Filled.Done, contentDescription = "完成", onClick = {
+                    selecting = false
+                    selectedIds.clear()
+                })
+            } else {
+                M3eIconTap(icon = Icons.Filled.Add, contentDescription = s.newChat, onClick = {
+                    scope.launch {
+                        if (filtered) {
+                            container.engine.startNew(
+                                settings = container.settings.value.copy(
+                                    agentMode = com.dshwatch.domain.model.AgentMode.OFF,
+                                ),
+                                scene = filterScene,
+                                roleCardId = filterCardId,
+                                title = cardTitle,
+                            )
+                            nav.pop()
+                            nav.push(Screen.RoleplayChat)
+                        } else {
+                            container.engine.newConversation(container.settings.value)
+                            nav.toChat()
+                        }
                     }
-                }
-            })
+                })
+            }
         },
     ) {
         M3eList(state = listState, modifier = Modifier.weight(1f)) {
@@ -149,23 +174,62 @@ fun M3eSessionsScreen(
                 }
             }
 
+            /*
+             * 选择条放列表**第一项**，不做底部浮层。
+             *
+             * 手表上一屏只露三四条，浮层会盖住最后两条；而列表第一项是
+             * 「滚到顶就能看见」的位置，选中之后用户本来就要往上翻。
+             * 这也是经典页的选择条位置 —— 两套界面在同一个功能上不该有两种肌肉记忆。
+             */
+            if (selecting && conversations.isNotEmpty()) {
+                item(key = "__select_bar__") {
+                    SelectionBar(
+                        count = selectedIds.size,
+                        total = conversations.size,
+                        onSelectAll = {
+                            if (selectedIds.size == conversations.size) {
+                                selectedIds.clear()
+                            } else {
+                                selectedIds.clear()
+                                selectedIds.addAll(conversations.map { it.id })
+                            }
+                        },
+                        onPin = {
+                            scope.launch {
+                                selectedIds.forEach { id -> container.conversationStore.setPinned(id, true) }
+                                selectedIds.clear()
+                                selecting = false
+                                reloadKey++
+                            }
+                        },
+                        onDelete = { confirmBatchDelete = true },
+                    )
+                }
+            }
+
             items(conversations.size, key = { conversations[it].id }) { index ->
                 val conv = conversations[index]
                 SessionCard(
                     conversation = conv,
+                    selecting = selecting,
+                    selected = conv.id in selectedIds,
                     onClick = {
-                        scope.launch {
-                            container.engine.open(conv.id)
-                            // 打开之后去哪由会话自己的场景决定，不看「从哪进来」：
-                            // 全局列表里点开一个酒馆会话，跳到编程对话页会没有角色名、
-                            // 也没有记忆入口，看起来像内容丢了。
-                            if (filtered ||
-                                (conv.scene.isNotBlank() && conv.scene != Scenes.CODING)
-                            ) {
-                                nav.pop()
-                                nav.push(Screen.RoleplayChat)
-                            } else {
-                                nav.toChat()
+                        if (selecting) {
+                            if (!selectedIds.remove(conv.id)) selectedIds.add(conv.id)
+                        } else {
+                            scope.launch {
+                                container.engine.open(conv.id)
+                                // 打开之后去哪由会话自己的场景决定，不看「从哪进来」：
+                                // 全局列表里点开一个酒馆会话，跳到编程对话页会没有角色名、
+                                // 也没有记忆入口，看起来像内容丢了。
+                                if (filtered ||
+                                    (conv.scene.isNotBlank() && conv.scene != Scenes.CODING)
+                                ) {
+                                    nav.pop()
+                                    nav.push(Screen.RoleplayChat)
+                                } else {
+                                    nav.toChat()
+                                }
                             }
                         }
                     },
@@ -202,6 +266,12 @@ fun M3eSessionsScreen(
                 M3eDialogRow(s.sessionWorkDir) {
                     menuTarget = null
                     dirTarget = conv
+                }
+                M3eDialogRow("多选") {
+                    menuTarget = null
+                    selecting = true
+                    selectedIds.clear()
+                    selectedIds.add(conv.id)
                 }
                 M3eDialogRow(if (conv.pinned) s.unpin else s.pin) {
                     menuTarget = null
@@ -318,6 +388,70 @@ fun M3eSessionsScreen(
             onDismiss = { deleteTarget = null },
         )
     }
+
+    if (confirmBatchDelete) {
+        M3eConfirmDialog(
+            title = "删除 ${selectedIds.size} 条对话",
+            text = "删掉之后找不回来。消息、用量记录都会一起没有。",
+            onConfirm = {
+                scope.launch {
+                    val ids = selectedIds.toList()
+                    selectedIds.clear()
+                    selecting = false
+                    confirmBatchDelete = false
+                    // 逐条删而不是批量接口：存储层本来就是一条一个文件，
+                    // 「批量」只是界面上的概念，这里没有第二个真值来源要对齐
+                    ids.forEach { id -> container.engine.deleteConversation(id) }
+                    reloadKey++
+                }
+            },
+            onDismiss = { confirmBatchDelete = false },
+        )
+    }
+}
+
+/**
+ * 多选状态下的操作条。
+ *
+ * 三个动作各占一颗 chip：全选 / 置顶 / 删除。不放「取消置顶」——
+ * 置顶本来就是低频管理动作，再分出一个反向操作，三个按钮会变成四个，
+ * 在 200dp 宽里必然换行。
+ */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    total: Int,
+    onSelectAll: () -> Unit,
+    onPin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(26.dp))
+            .background(W3.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = if (count == 0) "选几条要一起处理的" else "已选 $count / $total",
+            style = W3.typography.labelSmall,
+            color = W3.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            M3eChip(
+                text = if (count == total && total > 0) "清空" else "全选",
+                onClick = onSelectAll,
+            )
+            M3eChip(text = "置顶", selected = count > 0, onClick = { if (count > 0) onPin() })
+            M3eChip(text = "删除", selected = count > 0, onClick = { if (count > 0) onDelete() })
+        }
+    }
 }
 
 /**
@@ -329,6 +463,8 @@ fun M3eSessionsScreen(
 @Composable
 private fun SessionCard(
     conversation: Conversation,
+    selecting: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
     onMore: () -> Unit,
 ) {
@@ -336,14 +472,29 @@ private fun SessionCard(
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
+        // 选中时整块换底色，比只在左边画个勾更醒目 —— 圆屏上扫一眼就能看出选了几条
+        colors = if (selected) {
+            CardDefaults.cardColors(containerColor = W3.colorScheme.primaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 12.dp,
+            start = if (selecting) 6.dp else 12.dp,
             end = 2.dp,
             top = 7.dp,
             bottom = 7.dp,
         ),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (selecting) {
+                Icon(
+                    imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = if (selected) W3.colorScheme.primary else W3.colorScheme.outline,
+                )
+                Spacer(Modifier.width(6.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (conversation.pinned) {
@@ -357,7 +508,7 @@ private fun SessionCard(
                     Text(
                         text = conversation.displayTitle,
                         style = W3.typography.bodyMedium,
-                        color = W3.colorScheme.onSurface,
+                        color = if (selected) W3.colorScheme.onPrimaryContainer else W3.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -366,7 +517,11 @@ private fun SessionCard(
                     text = Fmt.relative(conversation.updatedAt) +
                         " · " + conversation.messageCount + " " + s.messagesCount,
                     style = W3.typography.labelSmall,
-                    color = W3.colorScheme.onSurfaceVariant,
+                    color = if (selected) {
+                        W3.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    } else {
+                        W3.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -375,14 +530,19 @@ private fun SessionCard(
              * 更多按钮不用 M3eIconTap（44dp 命中区）：卡片内容高只有 56dp 左右，
              * 44dp 的方形命中区会把卡片撑高，还会把标题挤到左边一小条。
              * 32dp 是「能点中、又不撑高」的折中，图标仍是 20dp。
+             *
+             * 选择模式下整行就是「选中 / 取消」，⋯ 一并收起来 —— 留着它等于多一个
+             * 「点了会跳菜单」的误触区。
              */
-            Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                IconButton(onClick = onMore, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        imageVector = Icons.Outlined.MoreVert,
-                        contentDescription = s.more,
-                        modifier = Modifier.size(20.dp),
-                    )
+            if (!selecting) {
+                Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                    IconButton(onClick = onMore, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Outlined.MoreVert,
+                            contentDescription = s.more,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
         }

@@ -34,6 +34,15 @@ data class ChatRequest(
      * 只有第一轮且供应商支持时才开 —— 每轮都带是一份白送的 token 与延迟。
      */
     val titleRequested: Boolean = false,
+    /**
+     * 把历史里助手消息的思维链回传为 `reasoning_content`。
+     *
+     * DeepSeek 的 thinking 模式**强制**要求这个字段：不带就 400
+     * （`The 'reasoning_content' in the thinking mode must be passed back to the API.`）。
+     * 而 OpenAI 官方与一部分严格网关见到这个未知字段会反过来 400，
+     * 所以只有供应商判定为 DeepSeek 时才打开，见 ChatEngine 里的判定。
+     */
+    val echoReasoning: Boolean = false,
 ) {
     val agentEnabled: Boolean get() = tools.isNotEmpty()
     val displayModel: String get() = model.ifBlank { "default" }

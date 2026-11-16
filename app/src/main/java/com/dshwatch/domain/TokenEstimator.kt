@@ -42,9 +42,11 @@ object TokenEstimator {
     fun estimateMessages(messages: List<Pair<String, String>>): Int =
         messages.sumOf { estimatePair(it.first, it.second) } + 2
 
-    /** 估算一轮对话的量：正文 + 工具参数 + 工具结果都要算进去，否则会低估上下文 */
+    /** 估算一轮对话的量：正文 + 思维链 + 工具参数 + 工具结果都要算进去，否则会低估上下文 */
     fun estimateTurn(turn: com.dshwatch.domain.model.ChatTurn): Int {
         var total = estimatePair(turn.role, turn.content)
+        // 思考模式下 reasoning_content 会整段随历史回传，它是真实占用的 token
+        if (turn.reasoning.isNotEmpty()) total += estimate(turn.reasoning)
         turn.toolCalls.forEach { call ->
             total += estimate(call.name) + estimate(call.arguments) + estimate(call.result) + 8
         }

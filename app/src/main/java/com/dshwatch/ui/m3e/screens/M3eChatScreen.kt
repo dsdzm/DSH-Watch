@@ -78,6 +78,7 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.m3e.M3eChip
 import com.dshwatch.ui.m3e.M3eConfirmDialog
 import com.dshwatch.ui.m3e.M3eDialog
+import com.dshwatch.ui.m3e.M3eDialogAction
 import com.dshwatch.ui.m3e.M3eDialogRow
 import com.dshwatch.ui.m3e.M3eEmptyState
 import com.dshwatch.ui.m3e.M3eFab
@@ -161,6 +162,8 @@ fun M3eChatScreen(
     var showScenePicker by remember { mutableStateOf(false) }
     var showContext by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
+    /** 正在编辑的那条提问。非空时弹出编辑框 */
+    var editing by remember { mutableStateOf<ChatMessage?>(null) }
 
     val turns = remember(messages) { groupMessages(messages) }
 
@@ -389,6 +392,9 @@ fun M3eChatScreen(
                             clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
                         },
                         onRegenerate = { engine.regenerate(last.id) },
+                        onContinue = { engine.continueGeneration(last.id) },
+                        onSwitchVersion = { i -> engine.switchVersion(last.id, i) },
+                        onEdit = { editing = msgs.first() },
                         onDelete = { pendingDelete = last },
                         container = container,
                         onOpenArtifact = { path -> nav.push(Screen.WorkspacePreview(path)) },
@@ -409,6 +415,20 @@ fun M3eChatScreen(
     }
 
     // ---------------- 弹窗 ----------------
+
+    editing?.let { target ->
+        M3eEditPromptDialog(
+            initial = target.content,
+            onConfirm = { text ->
+                editing = null
+                // 一字未改就别重跑了 —— 那是白花一次请求，还会平白多一个版本
+                if (text != target.content) {
+                    scope.launch { engine.editMessage(target.id, text) }
+                }
+            },
+            onDismiss = { editing = null },
+        )
+    }
 
     pendingDelete?.let { target ->
         M3eConfirmDialog(
@@ -539,6 +559,9 @@ private fun M3eTurn(
     onChoose: (Choices.Choice) -> Unit,
     onCopy: (String) -> Unit,
     onRegenerate: () -> Unit,
+    onContinue: () -> Unit,
+    onSwitchVersion: (Int) -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     container: AppContainer,
     onOpenArtifact: (String) -> Unit,
@@ -665,12 +688,24 @@ private fun M3eTurn(
             ChoiceButtons(choices = parsed.choices, enabled = canPick, onPick = onChoose)
         }
 
+        if (!isStreaming && last.hasVersions) {
+            Spacer(Modifier.height(4.dp))
+            M3eVersionBar(
+                index = last.versionIndex,
+                total = last.versions.size,
+                onPick = onSwitchVersion,
+            )
+        }
+
         if (!isStreaming && bodyText.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 M3eCardAction(LocalStrings.current.copy) { onCopy(body) }
-                if (!isUser) {
+                if (isUser) {
+                    M3eCardAction("编辑") { onEdit() }
+                } else {
                     M3eCardAction(LocalStrings.current.regenerate) { onRegenerate() }
+                    M3eCardAction("续写") { onContinue() }
                     M3eCardAction(LocalStrings.current.delete) { onDelete() }
                 }
             }
@@ -776,6 +811,90 @@ private fun M3eCardAction(text: String, onClick: () -> Unit) {
     ) {
         Text(text = text, style = W3.typography.labelSmall, maxLines = 1)
     }
+}
+
+/**
+ * 版本切换条：`‹ 2 / 3 ›`。
+ *
+ * 不套胶囊背景：消息卡本身已经有了底色，再加一层会变成「卡里还有一张卡」。
+ * 手表上这两颗箭头不需要更大的命中区 —— TextButton 自带 32dp 最小高度，
+ * 左右各 24dp 的默认内边距把它们撑得足够宽了。
+ *
+ * 到头的方向不隐藏而是禁用：位置固定，用户不会因为「箭头消失」而以为这版没有历史。
+ */
+@Composable
+private fun M3eVersionBar(index: Int, total: Int, onPick: (Int) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        androidx.wear.compose.material3.TextButton(
+            onClick = { if (index > 0) onPick(index - 1) },
+            enabled = index > 0,
+            modifier = Modifier.heightIn(min = 32.dp),
+        ) {
+            Text(text = "‹", style = W3.typography.labelSmall, maxLines = 1)
+        }
+        Text(
+            text = "${index + 1} / $total",
+            style = W3.typography.labelSmall,
+            color = W3.colorScheme.primary,
+            maxLines = 1,
+        )
+        androidx.wear.compose.material3.TextButton(
+            onClick = { if (index < total - 1) onPick(index + 1) },
+            enabled = index < total - 1,
+            modifier = Modifier.heightIn(min = 32.dp),
+        ) {
+            Text(text = "›", style = W3.typography.labelSmall, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * 编辑已发出的提问。
+ *
+ * 用对话框而不是跳输入页：输入页的语义是「发一条新消息」，从那里回来
+ * 还得再判断是新增还是替换；而编辑只改一段已有文字，改完原地重跑最直接。
+ *
+ * 手表键盘会盖掉下半屏，所以正文只给 3 行 —— 再多用户也看不见自己在打什么。
+ */
+@Composable
+private fun M3eEditPromptDialog(
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val s = LocalStrings.current
+    var draft by remember(initial) { mutableStateOf(initial) }
+    M3eDialog(
+        onDismissRequest = onDismiss,
+        title = "编辑这条提问",
+        maxContentHeight = 240,
+        content = {
+            androidx.compose.material3.OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = W3.typography.bodySmall,
+                minLines = 3,
+                maxLines = 4,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "改完会重新回答，这条之后的对话会被清掉。",
+                style = W3.typography.labelSmall,
+                color = W3.colorScheme.error,
+            )
+        },
+        buttons = {
+            M3eDialogAction("保存并重答", primary = true) {
+                val text = draft.trim()
+                if (text.isNotBlank()) onConfirm(text)
+            }
+            M3eDialogAction(s.cancel, primary = false) { onDismiss() }
+        },
+    )
 }
 
 /** 错误提示条：一条窄卡片，右侧「关闭」 */

@@ -23,6 +23,14 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.28.0",
+            date = "2026-11-16",
+            highlights = listOf(
+                "新增 M3E 对话页的回答版本切换、续写与「编辑这条提问」",
+                "新增 M3E 会话列表多选：批量置顶与删除，入口在每条会话的「⋯」里",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.27.0",
             date = "2026-11-16",
             highlights = listOf(
