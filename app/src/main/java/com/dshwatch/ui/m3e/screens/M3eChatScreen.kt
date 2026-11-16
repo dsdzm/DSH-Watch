@@ -570,7 +570,7 @@ private fun M3eTurn(
      * 三层都做完之后的才是"正文"。
      */
     val htmlDoc = remember(body, isStreaming) {
-        if (isStreaming) null else com.dshwatch.ui.html.HtmlBlocks.find(body)
+        if (isStreaming) null else com.dshwatch.ui.html.HtmlBlocks.findRenderable(body)
     }
     val rawText = if (htmlDoc != null) com.dshwatch.ui.html.HtmlBlocks.strip(body, htmlDoc) else body
     val panelRes = remember(rawText, isStreaming) {

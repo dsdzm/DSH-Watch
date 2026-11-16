@@ -1178,7 +1178,7 @@ private fun MessageItem(
     // 流式期间不扫 HTML：每个字都要跑一次正则，手表上这直接就是掉帧。
     // 生成结束后再判断一次，卡片出现得晚半秒，但滚动是顺的。
     val htmlDoc = remember(body, isStreaming) {
-        if (isStreaming) null else com.dshwatch.ui.html.HtmlBlocks.find(body)
+        if (isStreaming) null else com.dshwatch.ui.html.HtmlBlocks.findRenderable(body)
     }
     val rawText = if (htmlDoc != null) com.dshwatch.ui.html.HtmlBlocks.strip(body, htmlDoc) else body
     // ```panel 围栏抽成原生面板；流式期间半截围栏还没闭合，解析也没有意义
@@ -1473,7 +1473,7 @@ private fun AgentTurnItem(
 
         if (answerBody.isNotBlank()) {
             Spacer(Modifier.height(6.dp))
-            val htmlDoc = remember(answerBody) { com.dshwatch.ui.html.HtmlBlocks.find(answerBody) }
+            val htmlDoc = remember(answerBody) { com.dshwatch.ui.html.HtmlBlocks.findRenderable(answerBody) }
             if (htmlDoc != null) {
                 com.dshwatch.ui.html.InlineHtml(
                     html = htmlDoc.html,

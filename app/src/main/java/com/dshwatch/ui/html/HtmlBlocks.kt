@@ -44,4 +44,14 @@ object HtmlBlocks {
     /** 把界面文档从正文里去掉，剩下的文字仍然按 Markdown 渲染 */
     fun strip(text: String, block: Block): String =
         text.replace(block.raw, "").trim()
+
+    /**
+     * 同上，但先确认这台设备render得出来。
+     *
+     * 没有 WebView 实现时返回 null —— 正文里的 HTML 就留在原地，按普通代码块
+     * 显示原文。这比「识别出界面 → 塞进一个点开是提示的全屏页」诚实得多：
+     * 入口根本不该出现。GLL-AL00 这类剔掉 WebView 的机型就靠这个不出丑。
+     */
+    fun findRenderable(text: String): Block? =
+        if (WebViewSupport.isAvailable()) find(text) else null
 }

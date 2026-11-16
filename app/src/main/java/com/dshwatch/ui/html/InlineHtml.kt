@@ -77,6 +77,13 @@ fun InlineHtml(
     /** 只有最新一条消息的选项可点，历史面板一律置灰 */
     pickable: Boolean = false,
 ) {
+    // 先问能力再动手：缺 WebView 实现的机型上，`WebView(ctx)` 本身就会抛
+    // UnsupportedOperationException。不建实例，直接出提示。
+    if (!WebViewSupport.isAvailable()) {
+        HtmlUnavailable(modifier)
+        return
+    }
+
     val scheme = MaterialTheme.colorScheme
     val fg = HtmlShell.hex(scheme.onSurface.toArgb())
     val accent = HtmlShell.hex(scheme.primary.toArgb())
@@ -176,6 +183,8 @@ fun InlineHtml(
                             attachDragForwarding(wv, { innerScroll }, { onDrag(it) })
                         }
                     }.getOrElse {
+                        // 能力检测过了却还是建不起来（厂商实现半残、被系统回收）。
+                        // 这条分支只该出现在异常机型上，但必须留 —— 组合期抛异常就是闪退。
                         failed = true
                         View(ctx)
                     }

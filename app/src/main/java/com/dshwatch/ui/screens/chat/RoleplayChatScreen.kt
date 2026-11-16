@@ -383,7 +383,7 @@ private fun RoleplayMessage(
      */
     val html = remember(text, message.status) {
         if (message.status == MessageStatus.STREAMING) null
-        else com.dshwatch.ui.html.HtmlBlocks.find(text)
+        else com.dshwatch.ui.html.HtmlBlocks.findRenderable(text)
     }
     val rawPlain = if (html != null) com.dshwatch.ui.html.HtmlBlocks.strip(text, html) else text
     // ```panel 围栏 → 原生面板；流式期间半截围栏没闭合，不必解析

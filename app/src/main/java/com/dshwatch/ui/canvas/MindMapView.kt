@@ -31,6 +31,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.core.Logx
 
 /**
  * 思维导图渲染。
@@ -186,7 +187,11 @@ object MindMap {
      * 缩进按「每 2 空格一级」判断，tab 当 4 空格。mermaid 的 `root((x))` 与
      * 普通 `x` 都当成根文本处理 —— 括号在手表上只会变成视觉噪音。
      */
-    fun parse(source: String): Node? {
+    fun parse(source: String): Node? = runCatching { parseInternal(source) }
+        .onFailure { Logx.w("MindMap", "思维导图解析失败，整块按原文显示", it) }
+        .getOrNull()
+
+    private fun parseInternal(source: String): Node? {
         val lines = source.lines()
             .map { it.replace("\t", "    ") }
             .filter { it.isNotBlank() }
@@ -204,13 +209,7 @@ object MindMap {
                 .removePrefix("- ").removePrefix("* ").removePrefix("+ ")
                 .trim()
             if (text.isEmpty()) continue
-            // mermaid 节点形状：root((文字)) / A[文字] / B{文字}
-            text = text
-                .replace(Regex("^\\(\\((.*)\\)\\)$"), "$1")
-                .replace(Regex("^\\[(.*)]$"), "$1")
-                .replace(Regex("^\\{(.*)}$"), "$1")
-                .replace(Regex("^\\((.*)\\)$"), "$1")
-                .trim()
+            text = stripShape(text).trim()
             if (text.isEmpty()) continue
 
             val level = indent / 2
@@ -228,6 +227,53 @@ object MindMap {
             stack += level to node
         }
         return root
+    }
+
+    /**
+     * 剥掉 mermaid 的节点形状壳：`root((文字))` / `A[文字]` / `B{文字}`。
+     *
+     * ## 为什么不用正则
+     *
+     * 这里原来写的是四条 `Regex(...)`，其中 `^\\{(.*)}$` 结尾的 `}` 没有转义。
+     * JVM 的 Pattern 把孤立的 `}` 当字面量放过去了 —— 所以单元测试、桌面预览
+     * 全都正常；Android 9 起 java.util.regex 换成了 ICU 实现，ICU 判它非法，
+     * 直接抛 `PatternSyntaxException: Syntax error in regexp pattern near index 8`。
+     *
+     * 抛出的位置很要命：调用点在组合期（`remember(source) { MindMap.parse(...) }`），
+     * 也就是 Choreographer 的帧回调里，异常一路冒到主线程 = 闪退。而组合期意味着
+     * **只要那条消息还在历史里，每次冷启动都会重新踩一遍**，用户被自己的聊天记录
+     * 卡在 crash loop 里 —— 1.23.2(84) 在 GLL-AL00 上就是这么崩的。
+     *
+     * 字符串判断没有这一整类风险：不需要编译、不区分引擎、也不可能语法错。
+     */
+    private fun stripShape(raw: String): String {
+        fun unwrapWhole(s: String): String? {
+            fun pick(prefix: String, suffix: String): String? =
+                if (s.length >= prefix.length + suffix.length &&
+                    s.startsWith(prefix) && s.endsWith(suffix)
+                ) {
+                    s.substring(prefix.length, s.length - suffix.length)
+                } else {
+                    null
+                }
+            // 顺序有讲究：`((x))` 先于 `(x)`，否则会剩下一个 `(x)` 再被剥一次
+            return pick("((", "))")
+                ?: pick("[", "]")
+                ?: pick("{", "}")
+                ?: pick("(", ")")
+        }
+
+        // 1) 整串就是一个形状：`{文字}`
+        unwrapWhole(raw)?.let { return it }
+
+        // 2) 节点 ID 加形状：`root((mindmap))` / `A[文字]` —— mermaid 的标准写法。
+        //    只有当 ID 部分「像 ID」（ASCII 字母数字下划线短横）时才剥，
+        //    否则一句 `他说(真的)` 会被误当成节点形状。
+        val idEnd = raw.indexOfFirst { it in "([{" }
+        if (idEnd <= 0) return raw
+        val id = raw.substring(0, idEnd)
+        if (!id.all { it.code < 128 && (it.isLetterOrDigit() || it == '_' || it == '-') }) return raw
+        return unwrapWhole(raw.substring(idEnd)) ?: raw
     }
 
     fun layout(

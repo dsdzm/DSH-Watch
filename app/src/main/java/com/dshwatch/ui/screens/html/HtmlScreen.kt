@@ -7,14 +7,20 @@ import android.webkit.WebViewClient
 import android.widget.TextView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.html.HtmlShell
+import com.dshwatch.ui.html.WebViewSupport
 import com.dshwatch.ui.nav.WatchNavigator
 
 /**
@@ -45,11 +51,18 @@ fun HtmlScreen(nav: WatchNavigator, html: String) {
     }
 
     WatchScaffold(title = "界面", onBack = { nav.pop() }) {
+        // 缺 WebView 实现的机型上 new WebView() 就抛，页面会整个废掉。
+        // 能力检测放在最外面，用户看到一句人话，而不是一个空白页。
+        if (!WebViewSupport.isAvailable()) {
+            HtmlUnavailableNotice()
+            return@WatchScaffold
+        }
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
-                    // 少数精简系统镜像没装 WebView；那时退化成一段提示，不要连累整个页面
+                    // 能力检测已经过了，这里是运行期兜底：厂商实现半残、或被系统回收。
+                    // 组合期抛异常就是闪退，所以必须接住。
                     runCatching {
                         WebView(ctx).apply {
                             setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -82,5 +95,23 @@ fun HtmlScreen(nav: WatchNavigator, html: String) {
                 },
             )
         }
+    }
+}
+
+/** 没有 WebView 时的一页提示。比空白页有用，也比闪退强。 */
+@Composable
+private fun HtmlUnavailableNotice() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "这台设备没有可用的 WebView，无法渲染自定义界面",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }

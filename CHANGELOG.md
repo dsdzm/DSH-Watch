@@ -6,6 +6,83 @@
 
 ---
 
+## [1.23.8] — 2026-11-16（versionCode 90）· 测试版
+
+一条历史消息，就能让 App 永远打不开。根因是一个反斜杠。
+
+### 现象
+
+GLL-AL00（HUAWEI Watch 3，Android 10）冷启动必崩，崩在启动阶段 —— 启动耗时
+11 秒、「首帧组合完成」之后立刻挂：
+
+```
+java.util.regex.PatternSyntaxException: Syntax error in regexp pattern near index 8
+^\{(.*)}$
+        ^
+```
+
+栈顶落在思维导图解析（`u1.i.H` → 混淆后的 `MindMap.parse`）。崩在启动阶段说明
+是**回放持久化历史**时重新解析触发的 —— 也就是说，只要那条消息还在会话里，
+每次冷启动都会再崩一次。用户被自己的聊天记录关在门外，连进设置删掉它的机会都没有。
+
+### 根因：`}` 没转义，而且只有 Android 会告诉你
+
+`MindMap.parse` 用四条正则剥 mermaid 的节点形状壳，第三条是：
+
+```kotlin
+.replace(Regex("^\\{(.*)}$"), "$1")   // 编译后是  ^\{(.*)}$
+```
+
+开头 `{` 转义了，结尾 `}` 忘了。**JDK 把孤立的 `}` 当字面量放过，ICU 判它非法**——
+Android 9 起 `java.util.regex` 换成了 ICU 实现，构造 Pattern 时就抛。
+
+| 环境 | `^\{(.*)}$` | 结果 |
+| --- | --- | --- |
+| JVM（单元测试、桌面预览） | 接受，`}` 当字面量 | 测试全绿 |
+| Android 9+（ICU） | 拒绝 | `PatternSyntaxException` |
+
+两边不一致，所以「测试全绿」和「线上崩」可以同时成立。这也是为什么这条从 1.23.2
+一路带到 1.23.7 都没被发现 —— 没有任何一层在 ICU 上跑过它。
+
+抛出的位置决定了它有多致命：调用点是 `remember(source) { MindMap.parse(source) }`，
+也就是 **Choreographer 的帧回调**，外面没有 try/catch，异常直接冒到 `Looper.loop`。
+
+### 修法
+
+**一、不再用正则。** 剥壳改纯字符串判断（`stripShape`）：不需要编译、不区分引擎、
+不可能语法错。顺手把一个一直没人在意的小毛病修了 —— `root((mindmap))` 以前整串
+显示出来，因为正则要求 `{` 在开头，而 mermaid 的写法是「ID + 形状」。
+
+**二、组合期解析全部兜底。** 公式、几何图、思维导图三个入口都包了 `runCatching`，
+失败返回 null，由调用方退回「原文 + 解析失败」。日志走 `Logx.w`，release 也留着，
+崩溃报告里能看见。判据只有一条：**难看的输出可以接受，闪退不行**。
+
+**三、给正则加了可移植性守卫。** 单测扫全部源码里的正则字面量，字符类之外出现
+没有 `{` 配对的 `}` 就失败。附一条用例钉住「JVM 不会报错」这件事，提醒后来的人
+别拿 JVM 当 ICU 用。
+
+**四、单独记一笔：`IllegalStateException: entered drag with non-zero pending scroll`。**
+同一次会话里的这条是崩溃后界面卡死、用户继续滑动触发的连锁断言，不是独立缺陷，
+根因修掉它自然消失。
+
+### 顺带：没有 WebView 的机型
+
+报告里第六节提到同一台机器 `new WebView()` 本身就会抛 `UnsupportedOperationException`
+（framework 剔掉了 WebView 实现，缺 `libwebviewchromium.so`）。
+
+原来两处使用点都是「先建、崩了再降级」，能活，但每渲染一条 HTML 消息就抛一次异常，
+抛在组合期。现在改成先问一句：`WebViewSupport.isAvailable()` 检测一次并缓存，
+不可用时连实例都不建。
+
+入口也一并收了：`HtmlBlocks.findRenderable()` 在无 WebView 时返回 null，正文里那段
+HTML 就留在原地按代码块显示原文 —— 比「识别出界面 → 点开是一个提示页」诚实。
+
+### 附：这版没做什么
+
+- 解析没有挪到后台线程。它是纯文本线性扫描，微秒级；真正的风险源（正则编译）
+  已经消除，为它引入异步只会换来首帧空白。
+- `ScreenScaffold` 那套 M3E 页面保持原样，本版只碰解析与兼容性。
+
 ## [1.23.7] — 2026-11-15（versionCode 89）· 测试版
 
 你贴的两张截图，其实是一个 bug 的两种表现。

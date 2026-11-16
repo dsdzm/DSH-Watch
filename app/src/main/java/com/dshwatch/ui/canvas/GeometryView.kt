@@ -32,6 +32,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.core.Logx
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -341,7 +342,19 @@ object Geometry {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun parse(source: String): Scene? {
+    /**
+     * 解析整张图。
+     *
+     * 最外层包 runCatching：这条链路跑在组合期（`remember(source) { Geometry.parse(...) }`），
+     * 也就是 Choreographer 的帧回调里，任何漏网的异常都会直接杀进程 —— 而组合期意味着
+     * 只要那条消息还留在历史里，每次冷启动都会再崩一次。解析不出东西就返回 null，
+     * 由调用方退回「原文 + 解析失败」的显示，损失一条消息的美观，换进程活着。
+     */
+    fun parse(source: String): Scene? = runCatching { parseInternal(source) }
+        .onFailure { Logx.w("Geometry", "几何图解析失败，整块按原文显示", it) }
+        .getOrNull()
+
+    private fun parseInternal(source: String): Scene? {
         val root = runCatching { json.parseToJsonElement(extractJson(source)).jsonObject }.getOrNull()
             ?: return null
 

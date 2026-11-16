@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dshwatch.core.Logx
 import kotlin.math.max
 
 /**
@@ -80,7 +81,10 @@ fun MathView(
     val resolved = if (color == Color.Unspecified) palette.ink else color
     val sized = if (compact) fontSize * 0.86f else fontSize
     val box = remember(latex, sized, resolved) {
-        val node = Latex.parse(latex)
+        // 解析在组合期跑（Choreographer 帧回调），异常会直接杀进程；公式再怪也只该显示原文
+        val node = runCatching { Latex.parse(latex) }
+            .onFailure { Logx.w("Math", "公式解析失败，按原文显示", it) }
+            .getOrNull() ?: MathNode.Text(latex)
         buildMathBox(node, sized, measurer, resolved)
     }
     Box(
