@@ -67,4 +67,37 @@ class DeviceKindsTest {
         assertThat(body).contains("DeviceKinds.PHONE")
         assertThat(body).contains("DeviceKinds.WATCH")
     }
+
+    /**
+     * 老存档要钉一次，不能每次启动重算。
+     *
+     * 1.23.9 引入 `deviceKind` 之前，所有用户都只有手表界面；升级上来时这个字段
+     * 是默认的 `auto`。如果一直按检测重算，检测一旦失准（安卓手表兼容层的
+     * uiMode 报 NORMAL、hasSystemFeature 也没声明），这些人更新完就只剩手机布局，
+     * 而他们从没被问过 —— 用户对这件事的描述只会是「更新把我界面搞坏了」。
+     */
+    @Test
+    fun `从没问过的老存档钉成检测结果`() {
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.AUTO, chosen = false, watchDevice = true))
+            .isEqualTo(DeviceKinds.WATCH)
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.AUTO, chosen = false, watchDevice = false))
+            .isEqualTo(DeviceKinds.PHONE)
+        // 空串（更老的存档）与 auto 等价
+        assertThat(DeviceKinds.pinnedForLegacy("", chosen = false, watchDevice = true))
+            .isEqualTo(DeviceKinds.WATCH)
+    }
+
+    @Test
+    fun `主动选过的不钉`() {
+        // 亲手点了「自动」：他要的就是每次重算
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.AUTO, chosen = true, watchDevice = true))
+            .isNull()
+        // 显式手表 / 手机：更不能动
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.WATCH, chosen = true, watchDevice = false))
+            .isNull()
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.WATCH, chosen = false, watchDevice = false))
+            .isNull()
+        assertThat(DeviceKinds.pinnedForLegacy(DeviceKinds.PHONE, chosen = false, watchDevice = true))
+            .isNull()
+    }
 }

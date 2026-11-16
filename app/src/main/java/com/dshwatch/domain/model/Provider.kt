@@ -374,6 +374,18 @@ data class AppSettings(
      */
     val deviceKind: String = DeviceKinds.AUTO,
 
+    /**
+     * 用户是否亲手定过 [deviceKind]（引导页点过、或设置里点过）。
+     *
+     * 用来区分两种 `auto`：
+     *  - **从没问过**（老存档）—— 该把当时的检测结果钉下来，老版本只有手表界面，
+     *    升级上来的人不该因为一次检测失准就被换掉整套界面；
+     *  - **主动选了「自动」**—— 尊重它，每次启动重新检测。
+     *
+     * 少了这个标记，两种状态在存档里长得一模一样，迁移只能靠猜。
+     */
+    val deviceKindChosen: Boolean = false,
+
     /** 对话页布局 id，见 [ChatLayouts] */
     val chatLayout: String = ChatLayouts.BUBBLE,
 

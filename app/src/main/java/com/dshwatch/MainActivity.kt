@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
 
         val container = AppContainer.of(this)
+        // 判定设备类型只用得到 resources 与 packageManager，持 applicationContext
+        // 比在每次重组里读 Activity 干净
+        val appContext = applicationContext
 
         setContent {
             val settings by container.settings.collectAsStateWithLifecycle()
@@ -66,17 +69,19 @@ class MainActivity : ComponentActivity() {
             /*
              * 设备类型决定用哪一整套界面。
              *
-             * 检测只看 uiMode —— 手表系统会报 `UI_MODE_TYPE_WATCH`。
-             * 用户可以在引导页和设置里覆盖它：方形表和「装在平板上」的设备
+             * 判定收在 [com.dshwatch.domain.model.DeviceKinds.isWatchDevice] 里：
+             * `uiMode` 与「系统清单声明 watch」两个信号取或。只认 uiMode 的时候，
+             * 装进安卓手表兼容层的用户会一路被判成手机 —— 升级完发现界面变了，
+             * 而他从没动过设置。
+             *
+             * 用户可以在引导页和设置里覆盖检测结果：方形表和「装在平板上」的设备
              * 检测不出来，而判错的代价是「整个界面根本不是他要的那套」。
              *
              * 两条分支**不共用任何主题代码**：手机版有自己的色板、字号与骨架，
              * 手表那套的界面缩放、圆角安全区、玻璃材质、主题预设一律不参与。
              */
-            val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-            val isWatchUi = (configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK) ==
-                android.content.res.Configuration.UI_MODE_TYPE_WATCH
-            val phoneUi = com.dshwatch.domain.model.DeviceKinds.isPhone(settings.deviceKind, isWatchUi)
+            val watchDevice = com.dshwatch.domain.model.DeviceKinds.isWatchDevice(appContext)
+            val phoneUi = com.dshwatch.domain.model.DeviceKinds.isPhone(settings.deviceKind, watchDevice)
 
             if (phoneUi) {
                 com.dshwatch.ui.phone.PhoneTheme(

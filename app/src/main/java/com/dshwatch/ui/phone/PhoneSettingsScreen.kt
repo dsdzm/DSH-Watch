@@ -188,7 +188,9 @@ fun PhoneSettingsScreen(
                             ).forEach { (kind, label) ->
                                 FilterChip(
                                     selected = DeviceKinds.of(settings.deviceKind) == kind,
-                                    onClick = { update { it.copy(deviceKind = kind) } },
+                                    onClick = {
+                                        update { it.copy(deviceKind = kind, deviceKindChosen = true) }
+                                    },
                                     label = { Text(label) },
                                 )
                             }

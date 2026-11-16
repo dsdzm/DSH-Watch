@@ -23,7 +23,20 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
-            version = "1.28.0",
+            version = "1.24.0",
+            date = "2026-11-16",
+            highlights = listOf(
+                "新增 手机版界面：Material 3 底部导航的对话 / 记录 / 设置三页，与手表主题完全独立，引导页与设置里都能切",
+                "新增 手机对话页：三颗药丸顶栏、按时段问候的空状态、悬浮输入胶囊，左上角拉开是历史记录抽屉，加号直接拍照 / 相册 / 文件",
+                "新增 上下文构成面板与实时生成速率：看清单轮花在系统提示、消息、工具各占多少，卡住还是慢一眼分得清",
+                "新增 莫奈取色：一个种子色生成整套 Material You 色板，可跟随壁纸或从九色里挑",
+                "新增 对话归档：导入 / 导出 DeepSeek 官方格式，对话、思考过程与图片原件一起搬，导出的文件在官方 demo 里也能打开",
+                "新增 回答多版本、续写与编辑提问：重新生成不再丢掉上一版，回答可 ‹ 1/2 › 来回翻，半截回答能接着写，提问改完直接重跑",
+                "新增 DeepSeek 官方联网搜索与历史记录多选：搜索结果带长摘要，记录可批量置顶、取消置顶与删除",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.28.0-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "新增 M3E 对话页的回答版本切换、续写与「编辑这条提问」",
@@ -31,7 +44,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.27.0",
+            version = "1.27.0-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "新增 多版本回答：重新生成不再丢掉上一版，回答下面可以 ‹ 1/2 › 来回翻",
@@ -43,7 +56,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.26.0",
+            version = "1.26.0-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "新增 数据管理：可直接导入 DeepSeek 官方导出的历史对话 zip，对话、思考过程与图片原件一起搬进来",
@@ -52,7 +65,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.25.0",
+            version = "1.25.0-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "新增 手机对话页的左侧历史记录：一列会话按今天 / 昨天 / 7 天内分组，顶上能搜；长按一条才出重命名、置顶、关于对话（token 用量）与删除",
@@ -63,7 +76,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.24.0",
+            version = "1.24.0-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "重做 手机对话页：顶栏换成「菜单 + 会话 + 模型」三颗药丸，空状态改成问候语 + 快捷起点，输入栏改成悬浮胶囊",
@@ -73,7 +86,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.23.9",
+            version = "1.23.9-beta.1",
             date = "2026-11-16",
             highlights = listOf(
                 "新增 手机版界面：Material 3 底部导航布局，对话 / 记录 / 设置各占一页，与手表主题完全独立",
@@ -83,12 +96,12 @@ object AppChangelog {
         ),
         // 1.23.8 是纯修复版本（崩溃与兼容性），按约定不写进「新增能力」
         ChangelogEntry(
-            version = "1.23.8",
+            version = "1.23.8-beta.1",
             date = "2026-11-16",
             highlights = emptyList(),
         ),
         ChangelogEntry(
-            version = "1.23.7",
+            version = "1.23.7-beta.1",
             date = "2026-11-15",
             highlights = listOf(
                 "修复 列表滚上去的内容盖住顶栏与时间文字：贴边列表为了做缩放关掉了绘制裁剪，滚出边界的项会画到顶栏上面",
@@ -98,7 +111,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.23.6",
+            version = "1.23.6-beta.1",
             date = "2026-11-15",
             highlights = listOf(
                 "重构 M3E 界面的页面层：对话、会话列表、设置、用量四页改为独立实现，走谷歌官方的 TransformingLazyColumn",
@@ -107,7 +120,7 @@ object AppChangelog {
             ),
         ),
         ChangelogEntry(
-            version = "1.23.5",
+            version = "1.23.5-beta.1",
             date = "2026-11-15",
             highlights = listOf(
                 "新增 莫奈取色：任意一个种子色都能生成整套 Material You 色板，跟随壁纸或自定义背景自动取色",

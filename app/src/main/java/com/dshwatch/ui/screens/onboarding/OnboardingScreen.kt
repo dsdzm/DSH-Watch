@@ -212,7 +212,9 @@ fun OnboardingScreen(container: AppContainer, settings: AppSettings) {
                     } else {
                         com.dshwatch.domain.model.DeviceKinds.of(settings.deviceKind)
                     },
-                    onPick = { kind -> update { it.copy(deviceKind = kind) } },
+                    onPick = { kind ->
+                        update { it.copy(deviceKind = kind, deviceKindChosen = true) }
+                    },
                 )
                 1 -> ShapeStep(
                     round = round,

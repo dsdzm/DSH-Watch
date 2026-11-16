@@ -440,7 +440,9 @@ private fun AppearanceGroup(
                             1 -> com.dshwatch.domain.model.DeviceKinds.WATCH
                             2 -> com.dshwatch.domain.model.DeviceKinds.PHONE
                             else -> com.dshwatch.domain.model.DeviceKinds.AUTO
-                        }
+                        },
+                        // 亲手选过就记住：迁移不会再把它钉成检测结果
+                        deviceKindChosen = true,
                     )
                 }
             },

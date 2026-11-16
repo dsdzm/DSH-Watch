@@ -40,6 +40,47 @@ object DeviceKinds {
     fun detect(isWatchUi: Boolean): String = if (isWatchUi) WATCH else PHONE
 
     /**
+     * 这台设备是不是手表 —— 全 App 唯一的判定入口。
+     *
+     * 两个信号取「或」：
+     *  - `uiMode` 报 `UI_MODE_TYPE_WATCH`：Wear OS 的标准做法；
+     *  - 系统声明 `android.hardware.type.watch`：写在设备清单里，改不了。
+     *
+     * **只信前者的后果是真实的**：装进安卓手表 / 手环兼容层里的 App、少数国内
+     * 手表 ROM，`uiMode` 报的是 NORMAL。此时「自动」会一路判成手机，界面上
+     * 表现为「升级完手表布局没了」—— 而用户从没改过任何设置，也不知道该改哪。
+     *
+     * 两个信号都不会把手机误报成手表，所以取「或」是安全的。
+     */
+    fun isWatchDevice(context: android.content.Context): Boolean {
+        val mask = android.content.res.Configuration.UI_MODE_TYPE_MASK
+        val type = context.resources.configuration.uiMode and mask
+        val byUiMode = type == android.content.res.Configuration.UI_MODE_TYPE_WATCH
+        val byFeature = runCatching {
+            context.packageManager.hasSystemFeature(WATCH_FEATURE)
+        }.getOrDefault(false)
+        return byUiMode || byFeature
+    }
+
+    private const val WATCH_FEATURE = "android.hardware.type.watch"
+
+    /**
+     * 老存档该钉成什么。
+     *
+     * 只有「从没被问过」+「当前是自动」才需要钉，其余一律返回 null（不动）。
+     *
+     * 为什么要在存档层钉一次，而不是每次启动按检测重算：检测本身有失败的情况
+     * （见 [isWatchDevice]），而 `auto` 意味着「这一次判错，整套界面就换掉」。
+     * 从 1.23.4 升上来的用户全都没有这个字段 —— 他们那会儿只有手表界面，
+     * 升上来却可能被判成手机，这是最不该发生的一种「升级把我东西改了」。
+     *
+     * 用户在设置里主动选「自动」时会置 [com.dshwatch.domain.model.AppSettings.deviceKindChosen]，
+     * 这条就不再生效 —— 他要重算，就重算。
+     */
+    fun pinnedForLegacy(choice: String, chosen: Boolean, watchDevice: Boolean): String? =
+        if (!chosen && of(choice) == AUTO) detect(watchDevice) else null
+
+    /**
      * 最终生效的设备类型。
      *
      * 返回的一定是 [WATCH] 或 [PHONE] —— [AUTO] 在这一步就被消解掉，

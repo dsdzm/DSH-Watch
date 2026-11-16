@@ -90,7 +90,9 @@ fun PhoneOnboarding(
             when (step) {
                 0 -> DeviceStep(
                     current = DeviceKinds.of(settings.deviceKind),
-                    onPick = { kind -> update { it.copy(deviceKind = kind) } },
+                    onPick = { kind ->
+                        update { it.copy(deviceKind = kind, deviceKindChosen = true) }
+                    },
                 )
                 1 -> ThemeStep(
                     current = settings.themeMode,

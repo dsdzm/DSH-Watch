@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.BuiltinProviders
+import com.dshwatch.domain.model.DeviceKinds
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -120,6 +121,26 @@ class SettingsRepository(
      */
     private fun migrate(s: AppSettings): AppSettings {
         var out = s
+        /*
+         * 把「从没问过」的老存档钉成当时的检测结果。
+         *
+         * `deviceKind` 是 1.23.9 才有的字段，之前升级上来的用户一律是 `auto`。
+         * 而 `auto` 的语义是「每次启动重新检测」—— 检测一旦失准（装进安卓手表 /
+         * 手环兼容层的 App、少数国内手表 ROM 的 uiMode 报 NORMAL），这些人会被
+         * 整棵界面树换成手机布局，表现为「更新完手表界面没了」。他们从没被问过，
+         * 不该承担这个不确定性。
+         *
+         * 只钉一次：钉完 [AppSettings.deviceKindChosen] 为 true，用户在设置里
+         * 主动选「自动」仍然保留「每次重算」的语义。
+         */
+        val pinned = DeviceKinds.pinnedForLegacy(
+            choice = out.deviceKind,
+            chosen = out.deviceKindChosen,
+            watchDevice = DeviceKinds.isWatchDevice(context),
+        )
+        if (pinned != null) {
+            out = out.copy(deviceKind = pinned, deviceKindChosen = true)
+        }
         // 1.11 的配图默认值修正
         if (!out.biliImageTouched && out.biliImage == "none") {
             out = out.copy(biliImage = "pack")
