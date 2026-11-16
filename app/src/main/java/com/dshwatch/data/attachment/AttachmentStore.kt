@@ -149,6 +149,40 @@ object AttachmentStore {
         runCatching { File(root(appFilesDir), att.id).deleteRecursively() }
     }
 
+    /**
+     * 直接把一段字节落成附件。
+     *
+     * 给「导入历史会话」用：那边的图从 zip 里来，没有 `content://` 可查，
+     * 也就不需要 [import] 里那套查名字、查大小、识别 mime 的流程 ——
+     * 名字和类型归档里都写着。落盘位置与目录结构保持和 [import] 一致，
+     * 这样清理、删除、发送都还是同一条路。
+     */
+    fun importBytes(appFilesDir: File, name: String, mime: String, bytes: ByteArray): Attachment {
+        val id = Ids.new()
+        val dir = File(root(appFilesDir), id).apply { mkdirs() }
+        val file = File(dir, safeName(name))
+        return runCatching {
+            file.writeBytes(bytes)
+            Attachment(
+                id = id,
+                name = name,
+                mime = mime,
+                sizeBytes = bytes.size.toLong(),
+                kind = AttachmentKinds.IMAGE,
+                path = file.absolutePath,
+            )
+        }.getOrElse {
+            Attachment(
+                id = id,
+                name = name,
+                mime = mime,
+                sizeBytes = bytes.size.toLong(),
+                kind = AttachmentKinds.IMAGE,
+                error = "图片保存失败",
+            )
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private fun kindOf(ext: String, mime: String): String = when {

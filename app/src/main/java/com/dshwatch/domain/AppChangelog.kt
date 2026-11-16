@@ -23,6 +23,15 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.26.0",
+            date = "2026-11-16",
+            highlights = listOf(
+                "新增 数据管理：可直接导入 DeepSeek 官方导出的历史对话 zip，对话、思考过程与图片原件一起搬进来",
+                "新增 导出全部对话：同一套归档格式，导出的文件在 DeepSeek 官方 demo 里也能打开",
+                "说明 导入是追加，不覆盖现有对话；PDF / Word 这类附件在官方导出里本来就只有文件名",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.25.0",
             date = "2026-11-16",
             highlights = listOf(

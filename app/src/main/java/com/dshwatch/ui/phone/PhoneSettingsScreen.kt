@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Wifi
@@ -300,6 +301,7 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
+    SettingsGroups.DATA -> Icons.Outlined.SwapVert
     SettingsGroups.RUNTIME -> Icons.Outlined.Memory
     else -> Icons.Outlined.Wifi
 }
@@ -337,6 +339,7 @@ private fun summaryOf(id: String, settings: AppSettings): String = when (id) {
         if (settings.showReasoning) add("思维链")
         if (settings.autoScroll) add("自动滚动")
     }.take(2).joinToString(" · ").ifBlank { "全部关闭" }
+    SettingsGroups.DATA -> "导入 / 导出"
     SettingsGroups.APPEARANCE -> when (settings.themeMode) {
         ThemeMode.SYSTEM -> "跟随系统"
         ThemeMode.DARK -> "深色"

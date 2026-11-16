@@ -97,6 +97,7 @@ internal object SettingsGroups {
     const val CHAT = "chat"
     const val APPEARANCE = "appearance"
     const val FILES = "files"
+    const val DATA = "data"
     const val RUNTIME = "runtime"
     const val CONNECTION = "connection"
     const val PLUGINS = "plugins"
@@ -104,7 +105,9 @@ internal object SettingsGroups {
     const val BILI = "bili"
 
     /** 顺序即一级页的显示顺序。插件、MCP、B站 紧跟「AI 能力」—— 它们扩展的都是能力 */
-    val all = listOf(MODEL, ABILITY, PLUGINS, MCP, BILI, CHAT, APPEARANCE, FILES, RUNTIME, CONNECTION)
+    val all = listOf(
+        MODEL, ABILITY, PLUGINS, MCP, BILI, CHAT, APPEARANCE, FILES, DATA, RUNTIME, CONNECTION,
+    )
 
     fun title(id: String, s: AppStrings): String = when (id) {
         MODEL -> s.groupModel
@@ -112,6 +115,7 @@ internal object SettingsGroups {
         CHAT -> s.groupChat
         APPEARANCE -> s.groupAppearance
         FILES -> s.groupFiles
+        DATA -> if (s.isChinese) "数据管理" else "Data"
         RUNTIME -> s.groupRuntime
         PLUGINS -> s.groupPlugins
         MCP -> s.groupMcp
@@ -189,6 +193,7 @@ fun SettingsGroupScreen(
             SettingsGroups.CHAT -> ChatGroup(settings, update, s)
             SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, s)
             SettingsGroups.FILES -> FilesGroup(settings, update, container, nav, s)
+            SettingsGroups.DATA -> DataGroup(container, s)
             SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
             SettingsGroups.PLUGINS -> PluginsGroup(settings, update, container, s)
             SettingsGroups.MCP -> McpGroup(settings, update, container, s)
