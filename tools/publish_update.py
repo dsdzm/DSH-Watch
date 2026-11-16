@@ -19,6 +19,8 @@
     python3 tools/publish_update.py --dry-run       # 只打印将要发生什么
     python3 tools/publish_update.py --force         # 同名 release 已存在时删掉重建
     python3 tools/publish_update.py --beta          # 发成预发布，只有测试通道能看到
+    python3 tools/publish_update.py --allow-minor   # 测试版确实要跨次版本号时才加
+                                                    # （默认禁止：测试版不替稳定版占号）
 
 凭证放项目根 `.env`：
 
@@ -177,6 +179,57 @@ def build_body(notes: list) -> str:
     return "### 更新内容\n\n" + "\n".join(f"- {n}" for n in notes)
 
 
+def last_stable_minor(repo: str, token: str):
+    """最近一个稳定版的 `(major, minor)`；查不到返回 None。
+
+    只认非 prerelease。测试版必须排除在外 —— 否则测试版自己会把下一次测试版的
+    「上限」一路抬上去，规则等于没有。
+    """
+    releases = gh("GET", f"/repos/{repo}/releases?per_page=30", token)
+    for rel in releases:
+        if rel.get("prerelease") or rel.get("draft"):
+            continue
+        m = re.match(r"v?(\d+)\.(\d+)", rel.get("tag_name", ""))
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def check_beta_scope(version_name: str, repo: str, token, allow_minor: bool) -> None:
+    """测试版不许把次版本号往前推。
+
+    稳定版是「人明确说了才发」的动作，测试版只是它的预览。测试版自己把
+    1.25 / 1.26 … 一格一格占掉之后，正式版只能叫回 1.24.0：
+    用户看到「更新完版本号变小」，已经装测试版的人还会怀疑自己装错了包。
+
+    所以在这里卡住 —— 靠记性守不住，写进脚本才守得住。
+    """
+    if allow_minor or "-" not in version_name:
+        return
+    m = re.match(r"(\d+)\.(\d+)", version_name)
+    if not m or not token:
+        return
+
+    minor = int(m.group(2))
+    try:
+        stable = last_stable_minor(repo, token)
+    except SystemExit:
+        # 网络抖动或权限不足不该卡住发版：真正的错误会在创建 release 时再报一次
+        print("  读不到稳定版序列，跳过跨版本检查")
+        return
+    if stable is None or minor <= stable[1]:
+        return
+
+    sys.exit(
+        f"测试版不能把次版本号往前推。\n"
+        f"稳定通道还停在 {stable[0]}.{stable[1]}.x，这个包是 {version_name}。\n\n"
+        f"  · 正常做法：版本名改成 {stable[0]}.{stable[1]}.1-beta.N，"
+        f"补丁号在同一段里加；\n"
+        f"  · 确实要跨版本预览：加 --allow-minor，但正式版之后就发不出更大的号了。\n\n"
+        f"测试版不替稳定版占号 —— 否则正式版发出来数字比测试版还小。"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="发布应用更新到 GitHub Releases")
     ap.add_argument("apk", nargs="?", default=str(DEFAULT_APK), help="APK 路径")
@@ -188,6 +241,11 @@ def main() -> int:
         action="store_true",
         help="发成预发布（prerelease）：/releases/latest 不会指向它，"
              "只有 App 里切到「测试版」通道的用户能看到",
+    )
+    ap.add_argument(
+        "--allow-minor",
+        action="store_true",
+        help="允许测试版跨次版本号（1.24 → 1.25）。默认禁止：测试版不替稳定版占号",
     )
     args = ap.parse_args()
 
@@ -211,6 +269,15 @@ def main() -> int:
     if not re.fullmatch(r"dshwatch-\d+\.apk", asset_name):
         sys.exit("资产名不符合 dshwatch-<versionCode>.apk，客户端会认不出来")
 
+    # 凭证提前读：跨版本检查需要查 GitHub 上的稳定版序列（dry-run 也查，
+    # 免得「计划里一切正常、真发时被拒」）
+    env = load_env()
+    token = env.get("GITHUB_TOKEN")
+    repo = env.get("GITHUB_REPO", "dsdzm/DSH-Watch")
+
+    if args.beta:
+        check_beta_scope(version_name, repo, token, args.allow_minor)
+
     if args.dry_run:
         print("\n[dry-run] 将执行：")
         print(f"  1. POST /repos/<repo>/releases          创建 tag {tag}")
@@ -221,9 +288,6 @@ def main() -> int:
             print("  3. GET  /repos/<repo>/releases/latest   回读校验")
         return 0
 
-    env = load_env()
-    token = env.get("GITHUB_TOKEN")
-    repo = env.get("GITHUB_REPO", "dsdzm/DSH-Watch")
     if not token:
         sys.exit("缺少 GITHUB_TOKEN（写在项目根 .env 里，参考 .env.example）")
 
