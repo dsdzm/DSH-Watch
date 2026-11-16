@@ -131,7 +131,16 @@ fun PhoneChatScreen(
 
     LaunchedEffect(Unit) {
         if (engine.conversation.value == null) {
-            container.conversationStore.index().firstOrNull()?.let { engine.open(it.id) }
+            /*
+             * 只自动续上**编程场景**的会话。
+             *
+             * 会话列表按时间倒序，第一条很可能是昨晚的酒馆剧情。把那条塞进
+             * 这一页，用户看到的就是「一段没有角色的散文」—— 而且他以为是
+             * 对话记录坏了。酒馆会话有自己的渲染页，从记录页点进去才对。
+             */
+            container.conversationStore.index()
+                .firstOrNull { Scenes.of(it.scene) == Scenes.CODING }
+                ?.let { engine.open(it.id) }
         }
     }
 
