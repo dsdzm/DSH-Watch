@@ -68,25 +68,17 @@ object PluginArchive {
     private const val MAX_ENTRIES = 4096
 
     /**
-     * 单个条目读进内存的上限。
+     * 单个条目读进内存的上限。只作用于清单与 `package.json`。
      *
-     * 清单本身限 8 000 字符（UTF-8 最多 32 KB），`package.json` 也远小于这个数。
+     * 清单本身限 16 000 字符（UTF-8 最多约 48 KB），`package.json` 也远小于这个数。
      * 256 KB 是留给「有人把清单写得非常长、或者 JSON 里塞了大段说明」的余量。
-     * 超过的一律不读进内存，只记下大小 —— 报错时能说清是「太大」而不是「没有」。
+     * 源码走 [CordisTranslator.MAX_FILE]，比这里宽得多 —— 提示词往往就在
+     * 一份几百 KB 的 `lib/` 下的大 `.js` 里。
      */
     private const val MAX_MEMBER = 256 * 1024
 
-    /** 裸文本（未压缩 JSON）的读取上限。8 000 字符的清单远小于它 */
+    /** 裸文本（未压缩 JSON）的读取上限。16 000 字符的清单远小于它 */
     private const val MAX_TEXT = 128 * 1024
-
-    /**
-     * 一个包里最多收多少源码字节，供 [CordisTranslator] 转译。
-     *
-     * 1 MB 是「一个正常的插件源码」的量级（打包产物也就几百 KB）。
-     * 超过它的一律不进内存：转译是尽力而为，读不完就在说明里写「还有几份没读」，
-     * 不该为了一个 20 MB 的 bundle 把用户的表卡住。
-     */
-    private const val MAX_SOURCE_TOTAL = 1024L * 1024
 
     private const val BLOCK = 512
 
@@ -241,8 +233,17 @@ object PluginArchive {
          * 所以一路都收着，靠累计上限兜住内存。
          */
         val sources = ArrayList<CordisTranslator.Source>()
+        /*
+         * 独立成文件的预设正文（`presets/` 下的 `.md`）。
+         *
+         * dsh-purge 这类插件不把预设写进代码，而是一条预设一个 markdown 文件：
+         * 文件名是预设名，正文就是提示词。只读 `presets/` `prompts/` 目录下的
+         * 文本文件，README 与 LICENSE 一律跳过 —— 它们也在包根，但不是预设。
+         */
+        val assets = ArrayList<CordisTranslator.Source>()
         var sourceBytes = 0L
         var skippedSources = 0
+        var skippedBig = 0
 
         val header = ByteArray(BLOCK)
         var entries = 0
@@ -282,23 +283,28 @@ object PluginArchive {
              * 读到清单之前谁也不知道后面还有没有。代价是几份 JS 进内存，
              * 收益是「作者只发了 npm 包」时不用让用户回去求人。
              */
-            val wantsSource = isFile && isSourceName(base) &&
-                sources.size < CordisTranslator.MAX_FILES &&
-                sourceBytes + size <= MAX_SOURCE_TOTAL
-            val wanted = size <= MAX_MEMBER && (
+            val wantsSource = isFile && (isSourceName(base) || isPresetAsset(name0)) &&
+                size <= CordisTranslator.MAX_FILE &&
+                sources.size + assets.size < CordisTranslator.MAX_FILES &&
+                sourceBytes + size <= CordisTranslator.MAX_TOTAL
+            val wantsMeta = size <= MAX_MEMBER && (
                 isMeta ||
-                    (isFile && (base == MANIFEST_NAME || base == "package.json")) ||
-                    wantsSource
+                    (isFile && (base == MANIFEST_NAME || base == "package.json"))
                 )
+            val wanted = wantsMeta || wantsSource
 
             val body = if (wanted) {
                 val b = ByteArray(size.toInt())
                 if (!input.readFully(b)) break
                 b
             } else {
-                if (isFile && isSourceName(base) && size > 0) {
+                if (isFile && size > 0 && (isSourceName(base) || isPresetAsset(name0))) {
                     // 只为了在核对说明里写清「还有几份没读」，不参与判断
-                    if (skippedSources < 99) skippedSources++
+                    if (size > CordisTranslator.MAX_FILE) {
+                        if (skippedBig < 99) skippedBig++
+                    } else if (skippedSources < 99) {
+                        skippedSources++
+                    }
                 }
                 input.skipFully(size)
                 null
@@ -327,10 +333,16 @@ object PluginArchive {
                             pkgName = packageName(body)
                         }
                         body != null && isSourceName(baseName) &&
-                            sources.size < CordisTranslator.MAX_FILES &&
-                            sourceBytes + body.size <= MAX_SOURCE_TOTAL -> {
+                            sources.size + assets.size < CordisTranslator.MAX_FILES &&
+                            sourceBytes + body.size <= CordisTranslator.MAX_TOTAL -> {
                             sourceBytes += body.size
                             sources += CordisTranslator.Source(name, String(body, Charsets.UTF_8))
+                        }
+                        body != null && isPresetAsset(name) &&
+                            sources.size + assets.size < CordisTranslator.MAX_FILES &&
+                            sourceBytes + body.size <= CordisTranslator.MAX_TOTAL -> {
+                            sourceBytes += body.size
+                            assets += CordisTranslator.Source(name, String(body, Charsets.UTF_8))
                         }
                     }
                 }
@@ -358,7 +370,9 @@ object PluginArchive {
                 bundle = CordisTranslator.Bundle(
                     meta = CordisTranslator.metaOf(pkgText),
                     sources = sources,
+                    assets = assets,
                     truncated = skippedSources,
+                    oversized = skippedBig,
                 ),
             )
         }
@@ -541,5 +555,19 @@ object PluginArchive {
         if (p.contains(".min.js")) return false
         if (p.contains("/node_modules/") || p.startsWith("node_modules/")) return false
         return p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".ts")
+    }
+
+    /**
+     * 独立成文件的预设正文。
+     *
+     * 只认 `presets/` 或 `prompts/` 目录下的文本文件 —— 包根的 README、CHANGELOG、
+     * LICENSE 也很长，但它们是给人看的，当预设导进去只会多出三条没用的选项。
+     */
+    private fun isPresetAsset(path: String): Boolean {
+        val p = path.lowercase()
+        if (p.contains("/node_modules/") || p.startsWith("node_modules/")) return false
+        if (!p.endsWith(".md") && !p.endsWith(".txt") && !p.endsWith(".prompt")) return false
+        return p.contains("/presets/") || p.contains("/prompts/") ||
+            p.startsWith("presets/") || p.startsWith("prompts/")
     }
 }

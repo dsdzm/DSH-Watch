@@ -42,7 +42,7 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
 
 导入前会跑一遍完整校验，过了才落盘；同名 id 重复导入是覆盖，不会堆两层。
 
-两条路的配额各 12 个，单个清单 8 000 字符（tgz 里解出来的清单同样受这个限制）。
+两条路的配额各 12 个，单个清单 16 000 字符（tgz 里解出来的清单同样受这个限制）。
 包本身可以到 32 MB —— 解析是流式的，只要清单那一条，其余条目直接跳过，
 所以包里放多少截图都不影响导入。导入的插件在文件系统里没有对应文件，
 所以单独给了「移除导入的插件」。
@@ -51,7 +51,7 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
 
 ```json
 {
-  "schema": 2,
+  "schema": 3,
   "id": "dsh-plugin-example",
   "name": "示例",
   "description": "一句话说明它改了什么",
@@ -65,13 +65,22 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
   "tools": {
     "hide": ["web_search"],
     "confirm": ["write_file"]
-  }
+  },
+  "presets": [
+    {
+      "id": "continuous",
+      "name": "连续执行",
+      "description": "少问、连续跑、最后汇报",
+      "systemPrompt": "你处在连续执行模式……",
+      "opening": "连续执行模式已开，说目标就行。"
+    }
+  ]
 }
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `schema` | 写 `2`。老清单写 `1` 或不写，照常能用 |
+| `schema` | 写 `3`。老清单写 `1` / `2` 或不写，照常能用 |
 | `id` | 必填，`dsh-plugin-` 开头，前缀后面再写 3–47 个字符，不能和内置插件重名 |
 | `name` | 设置页显示的名字，最多 40 字 |
 | `description` | 一句话说明它改了什么，最多 120 字 |
@@ -82,8 +91,15 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
 | `tools.only` | 只留这些，其余全下架。**与 `hide` 互斥** |
 | `tools.confirm` | 这些工具改成每次确认 |
 | `tools.when.model` | 同上，只在模型匹配时生效 |
+| `presets[].id` | 预设 id，`[a-z0-9][a-z0-9_-]{1,23}`；全局 id 是 `插件id/预设id` |
+| `presets[].name` | 选择器里显示的名字 |
+| `presets[].systemPrompt` | 选中后作为系统提示，最多 2 000 字 |
+| `presets[].opening` | 新建对话时自动插入的开场白，可省略 |
 
-`prompt` 和 `tools` 至少写一个，两个都空等于装了个寂寞，会被拒收。
+`prompt`、`tools`、`presets` 至少写一个，全空等于装了个寂寞，会被拒收。
+
+插件预设只在**插件开启**时出现在选择器里，关掉就消失 —— 这是它比
+「把预设写进 profile」更安全的地方：随时可撤，不留残余。
 
 变量：`{{model}}` `{{provider}}` `{{today}}` `{{weekday}}`。认不出的变量原样保留，
 不会报错。

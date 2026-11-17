@@ -140,6 +140,50 @@ class CordisTranslatorTest {
     }
 
     @Test
+    fun `markdown files under presets become presets`() {
+        // dsh-purge 这类包不把预设写进代码，而是一条预设一个 md 文件。
+        // 文件名是预设名，正文就是提示词 —— 这条路径漏了，用户会看到「预设 0 条」。
+        val body = "你处在连续执行模式。先做，再汇报；不要预告，不要问是否继续，" +
+            "遇到可恢复的错误自己重试，直到目标达成或者确定做不了为止。"
+        val bundle = CordisTranslator.Bundle(
+            meta = CordisTranslator.Meta(name = "dsh-purge", version = "1.0.0"),
+            sources = emptyList(),
+            assets = listOf(CordisTranslator.Source("package/presets/连续执行.md", body)),
+        )
+
+        val ok = CordisTranslator.translate(bundle, "测试包") as PluginLoader.Parsed.Ok
+
+        assertThat(ok.manifest.presets).hasSize(1)
+        assertThat(ok.manifest.presets[0].name).isEqualTo("连续执行")
+        assertThat(ok.manifest.presets[0].systemPrompt).contains("不要预告")
+        assertThat(ok.note).contains("预设")
+    }
+
+    @Test
+    fun `note keeps the candidate count when files were skipped`() {
+        // 这行原来写成 "…" + if (…) "…" else "" + "，挑出 N 段"，
+        // 条件成立时后半句会被吞掉，界面上只剩「读入 24 份源码（另有 99 份太大没读）」。
+        val bundle = CordisTranslator.Bundle(
+            meta = CordisTranslator.Meta(name = "big", version = "1.0.0"),
+            sources = listOf(
+                CordisTranslator.Source(
+                    "package/lib/boost.js",
+                    "'你现在是一个工程助手，回答时先给结论，不要寒暄，也不要复述问题，" +
+                        "遇到不确定的信息直接说不知道。'",
+                ),
+            ),
+            truncated = 99,
+        )
+
+        val ok = CordisTranslator.translate(bundle, "测试包") as PluginLoader.Parsed.Ok
+
+        assertThat(ok.note).contains("另有 99 份没读")
+        assertThat(ok.note).contains("超出总量上限")
+        assertThat(ok.note).contains("挑出")
+        assertThat(ok.note).doesNotContain("太大没读")
+    }
+
+    @Test
     fun `code without any prompt is refused`() {
         val bundle = bundle(
             "index.js" to """

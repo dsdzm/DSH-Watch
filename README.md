@@ -2,9 +2,9 @@
   <img src="docs/mascot-cutout.png" width="120" alt="DSH 肥鱼">
 </p>
 
-<h1 align="center">DSH 肥鱼 · DSH Watch</h1>
+<h1 align="center">DSH 肥鱼 · 原生 Android 的 DSH 轻量客户端</h1>
 
-<p align="center"><b>把 AI 编程助手装进手表。</b><br>不经过电脑，不依赖手机中转 —— 模型走云端 API，工具循环跑在表盘上。</p>
+<p align="center"><b>用 Kotlin 把 DSH 的核心能力重新实现了一遍。</b><br>手表、手机同一份 APK；模型走云端 API，工具循环跑在设备本地。</p>
 
 <p align="center">
   <a href="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml"><img src="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -12,62 +12,74 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
   <img src="https://img.shields.io/badge/minSdk-28-3ddc84" alt="minSdk 28">
   <img src="https://img.shields.io/badge/Kotlin-2.0.21-7f52ff" alt="Kotlin">
-  <img src="https://img.shields.io/badge/APK-8.2%20MB-lightgrey" alt="APK 8.2 MB">
+  <img src="https://img.shields.io/badge/APK-12%20MB-lightgrey" alt="APK 12 MB">
 </p>
 
 ---
 
 ## 这是什么
 
-DSH 肥鱼（`com.dshwatch`）是面向 **Android 9+（API 28）方形手表**的第三方 AI 助手客户端。
-Kotlin + Jetpack Compose + Material 3，单 Activity，一份约 8 MB 的 APK。
+DSH 肥鱼（`com.dshwatch`）是**原生 Android 实现的 DSH 轻量客户端**：
+Kotlin + Jetpack Compose，单 Activity，一份约 12 MB 的 APK。
 
-它与「手表遥控电脑上的 Agent」那一类项目是两种东西：
+「原生实现」的意思是：对话引擎、Agent 工具循环、上下文裁剪、插件体系、
+MCP 客户端、会话存储，全部是用 Kotlin 重写的，不套壳、不跑 Node、不内嵌 WebView。
+DSH 官方运行时需要 Node 与本机工具链，搬到手机上会把包体推到几百 MB；
+这里做的是**能力对齐 + 实现降级**：保留「多步 Agent」的骨架，把设备上做不了的事
+交给云端，把能做的事做进本地工具。
+
+界面不是「把手表界面放大」，而是三套并列的版式：手表两套（经典 / M3E），
+手机一套（Material 3）。设备类型在引导页问一次，设置里随时能改，同一份 APK 通吃。
+
+它与「遥控电脑上的 Agent」那一类项目是两种东西：
 
 | | 本项目 | 遥控类项目 |
 |---|---|---|
-| 引擎位置 | **手表本地** | 电脑 |
-| 工具循环 | 手表执行 `tool_calls` | 电脑执行，手表只转发/审批 |
+| 引擎位置 | **设备本地** | 电脑 |
+| 工具循环 | 设备执行 `tool_calls` | 电脑执行，客户端只转发/审批 |
 | 是否必须配电脑 | **否** | 是 |
 | 断网/离桌 | 有网即可用 | 电脑必须开着 |
+| 适用设备 | 手表、手机、平板 | 通常只有手机 |
 
-代价是它不跑真正的 DSH 运行时：没有 Node、没有本机 JDK。它用 OpenAI 兼容协议 +
-一套为小屏重写的工具集，复刻「多步 Agent」的体验，并把本机做不了的事交给云端。
-
-## 界面：两套并列，随时可切
+## 界面：三套并列，随时可切
 
 设置 → 外观 → **界面体系**（或首次引导的最后一屏）：
 
-| | 经典 | M3E |
-|---|---|---|
-| 骨架 | 自绘圆屏几何：按弦长反推内接矩形，顶栏压到 33dp | `AppScaffold` + `TimeText`，内容靠列表逐项缩放收进圆内 |
-| 卡片 / 按钮 / 开关 | 自绘玻璃或纯色胶囊 | `Card` / `Button` / `ButtonGroup` / `SwitchButton` |
-| 对话框 | `GlassDialog`（自绘 + 背景模糊） | `AlertDialog`（内容自动落进圆周） |
-| 观感 | 每屏多放一行，信息密度优先 | 更接近 Wear OS 系统应用，动效与形变优先 |
+| | 手表 · 经典 | 手表 · M3E | 手机 |
+|---|---|---|---|
+| 骨架 | 自绘圆屏几何：按弦长反推内接矩形，顶栏压到 33dp | `AppScaffold` + `TimeText`，内容靠列表逐项缩放收进圆内 | 顶栏 + 列表 + 底部导航，Material 3 baseline 或系统动态取色 |
+| 卡片 / 按钮 | 自绘玻璃或纯色胶囊 | `Card` / `Button` / `ButtonGroup` / `SwitchButton` | M3 标准组件 |
+| 对话框 | `GlassDialog`（自绘 + 背景模糊） | `AlertDialog`（内容落进圆周） | `AlertDialog` / `BottomSheet` |
+| 观感 | 每屏多放一行，信息密度优先 | 更接近 Wear OS 系统应用，动效与形变优先 | 常规手机应用，消息用户靠右、助手全宽 |
 
-两套共用同一份业务代码：**不是两套页面**，而是同一批公共组件在 `LocalUiStyle`
-下分派到两套实现。所以不存在「某个页面还是旧样子」的情况。
+三套共用同一份业务代码：**不是三套页面**，而是同一批公共组件在 `LocalUiStyle`
+下分派到各自的实现。所以不存在「某个页面还是旧样子」的情况。
 
-M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件，
-含 `MotionScheme.expressive()` 的形状过渡与按压反馈；色板与经典界面同源，
-切换界面体系不会改变配色，只改变控件与版式。
+手表两套里，M3E 用 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件，
+含 `MotionScheme.expressive()` 的形状过渡与按压反馈；色板与经典界面同源。
+手机版有独立的莫奈取色（种子色 → 整套 Material You 色板）与底部导航。
 
 ## 功能
 
 ### 对话
 
 - 流式输出，思维链单独折叠，Markdown / 代码块 / 表格渲染
-- 会话本地持久化、自动起标题、置顶、重命名
-- 停止生成、重新生成、一键复制
-- 附件上传：`txt` `md` `json` `csv` / 代码 / `docx` / `pdf` / 图片，正文提取后随消息进入上下文
-- 内置文件浏览器：不依赖系统文件管理器，直接翻目录选文件（见下）
-- 图片上传前压到长边 512 / JPEG 80（按路径与修改时间缓存），手表截图通常 20–60KB
+- 会话本地持久化、自动起标题（DeepSeek 支持服务端标题）、置顶、重命名
+- **回答多版本**：重新生成不丢旧回答，`‹ 1 / 2 ›` 来回切，切到哪版上下文就用哪版
+- **续写**：半截回答作为最后一条 assistant 发出去，接着写，结果拼回同一条消息
+- **编辑提问**：改完直接重跑这一轮，后面的回答按新问题重来
+- 停止生成、复制、批量多选（置顶 / 取消置顶 / 删除）
+- 附件上传：`txt` `md` `json` `csv` / 代码 / `docx` / `pdf` / 图片，正文提取后进入上下文
+- 图片上传前压到长边 512 / JPEG 80（按路径与修改时间缓存）
 - 对话内直接显示模型产出或引用的图片、视频（支持多模态的模型可读图）
 - 系统提示词预设：Vibe Coding / 极简 / 代码评审 / 排障 / 讲解 / 自定义
 
+手机版另有：按时段问候的空状态、供应商 / 模型 / 思考强度三层药丸、
+悬浮输入胶囊（＋ / 输入 / 发送）、左上角历史抽屉（搜索 + 按置顶/今天/昨天/7 天/30 天分组）。
+
 ### Agent 与工具
 
-模型返回 `tool_calls` → 手表本地执行 → 结果回灌 → 再问模型，直到收敛。
+模型返回 `tool_calls` → 设备本地执行 → 结果回灌 → 再问模型，直到收敛。
 步数不设硬上限，改用停滞检测；长任务用 `todo_write` 维护清单，进度实时可见。
 
 **52 个内置工具**：
@@ -99,9 +111,7 @@ M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件�
   操作期间 App 退到后台，屏幕底部一条悬浮提示写着当前动作，右边是停止按钮；
   通知栏同步显示「AI 正在操作设备 · 当前动作」。
   密码、验证码、支付确认框不代填；读到就交还用户。
-  操控期间强制占用前台服务（不受「后台保持连接」开关影响），
-  并可在设置页申请「不受电池优化限制」白名单 —— 手表的内存回收很激进，
-  这是不 root 的加固手段里最有效的一条。
+  操控期间强制占用前台服务，并可在设置页申请「不受电池优化限制」白名单。
   **系统设置页可以操作**（开勿扰、调亮度、连蓝牙）；权限管理、应用安装、
   系统界面仍然只读 —— 那几页点错不可逆。
   开关与系统授权分两层，都开才生效 —— 关着时这四个工具的 schema 不进请求。
@@ -116,10 +126,13 @@ M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件�
   **API 30+** 只能是「所有文件访问」(MANAGE_EXTERNAL_STORAGE) —— 后者要在系统设置里
   单独打开，不授权也能用，只是只看得到应用自己的目录。设置 → 文件里可切回系统选择器。
 
-- **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 8 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在手表上没有可用的进程沙箱，未支持。
+- **MCP 客户端**：手写实现，不引官方 Kotlin SDK（Ktor 对 12 MB 的包太重）。HTTP / SSE 传输，工具自动转成 `AgentTool` 注册进工具表。stdio 传输在 Android 上没有可用的进程沙箱，未支持。
 - **工具结果插件**：可插拔的后处理钩子，内置 JSON→TOON 压缩（重复键名只写一次，常压掉 30–60%）等。
-- **声明式插件**：把 JSON 清单放进工作空间 `plugins/`，就能替换身份段、追加尾部锚点、按模型切规则集。不跑 Node、不执行脚本 —— 只能改模型看到什么，不能放宽审批。格式见 [docs/plugins](docs/plugins/README.md)。
+- **声明式插件**：把 JSON 清单放进工作空间 `plugins/`，就能替换身份段、追加尾部锚点、按模型切规则集、附带对话预设。不跑 Node、不执行脚本 —— 只能改模型看到什么，不能放宽审批。
+- **Cordis 包转译**：把 npm 上的 `.tgz` 直接丢进来，应用静态分析源码，抽出里面的提示词与 `presets/` 下的预设文件，生成一份可核对的清单草稿。不执行任何一行 JS。
 - **审批策略**：读写分离，`run_script` 出厂关闭、每次强制确认且无视「总是允许」，工作目录锁在会话目录。
+
+格式与示例见 [docs/plugins](docs/plugins/README.md)、[docs/plugin-examples](docs/plugin-examples/README.md)。
 
 ### 画布
 
@@ -131,6 +144,20 @@ M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件�
 
 三块都支持全屏与手势缩放。语法说明会随系统提示一起发给模型，所以它知道这些能力存在。
 
+### 上下文与性能
+
+- **单轮上下文构成**：系统提示、你的消息、助手回复、工具调用、工具输出各占多少，
+  以及折叠历史还能省下多少
+- **实时生成速率**：流式回复时显示 tok/s，卡住还是慢一眼分得清
+- **按机器分档，不按形态分档**：只看总内存与核心数，4+64 的手表与低端手机都按
+  实际能力给预算；AUTO / 均衡 / 性能 / 省电四档可手动覆盖
+
+### 归档
+
+导入 DeepSeek 官方导出的 `deepseek_data-*.zip`，同一套格式也能写回去。
+消息树按 `current_message_id` 取最后停的那一支；`THINK` 片段进「思考」折叠区；
+图片原件复制进附件目录；失败状态标成出错但不丢正文。导入是**追加**，不清空现有对话。
+
 ### 模型接入
 
 两种后端，互不冲突：
@@ -138,10 +165,13 @@ M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件�
 | 模式 | 说明 |
 |---|---|
 | **直连 API** | 任意 OpenAI 兼容服务：官方接口、中转站、本地 Ollama。Key 存 Android Keystore |
-| **DSH 服务器** | 两条路：SSH 连上电脑起 `dsh web`，或走 DSH Remote 的加密隧道（手机上扫码配对） |
+| **DSH 服务器** | 两条路：SSH 连上电脑起 `dsh web`，或走 DSH Remote 的加密隧道（扫码配对） |
 
 另外内置两家免费通道（Agnes、智谱 GLM）。内置项的地址与 Key 在界面中不可见、不可改，
 模型名单锁定为免费档，避免误用计费模型。
+
+DeepSeek 供应商还有两项专用能力：`title: {enabled: true}` 让服务端起标题，
+`/v1/tools/search` 提供结构化联网搜索（失败自动回落到 Bing / DuckDuckGo）。
 
 > 仓库**不包含**内置 Key —— 它由构建时的 `local.properties` / 环境变量注入 `BuildConfig`。
 > 从源码自行构建的 APK 没有内置通道，需要在设置里填自己的 Key。正式 Release 包已注入。
@@ -153,14 +183,17 @@ M3E 用的是 `androidx.wear.compose.material3`（1.5.6）的 Expressive 组件�
 
 ## 安装
 
-到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK：
+到 [Releases](https://github.com/dsdzm/DSH-Watch/releases) 下载最新 APK，手表与手机通用：
 
 ```bash
-adb install -r DSH-Watch-v1.21.0.apk
+adb install -r DSH-Watch-v1.24.0.apk
 ```
 
-没有 adb 就把 APK 传进手表，用文件管理器点开安装（需允许「安装未知来源应用」）。
+没有 adb 就把 APK 传进设备，用文件管理器点开安装（需允许「安装未知来源应用」）。
 包名 `com.dshwatch`，debug 变体是 `com.dshwatch.debug`，两者可共存。
+
+首次启动会问「这台设备是什么」：手表 / 手机 / 自动。选错可以随时在设置 → 外观里改，
+改完整棵界面树立刻重排。
 
 **签名指纹**（SHA-256，可用于校验安装包来源）：
 
@@ -183,7 +216,7 @@ adb install -r DSH-Watch-v1.21.0.apk
 先在电脑上开 SSH（macOS：系统设置 → 通用 → 共享 → 远程登录；Ubuntu：`apt install openssh-server`），
 并确认电脑上装了 DSH（`dsh --version`）。
 
-手表端进 **设置 → 连接电脑（SSH）**（或新建供应商时选 **DSH 服务器**），填：
+客户端进 **设置 → 连接电脑（SSH）**（或新建供应商时选 **DSH 服务器**），填：
 
 | 字段 | 说明 |
 |---|---|
@@ -196,24 +229,21 @@ adb install -r DSH-Watch-v1.21.0.apk
 
 > 聊天走 `/api/remote.mux` 的 `session/follow`，不是 REST，也不是 SSE。
 > 协议细节集中在 `net/dshweb/`（连接、mux）与 `net/ssh/`（隧道、远端启动）。
->
-> 支持直连 `dsh web` 地址，但需要把整行 `dsh web: http://…/?token=…` 粘进来；
-> 手表上打字很痛苦，SSH 才是推荐路径。
 
-### 方式 C：DSH Remote（手机扫码配对）
+### 方式 C：DSH Remote（扫码配对）
 
 电脑上装 DSH Remote 插件并在服务端登记之后，可以不开 SSH、也不用在同一个 Wi-Fi：
 
-1. 手表 **设置 → 手机配对（DSH Remote）**，屏幕上出现二维码；
-2. 手机扫它打开手表提供的页面，填服务器地址、完成登录；
-3. 手表拿到设备凭据与电脑列表，回到 **设置 → 供应商 → DSH 服务器**；
+1. 客户端 **设置 → 手机配对（DSH Remote）**，屏幕上出现二维码；
+2. 手机扫它打开设备提供的页面，填服务器地址、完成登录；
+3. 拿到设备凭据与电脑列表，回到 **设置 → 供应商 → DSH 服务器**；
 4. 点「通过 Remote 连接」，会话流与审批都走这条加密隧道。
 
 隧道是四层：控制 WebSocket 协商 → Relay 数据面 → Noise IK → 业务消息
 （`rpc.request` / `event`）。审批（`approval/request`）走连接级的 `$events`，
-手表上会弹出「允许一次 / 拒绝」—— 远端协议没有"总是允许"，所以这里也不给。
+客户端会弹出「允许一次 / 拒绝」—— 远端协议没有「总是允许」，所以这里也不给。
 
-首次启动会走一遍 6 页新手引导：什么是 API Key、上下文窗口怎么设、温度影响什么。
+首次启动会走一遍新手引导：什么是 API Key、上下文窗口怎么设、温度影响什么。
 
 ## 构建
 
@@ -254,17 +284,20 @@ app/src/main/java/com/dshwatch/
 ├─ core/        AppContainer（手写 DI）、日志、JSON、ID
 ├─ domain/      ChatEngine（对话与 Agent 循环）、TokenEstimator、PerfProfile
 │  ├─ agent/    ToolRegistry、tools/（52 个工具）、exec/、cloud/、mcp/、build/（静态校验）
-│  ├─ plugin/   工具结果插件与 TOON 编码
+│  ├─ plugin/   声明式插件、Cordis 转译器、工具结果插件与 TOON 编码
 │  └─ model/    ChatMessage / Conversation / Provider / Media
 ├─ data/        SettingsRepository（DataStore）、ConversationStore（JSON）、SecureKeyStore
 ├─ net/         Http、SseReader、backend/（OpenAI 兼容 / DSH 服务器）、media/
 ├─ service/     流式期间的前台服务
-└─ ui/          AppRoot、nav、theme、markdown、canvas、media、screens/
+└─ ui/          AppRoot、nav、theme、markdown、canvas、media
+   ├─ screens/  手表 · 经典（对话 / 记录 / 设置 / 引导）
+   ├─ m3e/      手表 · M3E（Wear Material 3 Expressive）
+   └─ phone/    手机（Material 3 底部导航、历史抽屉、外观页）
 ```
 
 没有 Hilt、没有 Room、没有 navigation-compose、没有 WebView。理由都在
-[docs/PROJECT-DETAILS.md](docs/PROJECT-DETAILS.md) 里，一句话：手表内存小、启动要快，
-每去掉一层依赖都换来实打实的常驻内存。
+[docs/PROJECT-DETAILS.md](docs/PROJECT-DETAILS.md) 里，一句话：少一层依赖就少一份常驻内存，
+启动也更快 —— 这一点在手机上同样是优点。
 
 ## 能力边界
 
@@ -273,12 +306,13 @@ app/src/main/java/com/dshwatch/
 - **没有本机编译器**。`build_project` 只做静态校验 + 打包，不是真编译。校验器覆盖 JSON、HTML/XML、CSS、JS/TS、Python、Shell、YAML，原则是「只报确定是错的」——读报告的是模型，误报会让它把正确代码改坏。真要编 APK / Gradle 工程，走 `cloud_build`（GitHub Actions）。
 - **`run_script` 不是沙箱**。子进程与 App 同 UID，能读应用私有目录。缓解手段是默认关闭、每次确认、工作目录限制，而不是隔离。
 - **内置 Key 可被反编译提取**。真正的防线是服务端限额，不是客户端的隐藏。
-- **圆形表盘未适配**。当前按方形/矩形优化，圆形表需要改 `ui/theme` 的尺寸策略。
+- **Cordis 转译是启发式的**。它不懂 JS 语义，只读字符串与 `presets/` 下的文本文件；工具注册、钩子、`ctx.fs` 这类代码一律丢弃。所以导入前必须看一眼核对页。
+- **界面以真机为准**。不同 ROM 的圆屏安全区、字号缩放差异很大，版式问题只有装上去才会暴露。
 
 ## 安全与隐私
 
 - API Key 优先存 Android Keystore（Tink）；部分定制 ROM 不支持时降级为普通存储，并在界面明确提示
-- 直连模式下聊天内容发往你配置的第三方接口；DSH 服务器模式数据只在手表与你的电脑之间
+- 直连模式下聊天内容发往你配置的第三方接口；DSH 服务器模式数据只在设备与你的电脑之间
 - HTTP 明文仅适合可信局域网，跨公网请用 HTTPS 或 Tailscale / WireGuard
 - 不依赖任何 Google 服务（无 GMS、无 Firebase、无 Wearable Data Layer）
 - 存储权限只在用内置文件浏览器时申请，**只读不写**；API 30+ 的「所有文件访问」是
@@ -299,8 +333,8 @@ app/src/main/java/com/dshwatch/
 
 ## 参与贡献
 
-欢迎 Issue 与 PR。请注意这是**手表应用**：很多问题（路径、时区、真机权限、体积）
-只有装到设备上才会暴露，所以合并前需要真机验证。具体流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+欢迎 Issue 与 PR。很多问题（路径、时区、真机权限、体积）只有装到设备上才会暴露，
+所以合并前需要真机验证 —— 手表与手机都算。具体流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 

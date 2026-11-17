@@ -26,6 +26,16 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.1-beta.3",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 插件转译能读完整源码：单文件 2 MB、总量 16 MB，不再出现「还有 99 份太大没读」",
+                "新增 presets 目录下的 markdown 直接转成对话预设，文件名就是预设名",
+                "新增 插件副标题显示「系统提示 +N 字」，开了有没有生效一眼可见",
+                "放宽 性能档上限：渲染与上下文条数、代码着色；中等配置也开着色",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.1-beta.2",
             date = "2026-11-17",
             highlights = listOf(

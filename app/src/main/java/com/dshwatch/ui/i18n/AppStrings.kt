@@ -1005,7 +1005,7 @@ object Zh : AppStrings {
 
     override val aboutTitle = "关于"
     override val version = "版本"
-    override val aboutDesc = "非官方第三方 DSH 客户端，为方形小屏手表做了渲染与内存优化。"
+    override val aboutDesc = "非官方第三方 DSH 客户端：原生实现，手表与手机同一份 APK，按设备能力做渲染与内存优化。"
     override val builtWith = "Kotlin · Jetpack Compose · Material 3"
     override val deviceInfo = "设备信息"
     override val sourceHint = "本项目基于开源社区的 DeepSeek Harness 客户端思路重写，与 DeepSeek 官方无关。"
@@ -1124,7 +1124,7 @@ object Zh : AppStrings {
         "B站读写接口参考开源第三方 B站终端（bili 终端类项目）的网页端实现；\n" +
         "产品形态参考社区 DSH 客户端（如 dsh-android-app）的思路。\n" +
         "本项目为独立实现，未复用上述项目的代码；\n" +
-        "界面与工程全部自研，针对手表屏幕从零设计。"
+        "界面与工程全部自研，手表与手机两套版式分别从原语搭起。"
     override val showMascot = "显示看板娘"
     override val mascotHint = "聊天空态插图与 AI 回复头像"
 
@@ -1672,7 +1672,7 @@ object En : AppStrings {
 
     override val aboutTitle = "About"
     override val version = "Version"
-    override val aboutDesc = "Unofficial third-party DSH client, tuned for small square watch screens."
+    override val aboutDesc = "Unofficial third-party DSH client: native, one APK for watches and phones, tuned per device."
     override val builtWith = "Kotlin · Jetpack Compose · Material 3"
     override val deviceInfo = "Device"
     override val sourceHint = "Rewritten from community DSH client ideas. Not affiliated with DeepSeek."
@@ -1791,7 +1791,7 @@ object En : AppStrings {
         "Bilibili read/write calls follow the web endpoints used by open-source bili terminal projects;\n" +
         "the product concept draws on community DSH clients (e.g. dsh-android-app).\n" +
         "This project is an independent implementation and reuses none of their code;\n" +
-        "the UI and engineering are built from scratch for watch-sized screens."
+        "the UI and engineering are built from scratch, with separate layouts for watches and phones."
     override val showMascot = "Show mascot"
     override val mascotHint = "Illustration and AI reply avatar"
 

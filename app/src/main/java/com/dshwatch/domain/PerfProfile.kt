@@ -6,15 +6,21 @@ import com.dshwatch.domain.model.PerfMode
 enum class DeviceTier { LOW, MID, HIGH }
 
 /**
- * 手表性能档。
+ * 设备性能档。
  *
- * 手表的问题不是算力不够，而是：内存 512MB~1GB、屏幕 1.4 寸、电池 300~600mAh。
- * 因此最主要的优化手段是「少渲染、少重排、少唤醒」：
+ * 档位按机器的真实内存与核心数分，**不按「是不是手表」**。同一份 APK 要跑在
+ * 手机和手表上，而 4+64 的手表比不少低端手机还强 —— 按设备形态一刀切只会
+ * 把能跑满的机器压成幻灯片。
+ *
+ * 仍然保留的优化手段是「少渲染、少重排、少唤醒」，只是阈值按实测放宽了：
  *  - maxRenderedMessages：LazyColumn 只保留最近 N 条在组合树里；
  *  - streamThrottleMs：流式增量合并刷新间隔，避免每来一个 token 就重组一次；
  *  - markdownMaxBlocks：解析与渲染的块数上限，超出的折叠；
  *  - enableAnimations：全局关掉非必要动画与光标闪烁；
- *  - enableCodeHighlight：轻量代码着色会带来额外的 AnnotatedString 构建，低端机关闭。
+ *  - enableCodeHighlight：轻量代码着色会带来额外的 AnnotatedString 构建。
+ *
+ * 这些数字是「兜底」而不是「目标」：正常会话远到不了这些上限，只有几百轮的
+ * 长会话才会碰到。把它们调小换不来可感知的流畅度，只会让长对话读到一半就断。
  */
 data class PerfProfile(
     val tier: DeviceTier,
@@ -41,46 +47,46 @@ object PerfProfiles {
             DeviceTier.LOW -> PerfProfile(
                 tier = DeviceTier.LOW,
                 mode = mode,
-                maxRenderedMessages = 30,
-                streamThrottleMs = 220L,
-                markdownMaxBlocks = 120,
-                maxCodeBlockLines = 40,
-                maxPinnedReasoningChars = 4_000,
+                maxRenderedMessages = 48,
+                streamThrottleMs = 160L,
+                markdownMaxBlocks = 240,
+                maxCodeBlockLines = 60,
+                maxPinnedReasoningChars = 8_000,
                 enableAnimations = false,
                 enableCodeHighlight = false,
                 enableHaptics = true,
-                historyLoadLimit = 60,
-                requestHistoryLimit = 16,
+                historyLoadLimit = 120,
+                requestHistoryLimit = 24,
             )
 
             DeviceTier.MID -> PerfProfile(
                 tier = DeviceTier.MID,
                 mode = mode,
-                maxRenderedMessages = 80,
-                streamThrottleMs = 130L,
-                markdownMaxBlocks = 400,
-                maxCodeBlockLines = 80,
-                maxPinnedReasoningChars = 12_000,
+                maxRenderedMessages = 140,
+                streamThrottleMs = 90L,
+                markdownMaxBlocks = 700,
+                maxCodeBlockLines = 140,
+                maxPinnedReasoningChars = 24_000,
                 enableAnimations = true,
-                enableCodeHighlight = false,
+                enableCodeHighlight = true,
                 enableHaptics = true,
-                historyLoadLimit = 150,
-                requestHistoryLimit = 24,
+                historyLoadLimit = 300,
+                requestHistoryLimit = 32,
             )
 
             DeviceTier.HIGH -> PerfProfile(
                 tier = DeviceTier.HIGH,
                 mode = mode,
-                maxRenderedMessages = 200,
-                streamThrottleMs = 70L,
-                markdownMaxBlocks = 1_200,
-                maxCodeBlockLines = 200,
-                maxPinnedReasoningChars = 40_000,
+                maxRenderedMessages = 320,
+                streamThrottleMs = 50L,
+                markdownMaxBlocks = 2_000,
+                maxCodeBlockLines = 320,
+                maxPinnedReasoningChars = 64_000,
                 enableAnimations = true,
                 enableCodeHighlight = true,
                 enableHaptics = true,
-                historyLoadLimit = 400,
-                requestHistoryLimit = 40,
+                historyLoadLimit = 800,
+                requestHistoryLimit = 64,
             )
         }
 

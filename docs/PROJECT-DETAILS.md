@@ -9,7 +9,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 形态 | 单 Activity + Compose，手表端 AI 编程助手 |
+| 形态 | 单 Activity + Compose，原生 Android 的 DSH 轻量客户端（手表 / 手机） |
 | 包名 | `com.dshwatch`（debug 变体加 `.debug` 后缀，可与正式版共存） |
 | 版本 | 1.18.5 / 61 |
 | SDK | minSdk 28 / targetSdk 34 / compileSdk 35 |
@@ -443,8 +443,9 @@ interface RoutingPlugin : Plugin {             // 每轮决定工具面
 
 ---
 
-## 11. UI 与手表适配
+## 11. UI 与多端适配
 
+- **三套版式**：手表 · 经典（自绘圆屏）、手表 · M3E（Wear Material 3）、手机（M3 底部导航）
 - **Material 3**，Android 12+ 支持动态取色；深浅色跟随系统
 - **大圆角**：`Shapes` 统一 20–28dp；屏幕四角有物理 R 角，内容区用 `cornerInsetDp` 让出安全区
 - **字号**：默认 `fontScale = 0.92`，可在设置里 0.8–1.2 调

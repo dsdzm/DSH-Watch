@@ -37,6 +37,15 @@ class ManifestPlugin(val manifest: PluginManifest) : PromptPlugin, GuardPlugin {
         get() {
             val base = manifest.description.takeIf { it.isNotBlank() }.orEmpty()
             val impacts = mutableListOf<String>()
+            /*
+             * 提示词插件改的是「模型看到的话」，界面上本来什么都看不见 ——
+             * 用户拨开开关，聊两句，看不出区别，就会以为没生效。
+             * 把注入的字数写进副标题，至少能对上「它确实往每轮请求里加了东西」。
+             */
+            val promptChars = manifest.prompt.let {
+                (it?.identity?.length ?: 0) + (it?.append?.length ?: 0)
+            }
+            if (promptChars > 0) impacts += "系统提示 +$promptChars 字"
             val t = manifest.tools
             if (t != null) {
                 if (t.hide.isNotEmpty()) impacts += "禁用 ${t.hide.size} 个工具"

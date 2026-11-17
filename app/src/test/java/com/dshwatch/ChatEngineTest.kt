@@ -382,6 +382,32 @@ class ChatEngineTest {
     }
 
     @Test
+    fun `imported manifest plugin appends to the system prompt`() = runTest {
+        // 用户装进来的插件只有 prompt.append：开启后必须真的出现在请求里。
+        // 这条和 whale 那条是同一个目的 —— 只测插件的 compose 不测接线，
+        // 「开关拨了、请求没变」这种故障会漏过去。
+        val manifest = com.dshwatch.domain.plugin.PluginManifest(
+            id = "dsh-plugin-boost",
+            name = "Boost",
+            prompt = com.dshwatch.domain.plugin.PromptPart(
+                append = "<dsh_boost>不要预告、不要复述、直接做。</dsh_boost>",
+            ),
+        )
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            enabledPlugins = setOf(manifest.id),
+            pluginsCustomized = true,
+            importedPlugins = listOf(manifest),
+        )
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().systemPrompt).contains("不要预告")
+    }
+
+    @Test
     fun `plugins off keeps the system prompt untouched`() = runTest {
         val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
         val settings = settingsWithProvider().copy(

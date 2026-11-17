@@ -35,14 +35,26 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object CordisTranslator {
 
-    /** 单份源码最大读取量。再大的 `.js` 一般是打包产物，抽出来的也是混淆代码 */
-    private const val MAX_FILE = 256 * 1024
+    /**
+     * 单份源码最大读取量。
+     *
+     * 2 MB 对应「一个没压缩的打包产物」。早先卡在 256 KB，结果 dsh-purge 那种
+     * `lib/` 里放几个大文件的包，正文所在的那份正好超限 —— 读进来 24 份，
+     * 最关键的提示词却没读。放松的代价是峰值内存多几百 KB，而这一点
+     * 在 1 GB 以上的设备上完全可以接受。
+     */
+    const val MAX_FILE = 2 * 1024 * 1024
 
-    /** 一个包里最多读几份源码。够覆盖 `lib/` 下的模块化写法，再多就是带 node_modules 了 */
-    const val MAX_FILES = 24
+    /** 一个包里最多读几份源码。带 `lib/` + `presets/` 的包通常在 60 份以内 */
+    const val MAX_FILES = 160
 
-    /** 所有源码的累计上限。抽字面量要整段进内存，这里给一条总闸 */
-    private const val MAX_TOTAL = 1024 * 1024
+    /**
+     * 所有源码的累计上限。
+     *
+     * 抽字面量要整段进内存，这里是一条总闸。16 MB 是「把 node_modules 排掉之后
+     * 整个包都读完」的量级；再大就不是插件，是把整个仓库打进来了。
+     */
+    const val MAX_TOTAL = 16L * 1024 * 1024
 
     /** 一段候选要有多长才可能是提示词。短于这个数基本是键名、类名、日志前缀 */
     private const val MIN_LIT = 40
@@ -55,6 +67,9 @@ object CordisTranslator {
 
     /** 主提示词上限，与 [PluginManifest.MAX_PROMPT] 对齐 */
     private const val MAX_APPEND = 4_000
+
+    /** `presets/` 下这些文件是索引或说明，不是预设本身 */
+    private val ASSET_IGNORED = setOf("readme", "index", "changelog", "license", "contributing")
 
     private val json = kotlinx.serialization.json.Json {
         ignoreUnknownKeys = true
@@ -73,13 +88,18 @@ object CordisTranslator {
      * 转译输入。
      *
      * [sources] 是「路径 → 文本」，只放 `.js` / `.mjs` / `.cjs` / `.ts`。
-     * [truncated] 记的是「因为超限没读进来的文件数」—— 它要出现在核对说明里，
-     * 否则用户会以为转译已经把整个包看完了。
+     * [assets] 是独立成文件的预设正文（`presets/` 下的 `.md`）—— 有些插件不把预设
+     * 写进代码，而是一条预设一个 markdown 文件，这时文件名就是预设名。
+     * [truncated] / [oversized] 记的是「因为超限没读进来的文件数」：
+     * 前者是数量或总量到顶，后者是单份太大。两者要分开报，
+     * 否则用户会看到一句「99 份太大没读」，以为包里全是几十 MB 的怪物。
      */
     data class Bundle(
         val meta: Meta,
         val sources: List<Source>,
+        val assets: List<Source> = emptyList(),
         val truncated: Int = 0,
+        val oversized: Int = 0,
     )
 
     data class Source(val path: String, val text: String)
@@ -118,8 +138,14 @@ object CordisTranslator {
          *
          * 原因是两者会抢同一段文字：一个写了三条预设的插件，最长那一段本来
          * 属于某条预设，把它再抄进 append 会让「选不选预设都一样」。
+         *
+         * 两个来源都要看：代码里的 `{ name: '破甲', prompt: '…' }`，
+         * 以及 `presets/` 下的 `.md` 这种一条一个文件、文件名即预设名的写法。
+         * 按正文去重 —— 同一个文件被两种方式各认一次时，只留前面那一条。
          */
-        val presets = pairPresets(joined)
+        val presets = (pairPresets(joined) + assetPresets(bundle.assets))
+            .distinctBy { it.systemPrompt.trim() }
+            .take(PluginManifest.MAX_PRESETS)
         val usedByPreset = presets.map { it.systemPrompt.trim() }.toSet()
 
         val main = strong.firstOrNull { it.first.text !in usedByPreset }
@@ -170,8 +196,20 @@ object CordisTranslator {
     ): String {
         val lines = ArrayList<String>()
         val files = bundle.sources.size
+        val skipped = bundle.oversized + bundle.truncated
+        val why = buildList {
+            if (bundle.oversized > 0) {
+                add("${bundle.oversized} 份单份超过 ${MAX_FILE / 1024 / 1024} MB")
+            }
+            if (bundle.truncated > 0) add("${bundle.truncated} 份超出总量上限")
+        }.joinToString("，")
+        /*
+         * 这一行用插值拼，不要用 `"…" + if (…) "…" else "" + "…"`：
+         * 后者在条件成立时会把后半句也吞进 else 分支，于是「读入几份、
+         * 另有几份没读」后面永远缺「挑出几段候选」。
+         */
         lines += "读入 $files 份源码" +
-            if (bundle.truncated > 0) "（另有 ${bundle.truncated} 份太大没读）" else "" +
+            (if (skipped > 0) "（另有 $skipped 份没读：$why）" else "") +
             "，挑出 $candidates 段候选文本。"
 
         main?.let { (lit, sc) ->
@@ -179,10 +217,11 @@ object CordisTranslator {
             lines += "· ${lit.file} 里 ${lit.text.length} 字那段$word，已放进「追加到系统提示」。"
         }
         if (presets.isNotEmpty()) {
-            lines += "· 认出 ${presets.size} 条预设：${presets.joinToString("、") { it.name }}。"
+            lines += "· 认出 ${presets.size} 条预设：${presets.joinToString("、") { it.name }}。" +
+                "在供应商 → 提示词 → 预设里选。"
         }
-        lines += "丢掉的部分：工具注册、配置读写、钩子 —— 手表上这些跑不了，" +
-            "转译只保留它会写进系统提示的那些话。"
+        lines += "丢掉的部分：工具注册、配置读写、钩子 —— App 里没有 JS 运行时，" +
+            "这些跑不了，转译只保留它会写进系统提示的那些话。"
         lines += "**导入后请先读一遍正文**，确认不是把日志或注释当成了提示词。"
         return lines.joinToString("\n")
     }
@@ -392,8 +431,38 @@ object CordisTranslator {
      * 代价是整段提示词变成一条常驻的 append。所以这里偏向「宁可少配」——
      * 只认「短段 ≤ 24 字、长段 ≥ 120 字、距离 ≤ 600 字符」这一种最干净的形态。
      */
-    private fun pairPresets(all: List<Lit>): List<PresetPart> {
-        // 不排序：all 已经是「按文件顺序、文件内按出现位置」，排序会把不同文件的
+    /**
+     * 把 `presets/` 下的 `.md` 这类独立文件转成预设。
+     *
+     * 文件名就是预设名（`破甲.md` → 「破甲」），正文整段作为 systemPrompt。
+     * 这一类往往比代码里抠出来的更完整：作者写 markdown 时不用考虑转义，
+     * 段落、列表、加粗都会原样保留。
+     */
+    private fun assetPresets(assets: List<Source>): List<PresetPart> {
+        if (assets.isEmpty()) return emptyList()
+        val ids = HashSet<String>()
+        return assets.mapNotNull { src ->
+            val text = src.text.trim()
+            /*
+             * 索引文件与说明文件要排掉，否则「本目录存放预设」会变成一条预设。
+             * 正文门槛只设 20 字：短预设（「只回一句话」）是合法写法，
+             * 真正防误收的是文件名白名单，不是长度。
+             */
+            val raw = src.path.substringAfterLast('/').substringBeforeLast('.').trim()
+            if (raw.lowercase() in ASSET_IGNORED) return@mapNotNull null
+            if (text.length < 20) return@mapNotNull null
+            val name = raw.replace('-', ' ').replace('_', ' ').trim()
+            if (name.isEmpty()) return@mapNotNull null
+            PresetPart(
+                id = presetId(name, ids),
+                name = name.take(PluginManifest.MAX_PRESET_NAME),
+                description = "来自 ${src.path}",
+                systemPrompt = clip(text, MAX_PRESET),
+            )
+        }
+    }
+
+    private fun pairPresets(all: List<Lit>): List<PresetPart> {        // 不排序：all 已经是「按文件顺序、文件内按出现位置」，排序会把不同文件的
         // 偏移量混在一起，配出跨文件的错误组合
         val shuffled = all
         val out = ArrayList<PresetPart>()
@@ -420,7 +489,7 @@ object CordisTranslator {
                 if (k in used) continue
                 val body = shuffled[k]
                 if (body.file != head.file) break
-                if (body.start - head.start > 600) break
+                if (body.start - head.start > 900) break
                 /*
                  * 60 字符而不是 120。
                  *
@@ -428,7 +497,7 @@ object CordisTranslator {
                  * 「三句话讲清风格」的短预设全部漏掉，而它们恰恰是最常见的一类。
                  * 真正防误配的是下面那条 score 判断，长度只是先筛掉键名与日志。
                  */
-                if (body.text.length < 60) continue
+                if (body.text.length < 40) continue
                 if (looksLikeCode(body.text)) continue
                 if (body.text.length > MAX_PRESET) continue
                 // 正文自己也得像提示词，否则「短名字 + 长日志」也会被配上

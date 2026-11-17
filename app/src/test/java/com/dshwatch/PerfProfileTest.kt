@@ -68,10 +68,28 @@ class PerfProfileTest {
     }
 
     @Test
-    fun `low tier disables expensive rendering`() {
+    fun `low tier still renders a useful window`() {
         val profile = PerfProfiles.of(PerfMode.AUTO, DeviceTier.LOW)
         assertThat(profile.enableCodeHighlight).isFalse()
-        assertThat(profile.maxRenderedMessages).isEqualTo(30)
-        assertThat(profile.requestHistoryLimit).isAtMost(20)
+        // 48 条 ≈ 一屏半的长会话。早先砍到 30 条，往上翻两下就「没内容了」
+        assertThat(profile.maxRenderedMessages).isEqualTo(48)
+        assertThat(profile.requestHistoryLimit).isAtLeast(24)
+        assertThat(profile.historyLoadLimit).isAtLeast(120)
+    }
+
+    @Test
+    fun `high tier no longer caps long conversations early`() {
+        val profile = PerfProfiles.of(PerfMode.AUTO, DeviceTier.HIGH)
+        assertThat(profile.maxRenderedMessages).isAtLeast(300)
+        assertThat(profile.requestHistoryLimit).isAtLeast(64)
+        assertThat(profile.streamThrottleMs).isAtMost(50L)
+        assertThat(profile.enableCodeHighlight).isTrue()
+    }
+
+    @Test
+    fun `mid tier gets code highlight too`() {
+        val profile = PerfProfiles.of(PerfMode.AUTO, DeviceTier.MID)
+        assertThat(profile.enableCodeHighlight).isTrue()
+        assertThat(profile.requestHistoryLimit).isAtLeast(32)
     }
 }
