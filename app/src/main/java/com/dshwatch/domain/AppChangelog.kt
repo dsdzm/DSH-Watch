@@ -26,6 +26,13 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.1-beta.2",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 Cordis 插件包转译：把 .tgz 丢进来，自动从源码里抽出提示词与预设做成草稿，核对一眼即可导入",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.1-beta.1",
             date = "2026-11-17",
             highlights = listOf(

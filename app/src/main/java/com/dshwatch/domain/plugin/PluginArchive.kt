@@ -79,6 +79,15 @@ object PluginArchive {
     /** 裸文本（未压缩 JSON）的读取上限。8 000 字符的清单远小于它 */
     private const val MAX_TEXT = 128 * 1024
 
+    /**
+     * 一个包里最多收多少源码字节，供 [CordisTranslator] 转译。
+     *
+     * 1 MB 是「一个正常的插件源码」的量级（打包产物也就几百 KB）。
+     * 超过它的一律不进内存：转译是尽力而为，读不完就在说明里写「还有几份没读」，
+     * 不该为了一个 20 MB 的 bundle 把用户的表卡住。
+     */
+    private const val MAX_SOURCE_TOTAL = 1024L * 1024
+
     private const val BLOCK = 512
 
     /** 包内清单的文件名。位置不限，取路径最短的那一份 */
@@ -173,10 +182,17 @@ object PluginArchive {
                 "$where 里的 ${found.path} 有 ${found.size / 1024} KB。" +
                     "清单上限是 ${PluginManifest.MAX_CHARS} 个字符 —— 这不是一份声明，是一篇文章。",
             )
-            is Scan.NpmOnly -> PluginLoader.Parsed.Err(
-                "$where 里只有 package.json，没有 $MANIFEST_NAME —— 这是要在 Node 里跑的 " +
-                    "Cordis 插件（${found.name}）。手表上没有 Node 运行时，装不了。" +
-                    "如果作者另外提供了声明式清单，让他把 $MANIFEST_NAME 一起打进包里。",
+            /*
+             * 只有 package.json 的包：先试着**转译**，转不出来再说为什么。
+             *
+             * 早先这里是直接拒收的（「Cordis 插件装不了」）。那句话是事实，
+             * 但对用户没用 —— 他手上就这么一个包，告诉他装不了等于让他放弃。
+             * 现在把源码当文本读一遍，能抽出提示词的照样能装上，
+             * 抽不出来的才报错，且报错文案改成「能做什么」而不是「不能做什么」。
+             */
+            is Scan.NpmOnly -> CordisTranslator.translate(
+                found.bundle,
+                label(source, where, found.name),
             )
             Scan.Nothing -> PluginLoader.Parsed.Err(
                 "$where 里没找到 $MANIFEST_NAME。声明式插件的包长这样：" +
@@ -188,6 +204,19 @@ object PluginArchive {
 
     // ---------------- 扫描 ----------------
 
+    /**
+     * 报错时怎么称呼这个包。
+     *
+     * 用户手上可能同时有几个 `.tgz`，光写「这个文件」等于让他猜。文件名
+     * 与包名都带上，他才知道该拿哪一个回去问作者。
+     */
+    private fun label(source: String, where: String, pkgName: String): String = when {
+        source.isNotBlank() && pkgName.isNotBlank() -> "$source（$pkgName）"
+        source.isNotBlank() -> source
+        pkgName.isNotBlank() -> "$where（$pkgName）"
+        else -> where
+    }
+
     private sealed interface Scan {
         data class Found(val path: String, val text: String) : Scan
 
@@ -195,15 +224,25 @@ object PluginArchive {
         data class Oversized(val path: String, val size: Int) : Scan
 
         /** 包里有 package.json，但没有我们的清单 —— 最可能是官方 Cordis 插件 */
-        data class NpmOnly(val name: String) : Scan
+        data class NpmOnly(val name: String, val bundle: CordisTranslator.Bundle) : Scan
 
         data object Nothing : Scan
     }
 
     private fun walk(input: Tallying): Scan {
         val manifests = ArrayList<Pair<String, ByteArray>>()
+        var pkgText: String? = null
         var pkgName: String? = null
         var oversized: Pair<String, Int>? = null
+
+        /*
+         * 源码单独收一份：只有在「没有 dsh-plugin.json」时才用得上，但 tar 是
+         * 流式的 —— 读到 packages.json 时还不知道后面会不会出现清单，
+         * 所以一路都收着，靠累计上限兜住内存。
+         */
+        val sources = ArrayList<CordisTranslator.Source>()
+        var sourceBytes = 0L
+        var skippedSources = 0
 
         val header = ByteArray(BLOCK)
         var entries = 0
@@ -232,15 +271,24 @@ object PluginArchive {
             val isMeta = type == 'x'.code || type == 'L'.code
             val base = if (isFile) name0.substringAfterLast('/') else ""
             /*
-             * 只读三类内容：pax/GNU 长名字头、清单、package.json。
+             * 只读四类内容：pax/GNU 长名字头、清单、package.json、源码。
              *
              * 这是「包可以很大」的关键：一个 5 MB 的截图条目在这里只花一次 skip，
              * 不进内存。长名字头本身很小，但**必须读** —— 跳过它就等于丢掉
              * 下一个条目的真实路径，pax 格式的 npm 包会整个认不出来。
+             *
+             * 源码是为转译准备的（见 [CordisTranslator]）：包里有 dsh-plugin.json
+             * 时它一点也不会用到，白读了 —— 但 tar 只能顺着读一遍，
+             * 读到清单之前谁也不知道后面还有没有。代价是几份 JS 进内存，
+             * 收益是「作者只发了 npm 包」时不用让用户回去求人。
              */
+            val wantsSource = isFile && isSourceName(base) &&
+                sources.size < CordisTranslator.MAX_FILES &&
+                sourceBytes + size <= MAX_SOURCE_TOTAL
             val wanted = size <= MAX_MEMBER && (
                 isMeta ||
-                    (isFile && (base == MANIFEST_NAME || base == "package.json"))
+                    (isFile && (base == MANIFEST_NAME || base == "package.json")) ||
+                    wantsSource
                 )
 
             val body = if (wanted) {
@@ -248,6 +296,10 @@ object PluginArchive {
                 if (!input.readFully(b)) break
                 b
             } else {
+                if (isFile && isSourceName(base) && size > 0) {
+                    // 只为了在核对说明里写清「还有几份没读」，不参与判断
+                    if (skippedSources < 99) skippedSources++
+                }
                 input.skipFully(size)
                 null
             }
@@ -271,7 +323,14 @@ object PluginArchive {
                         baseName == MANIFEST_NAME && body != null -> manifests += name to body
                         baseName == MANIFEST_NAME -> if (oversized == null) oversized = name to size.toInt()
                         baseName == "package.json" && body != null -> if (pkgName == null) {
+                            pkgText = String(body, Charsets.UTF_8)
                             pkgName = packageName(body)
+                        }
+                        body != null && isSourceName(baseName) &&
+                            sources.size < CordisTranslator.MAX_FILES &&
+                            sourceBytes + body.size <= MAX_SOURCE_TOTAL -> {
+                            sourceBytes += body.size
+                            sources += CordisTranslator.Source(name, String(body, Charsets.UTF_8))
                         }
                     }
                 }
@@ -293,7 +352,16 @@ object PluginArchive {
             return Scan.Found(path, String(data, Charsets.UTF_8))
         }
         oversized?.let { (path, size) -> return Scan.Oversized(path, size) }
-        if (pkgName != null) return Scan.NpmOnly(pkgName)
+        if (pkgName != null) {
+            return Scan.NpmOnly(
+                name = pkgName.orEmpty(),
+                bundle = CordisTranslator.Bundle(
+                    meta = CordisTranslator.metaOf(pkgText),
+                    sources = sources,
+                    truncated = skippedSources,
+                ),
+            )
+        }
         return Scan.Nothing
     }
 
@@ -456,4 +524,22 @@ object PluginArchive {
         val text = String(b, Charsets.UTF_8)
         Regex("\"name\"\\s*:\\s*\"([^\"]{1,80})\"").find(text)?.groupValues?.get(1)
     }.getOrNull()
+
+    /**
+     * 这份条目是不是「可能写着提示词的源码」。
+     *
+     * 三类要排除：
+     * · `*.d.ts` —— 只有类型，没有实现；
+     * · `*.min.js` —— 打包压缩后字符串被切成碎片，转译出来都是半个句子；
+     * · `node_modules/` 里的东西 —— 那是依赖，不是这个插件自己说的话。
+     *
+     * 判断只看文件名与路径，不看内容：tar 是流式的，读到内容时已经决定要不要读了。
+     */
+    private fun isSourceName(path: String): Boolean {
+        val p = path.lowercase()
+        if (p.endsWith(".d.ts")) return false
+        if (p.contains(".min.js")) return false
+        if (p.contains("/node_modules/") || p.startsWith("node_modules/")) return false
+        return p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".ts")
+    }
 }

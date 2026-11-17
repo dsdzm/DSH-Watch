@@ -41,7 +41,14 @@ object PluginLoader {
 
     /** 解析结果。错误文案是直接给用户看的，所以每条都要带「怎么改」 */
     sealed class Parsed {
-        data class Ok(val manifest: PluginManifest) : Parsed()
+        /**
+         * [note] 非空表示这份清单是**转译出来的草稿**（见 [CordisTranslator]）。
+         *
+         * 它不能和「作者写好的清单」一样静默导入：转译靠启发式判断，
+         * 认错一段日志当提示词是完全可能的。界面要先把这段说明摆出来，
+         * 让用户扫一眼再决定。
+         */
+        data class Ok(val manifest: PluginManifest, val note: String? = null) : Parsed()
         data class Err(val message: String) : Parsed()
     }
 

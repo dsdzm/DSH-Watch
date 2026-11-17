@@ -81,6 +81,15 @@ fun PluginImportDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var files by remember { mutableStateOf<List<WorkspaceStore.Entry>?>(null) }
+
+    /**
+     * 转译出来的草稿，等用户点头。
+     *
+     * 它与 [error] 是两条不同的路：error 是「读不出来」，draft 是「读出来了，
+     * 但可能读歪了」。后者**不能**直接导入 —— 转译靠猜，把一段日志认成
+     * 系统提示是完全可能的，而用户只有看到正文才发现不对。
+     */
+    var draft by remember { mutableStateOf<PluginLoader.Parsed.Ok?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -90,7 +99,10 @@ fun PluginImportDialog(
     fun accept(result: PluginLoader.Parsed) {
         when (result) {
             is PluginLoader.Parsed.Err -> error = result.message
-            is PluginLoader.Parsed.Ok -> {
+            is PluginLoader.Parsed.Ok -> if (result.note != null) {
+                draft = result
+                error = null
+            } else {
                 onImported(result.manifest)
                 onDismiss()
             }
@@ -149,40 +161,56 @@ fun PluginImportDialog(
 
     GlassDialog(
         onDismissRequest = onDismiss,
-        title = when (mode) {
-            Mode.MENU -> "导入插件"
-            Mode.URL -> "从链接导入"
-            Mode.WORKSPACE -> "工作空间里的插件"
+        title = when {
+            draft != null -> "转译预览"
+            mode == Mode.MENU -> "导入插件"
+            mode == Mode.URL -> "从链接导入"
+            else -> "工作空间里的插件"
         },
         maxContentHeight = 220,
         buttons = {
-            if (mode != Mode.MENU) {
-                GlassDialogButton(label = "返回") {
-                    mode = Mode.MENU
-                    error = null
-                }
+            val pending = draft
+            if (pending != null) {
+                // 转译草稿：只有「导入」与「算了」两个选择。
+                // 手表上没有舒服的编辑框，改不了就明确说，别给一个改不动的入口
+                GlassDialogButton(label = "算了") { draft = null }
                 Spacer(Modifier.width(6.dp))
-            }
-            if (mode == Mode.MENU || mode == Mode.WORKSPACE) {
-                GlassDialogButton(label = "取消", onClick = onDismiss)
+                GlassDialogButton(label = "导入", primary = true) {
+                    onImported(pending.manifest)
+                    onDismiss()
+                }
             } else {
-                GlassDialogButton(
-                    label = if (busy) "导入中…" else "导入",
-                    primary = true,
-                ) {
-                    if (busy) return@GlassDialogButton
-                    busy = true
-                    error = null
-                    scope.launch {
-                        val r = PluginImporter.fromUrl(url)
-                        busy = false
-                        accept(r)
+                if (mode != Mode.MENU) {
+                    GlassDialogButton(label = "返回") {
+                        mode = Mode.MENU
+                        error = null
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (mode == Mode.MENU || mode == Mode.WORKSPACE) {
+                    GlassDialogButton(label = "取消", onClick = onDismiss)
+                } else {
+                    GlassDialogButton(
+                        label = if (busy) "导入中…" else "导入",
+                        primary = true,
+                    ) {
+                        if (busy) return@GlassDialogButton
+                        busy = true
+                        error = null
+                        scope.launch {
+                            val r = PluginImporter.fromUrl(url)
+                            busy = false
+                            accept(r)
+                        }
                     }
                 }
             }
         },
         content = {
-            when (mode) {
+            val pending = draft
+            if (pending != null) {
+                TranslatedPreview(pending)
+            } else when (mode) {
                 Mode.MENU -> {
                     GlassDialogRow(
                         title = "选择文件",
@@ -298,6 +326,51 @@ fun PluginImportDialog(
             }
         },
     )
+}
+
+/**
+ * 转译草稿的核对页。
+ *
+ * 只做三件事：说清它叫什么、认出了多少、正文长什么样。**不给编辑入口** ——
+ * 手表上的输入法改不了一段两千字的提示词，给了等于让用户在里面迷路。
+ * 不满意就「算了」，然后在手机上改一份 JSON 从链接导入，那是更快的路。
+ */
+@Composable
+private fun TranslatedPreview(ok: PluginLoader.Parsed.Ok) {
+    val m = ok.manifest
+    Text(
+        text = m.name,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = m.id,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+    )
+    Text(
+        text = "追加提示词 ${m.prompt?.append?.length ?: 0} 字 · 预设 ${m.presets.size} 条",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(top = 2.dp),
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = ok.note.orEmpty(),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    val body = m.prompt?.append?.takeIf { it.isNotBlank() }
+        ?: m.presets.firstOrNull()?.systemPrompt.orEmpty()
+    if (body.isNotBlank()) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "正文开头：" + body.replace("\n", " ").take(70) + "…",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
 }
 
 /**

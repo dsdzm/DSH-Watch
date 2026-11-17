@@ -139,11 +139,11 @@ class PluginArchiveTest {
     /**
      * 官方 Cordis 插件：有 package.json、有 JS，但没有我们的清单。
      *
-     * 必须明确说「这是 Node 插件，装不了」，而不是把 package.json 的 name
-     * 当成插件导进去 —— 那样用户会以为装成功了，然后发现什么都没变。
+     * 现在的处理是**先转译**：把源码当文本读，抽出提示词就装。抽不出来才报错，
+     * 且报错要指出能做什么 —— 而不是「装不了」四个字把人挡回去。
      */
     @Test
-    fun `a cordis package is rejected with a reason`() {
+    fun `a cordis package with nothing to translate is refused with a reason`() {
         val pkg = gzip(
             tarBytes(
                 entry("package/package.json", """{"name":"@dsh/purge","version":"1.1.84"}"""),
@@ -153,7 +153,7 @@ class PluginArchiveTest {
         val r = PluginArchive.parse(pkg, "purge.tgz")
         assertThat(r).isInstanceOf(PluginLoader.Parsed.Err::class.java)
         val msg = (r as PluginLoader.Parsed.Err).message
-        assertThat(msg).contains("Cordis")
+        assertThat(msg).contains("没有一句像提示词")
         assertThat(msg).contains("@dsh/purge")
         assertThat(msg).contains(PluginArchive.MANIFEST_NAME)
     }
