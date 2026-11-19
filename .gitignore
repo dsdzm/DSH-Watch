@@ -29,3 +29,7 @@ signing/
 
 # 发布凭证（七牛 AK/SK 等），不进版本库
 .env
+
+# Python
+__pycache__/
+*.pyc
