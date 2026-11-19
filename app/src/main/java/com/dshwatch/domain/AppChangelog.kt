@@ -26,6 +26,72 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.1-beta.12",
+            date = "2026-11-18",
+            highlights = listOf(
+                "新增 登录态加密保存：扫码一次就够，重启不再重扫，设置页可直接退出登录",
+                "新增 直连长连接：换票、心跳、取私聊、发私聊四步打通，不再依赖 OneBot 后端",
+                "新增 连接自检：逐步报告建连、心跳、取消息、发消息的结果与耗时",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.11",
+            date = "2026-11-18",
+            highlights = listOf(
+                "新增 客户端身份跟官方手表版对齐（9.0.1 / SDK 6.0.0.2498），换票阶段不再报旧版本",
+                "新增 登录被拒时直接给出服务端返回码，能一眼分清是账号风控还是客户端不被接受",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.9",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 扫码登录走完全程：手机上点确认后自动用票据换登录态，成功会显示昵称",
+                "新增 登录失败说清原因：要验证码、账号被冻结、该号禁止第三方客户端，分别提示而不是只给一个数字",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.8",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 直连登录真的能出码了：按手表协议自己算密钥、自己封包，拿到的是 QQ 画的二维码，不再需要旁边有后端",
+                "新增 扫码状态轮询：扫到、已确认、过期、取消四种状态都能识别，过期自动换一张",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.7",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 直连登录：在「QQ 消息 → 直连登录」里扫码，App 自己按手表协议连 QQ，不需要旁边有后端",
+                "新增 手表协议的 TEA 加解密与登录包构造，设备指纹一次生成后固定不变",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.6",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 QQ 双向聊天：连上手机本机的 OneBot 后端，私聊与群里的消息直接进对话，回答自动发回 QQ",
+                "新增 QQ 群点名规则：@ 我、引用我说过的话、或命中前缀才回，可在设置里改；私聊按对象单独开",
+                "新增 QQ 消息里的图片会一起交给模型，回复可作为「QQ 群 / QQ 某人」留在会话列表里继续聊",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.5",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 插件转译按目录合成预设：名字取 preset.yml、正文取同目录 agent.cordis.yml 的 config.prefix，dsh-purge 装进来就是「红队模式」「无限制模式」两条",
+                "新增 预设文件单独配额：包里源码再多，也不会把 presets 目录挤掉",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.4",
+            date = "2026-11-17",
+            highlights = listOf(
+                "新增 插件转译支持 presets 目录下的 YAML 声明：按 name 与 config.prefix 读出预设，dsh-purge 的红队模式、无限制模式可直接导入",
+                "新增 单条预设上限放宽到 6 000 字、一个插件 8 条，长预设不再被截断",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.1-beta.3",
             date = "2026-11-17",
             highlights = listOf(

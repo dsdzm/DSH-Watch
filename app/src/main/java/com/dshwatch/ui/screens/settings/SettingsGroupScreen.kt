@@ -103,10 +103,11 @@ internal object SettingsGroups {
     const val PLUGINS = "plugins"
     const val MCP = "mcp"
     const val BILI = "bili"
+    const val QQ = "qq"
 
     /** 顺序即一级页的显示顺序。插件、MCP、B站 紧跟「AI 能力」—— 它们扩展的都是能力 */
     val all = listOf(
-        MODEL, ABILITY, PLUGINS, MCP, BILI, CHAT, APPEARANCE, FILES, DATA, RUNTIME, CONNECTION,
+        MODEL, ABILITY, PLUGINS, MCP, BILI, QQ, CHAT, APPEARANCE, FILES, DATA, RUNTIME, CONNECTION,
     )
 
     fun title(id: String, s: AppStrings): String = when (id) {
@@ -120,6 +121,7 @@ internal object SettingsGroups {
         PLUGINS -> s.groupPlugins
         MCP -> s.groupMcp
         BILI -> s.groupBili
+        QQ -> s.groupQq
         else -> s.groupConnection
     }
 }
@@ -198,6 +200,7 @@ fun SettingsGroupScreen(
             SettingsGroups.PLUGINS -> PluginsGroup(settings, update, container, s)
             SettingsGroups.MCP -> McpGroup(settings, update, container, s)
             SettingsGroups.BILI -> BiliGroup(settings, update, container, nav, s)
+            SettingsGroups.QQ -> QqGroup(settings, update, container, s)
             else -> ConnectionGroup(settings, update, container, nav, s)
         }
     }

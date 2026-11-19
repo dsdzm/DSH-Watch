@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.core.CrashLog
+import com.dshwatch.service.QqService
 import com.dshwatch.service.StreamingService
 import com.dshwatch.ui.AppRoot
 import com.dshwatch.ui.nav.rememberWatchNavigator
@@ -52,6 +53,26 @@ class MainActivity : ComponentActivity() {
             val settingsReady by container.settingsReady.collectAsStateWithLifecycle()
             val perf by container.perf.collectAsStateWithLifecycle()
             val profile by container.profile.collectAsStateWithLifecycle()
+
+            /*
+             * QQ 桥接的启停跟着开关走。
+             *
+             * 设置页里已经直接启停了；这里再挂一次是为了「进程被系统杀掉后
+             * 用户重新打开 App」这一路 —— 那次启动不会经过设置页，而
+             * START_STICKY 只在服务自己被杀时有效，整个进程一起没掉时
+             * 没人替我们拉起它。
+             *
+             * 等 settingsReady 之后再判：初始值是内存默认（enabled=false），
+             * 直接拿它判定会在每次冷启动时先 stop 一次，把正在跑的服务掐掉。
+             */
+            LaunchedEffect(settingsReady, settings.qq.enabled) {
+                if (!settingsReady) return@LaunchedEffect
+                if (settings.qq.enabled) {
+                    com.dshwatch.service.QqService.start(appContext)
+                } else {
+                    com.dshwatch.service.QqService.stop(appContext)
+                }
+            }
 
             /*
              * 界面缩放要在主题之外算好：主题内部只知道「缩放多少」，
@@ -192,6 +213,15 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         runCatching { StreamingService.resumePending(this) }
+        /*
+         * QQ 桥接同理，但它多一个坑：服务是 START_STICKY，
+         * 被系统杀掉后重启时进程是新的，桥接对象也是新的 —— 不在这里补一次，
+         * 用户会看到通知栏写着「QQ 已连接」，实际一条消息都不进来。
+         * 只在开着的时候补，关掉的用户不该看到任何东西。
+         */
+        runCatching {
+            if (AppContainer.of(this).settings.value.qq.enabled) QqService.start(this)
+        }
     }
 
     /**

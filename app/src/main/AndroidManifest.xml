@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- QQ 桥接要「一直挂着等消息」，不是一次性同步任务，用 specialUse 才不会被 6 小时上限掐掉 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 定时刷 B站想准点就得要精确闹钟；拿不到会退化成普通闹钟，不会崩 -->
@@ -143,6 +145,16 @@
             android:name=".service.StreamingService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- QQ 桥接：常驻轮询本机 OneBot 后端，熄屏也要能收 -->
+        <service
+            android:name=".service.QqService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="保持与本机 OneBot 后端的连接，把 QQ 消息转进对话并把回复发回去" />
+        </service>
 
         <!-- 工作空间产物导出：只暴露 files/workspace/，见 res/xml/file_paths.xml -->
         <provider

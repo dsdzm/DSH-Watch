@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Info
@@ -300,6 +301,7 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.PLUGINS -> Icons.Outlined.Extension
     SettingsGroups.MCP -> Icons.Outlined.Hub
     SettingsGroups.BILI -> Icons.Outlined.Videocam
+    SettingsGroups.QQ -> Icons.Outlined.Forum
     SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
@@ -337,6 +339,13 @@ private fun summaryOf(id: String, settings: AppSettings): String = when (id) {
         if (servers.isEmpty()) "没有服务器" else "${servers.count { it.enabled && it.confirmed }}/${servers.size} 已启用"
     }
     SettingsGroups.BILI -> if (settings.biliEnabled) "已开启" else "已关闭"
+    SettingsGroups.QQ -> when {
+        !settings.qq.enabled -> "已关闭"
+        else -> buildList {
+            if (settings.qq.privateEnabled) add("私聊")
+            if (settings.qq.groupEnabled) add("群")
+        }.joinToString(" + ").ifBlank { "已开启" }
+    }
     SettingsGroups.CHAT -> buildList {
         if (settings.showReasoning) add("思维链")
         if (settings.autoScroll) add("自动滚动")

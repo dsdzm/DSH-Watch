@@ -27,6 +27,21 @@ class BiliDailyReceiver : BroadcastReceiver() {
         ) {
             runCatching { BiliSchedule.sync(context, settings) }
                 .onFailure { Logx.w(TAG, "开机重排失败：${it.message}") }
+
+            /*
+             * QQ 桥接也在这里拉起来。
+             *
+             * 不然要等用户下次主动打开 App 才连上 —— 而「后台一直收消息」
+             * 正是这个功能唯一的价值。升级后（MY_PACKAGE_REPLACED）同理，
+             * 装新包会把服务杀掉，不补这一下，用户会以为新版本坏了。
+             *
+             * BOOT_COMPLETED / MY_PACKAGE_REPLACED 属于 Android 12 后台
+             * 起前台服务的豁免场景；仍然包一层，拿不到豁免时不至于崩。
+             */
+            if (settings.qq.enabled) {
+                runCatching { QqService.start(context) }
+                    .onFailure { Logx.w(TAG, "开机启动 QQ 桥接失败：${it.message}") }
+            }
             return
         }
         if (intent.action != BiliSchedule.ACTION_RUN) return

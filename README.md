@@ -73,6 +73,8 @@ DSH 官方运行时需要 Node 与本机工具链，搬到手机上会把包体�
 - 图片上传前压到长边 512 / JPEG 80（按路径与修改时间缓存）
 - 对话内直接显示模型产出或引用的图片、视频（支持多模态的模型可读图）
 - 系统提示词预设：Vibe Coding / 极简 / 代码评审 / 排障 / 讲解 / 自定义
+- **QQ 双向聊天**：接本机的 OneBot 后端（NapCat / SnowLuma），私聊与群里被点名的消息直接进对话，
+  回答自动发回；群里默认要 @ 或命中前缀，回复不带任何工具能力
 
 手机版另有：按时段问候的空状态、供应商 / 模型 / 思考强度三层药丸、
 悬浮输入胶囊（＋ / 输入 / 发送）、左上角历史抽屉（搜索 + 按置顶/今天/昨天/7 天/30 天分组）。
@@ -327,6 +329,7 @@ app/src/main/java/com/dshwatch/
 | [CHANGELOG.md](CHANGELOG.md) | 逐版本变更，与 App 内「关于 → 更新日志」同源 |
 | [docs/PROJECT-DETAILS.md](docs/PROJECT-DETAILS.md) | 架构、对话引擎、工具循环、MCP、插件、构建链 |
 | [docs/CLOUD.md](docs/CLOUD.md) | 云端编译（GitHub Actions）配置 |
+| [docs/qq-bridge.md](docs/qq-bridge.md) | QQ 双向聊天：Termux 里起后端、设置项、触发规则与排错 |
 | [docs/releases/](docs/releases/) | 各版本发布说明与根因分析 |
 | [docs/HISTORY.md](docs/HISTORY.md) | 早期开发日志存档（v1.0–v1.4） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 构建、测试、提交与 PR 约定 |

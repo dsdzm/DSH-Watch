@@ -746,6 +746,16 @@ data class AppSettings(
      * 必须由用户显式开启并确认工具清单。
      */
     val mcpServers: List<McpServerConfig> = emptyList(),
+
+    // ---------------- QQ ----------------
+    /**
+     * QQ 桥接。
+     *
+     * 独立成一个嵌套对象而不是往这里再铺十几个字段：这一整块是**可选功能**，
+     * 绝大多数用户永远不开；摊平之后每次读设置都要在一堆 qqXxx 里找东西，
+     * 序列化出来的老存档也会多出一大截无关的键。
+     */
+    val qq: QqSettings = QqSettings(),
 ) {
     val activeProvider: Provider? get() = providers.firstOrNull { it.id == activeProviderId }
         ?: providers.firstOrNull()

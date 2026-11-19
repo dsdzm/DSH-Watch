@@ -245,6 +245,54 @@ class AppContainer(private val app: Context) {
         mediaRoot = { mediaRoot },
     ).also { CrashLog.mark("对话引擎已构造") }
 
+    // ---------------- QQ 桥接 ----------------
+
+    /** OneBot 客户端，跟着设置里的地址 / token 走 */
+    val oneBot = com.dshwatch.net.qq.OneBotClient(json)
+
+    /**
+     * QQ 专用引擎。
+     *
+     * **必须是独立实例。** 主引擎的「当前会话」由界面控制，用户正在看的
+     * 是哪一段，后台不该改；反过来 QQ 来消息时把主引擎切走，用户眼前的
+     * 对话会突然变成「QQ 群 123456」。
+     *
+     * 两件强制项写在这里而不是运行时判断：
+     *  - `forceAgentOff`：QQ 消息来自外部，可能是群里任何人，不能让它自动
+     *    执行工具（装应用、改屏幕、读写文件）；
+     *  - `extraSystemPrompt`：QQ 不渲染 Markdown，得让模型按纯文本短句说话。
+     */
+    private val qqEngine = ChatEngine(
+        appScope = appScope,
+        settingsRepo = settingsRepo,
+        keyStore = keyStore,
+        store = conversationStore,
+        usageRepo = usageRepo,
+        backends = backends,
+        perfProvider = { _perf.value },
+        toolRegistry = { _toolRegistry.value },
+        workspaceRoot = { workspaceStore.rootPath() },
+        promptChannel = promptChannel,
+        roleCard = { id -> roleCardStore.load(id) },
+        memoryReader = { id -> memoryStore.read(id) },
+        json = json,
+        mediaApi = mediaApi,
+        mediaRoot = { mediaRoot },
+        forceAgentOff = true,
+        extraSystemPrompt = { com.dshwatch.domain.qq.QqBridge.QQ_PROMPT },
+    )
+
+    /** QQ ↔ 对话的桥。轮询由 [com.dshwatch.service.QqService] 驱动 */
+    val qqBridge = com.dshwatch.domain.qq.QqBridge(
+        appContext = app,
+        settingsRepo = settingsRepo,
+        engine = qqEngine,
+        store = conversationStore,
+        client = oneBot,
+        json = json,
+        scope = appScope,
+    )
+
     /**
      * 应用内更新：检查、下载、安装的状态中心。
      *

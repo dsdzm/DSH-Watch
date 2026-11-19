@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Memory
@@ -163,6 +164,14 @@ private fun m3eSummaryOf(id: String, settings: AppSettings, s: com.dshwatch.ui.i
             }
         }
 
+        SettingsGroups.QQ -> when {
+            !settings.qq.enabled -> "已关闭"
+            else -> buildList {
+                if (settings.qq.privateEnabled) add("私聊")
+                if (settings.qq.groupEnabled) add("群")
+            }.joinToString(" + ").ifBlank { "已开启" }
+        }
+
         SettingsGroups.CHAT -> buildList {
             if (settings.showReasoning) add(s.showReasoning)
             if (settings.autoScroll) add(s.autoScroll)
@@ -206,6 +215,7 @@ internal fun m3eGroupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.PLUGINS -> Icons.Outlined.Extension
     SettingsGroups.MCP -> Icons.Outlined.Hub
     SettingsGroups.BILI -> Icons.Outlined.Videocam
+    SettingsGroups.QQ -> Icons.Outlined.Forum
     SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Hub
@@ -117,6 +118,7 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     SettingsGroups.PLUGINS -> Icons.Outlined.Extension
     SettingsGroups.MCP -> Icons.Outlined.Hub
     SettingsGroups.BILI -> Icons.Outlined.Videocam
+    SettingsGroups.QQ -> Icons.Outlined.Forum
     SettingsGroups.CHAT -> Icons.Outlined.ChatBubbleOutline
     SettingsGroups.APPEARANCE -> Icons.Outlined.Palette
     SettingsGroups.FILES -> Icons.Outlined.FolderOpen
@@ -135,6 +137,17 @@ private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String 
             else -> ""
         }
         listOf(settings.agentMode.label, exec).filter { it.isNotBlank() }.joinToString(" · ")
+    }
+
+    SettingsGroups.QQ -> {
+        val q = settings.qq
+        when {
+            !q.enabled -> if (s.isChinese) "已关闭" else "Off"
+            else -> buildList {
+                if (q.privateEnabled) add(if (s.isChinese) "私聊" else "private")
+                if (q.groupEnabled) add(if (s.isChinese) "群" else "group")
+            }.joinToString(" + ").ifBlank { if (s.isChinese) "已开启" else "On" }
+        }
     }
 
     SettingsGroups.PLUGINS -> {

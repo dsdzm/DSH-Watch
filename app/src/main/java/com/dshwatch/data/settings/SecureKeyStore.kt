@@ -179,6 +179,17 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         runCatching { prefs.edit().remove(k(BILI_SCOPE, FIELD_BILI_COOKIE)).apply() }
     }
 
+    /**
+     * 通用加密读写。
+     *
+     * 给协议层用：QQ 登录态这类东西是二进制票据，不适合在密钥库里
+     * 一种一种地开字段，交由调用方自己编码后整体存进来。
+     * 仍走同一套加密、同一套降级逻辑，不额外开一条明文路径。
+     */
+    fun getSecret(scope: String, field: String): String? = get(k(scope, field))
+
+    fun putSecret(scope: String, field: String, value: String?) = put(k(scope, field), value)
+
     /** 只回显长度与首键，够用来确认「填对了没有」，又不会把凭证显示在屏幕上 */
     fun maskedBiliCookie(): String {
         val raw = getBiliCookie()?.trim().orEmpty()

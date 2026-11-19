@@ -47,8 +47,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -154,6 +157,16 @@ class ChatEngine(
     private val mediaApi: com.dshwatch.net.media.MediaApi? = null,
     /** 媒体落盘根目录（通常是 filesDir/media） */
     private val mediaRoot: () -> java.io.File = { java.io.File("") },
+    /**
+     * 强制关闭 agent 工具面。
+     *
+     * 专供 QQ 桥接：那边的用户消息来自**外部**（可能是群里的任何人），
+     * 让它自动跑工具等于把设备操作权限交给一个陌生人的一句话。
+     * 设 true 后无论全局 agentMode 是什么，这一实例都不带工具、不弹审批。
+     */
+    private val forceAgentOff: Boolean = false,
+    /** 追加在系统提示末尾的一段（QQ 场景的「回复要短」之类），空表示不加 */
+    private val extraSystemPrompt: () -> String = { "" },
 ) {
 
     private val _conversation = MutableStateFlow<Conversation?>(null)
@@ -274,6 +287,28 @@ class ChatEngine(
 
     private val _approval = MutableStateFlow<PendingApproval?>(null)
     val approval: StateFlow<PendingApproval?> = _approval.asStateFlow()
+
+    /**
+     * 一轮真正说完了。
+     *
+     * 只给「没有后续工具调用」的收尾发 —— 工具循环中间的 finalize(DONE)
+     * 是中间态，把它当成结束会让 QQ 桥接把半句话发出去，然后下一轮再发一次。
+     *
+     * 为什么用事件流而不是让调用方轮询 [messages]：桥接侧要的是
+     * 「这一轮的结果」，轮询得自己判断 streaming 何时变 false、再回读最后一条，
+     * 两处状态一错位就会取到上一条回答。事件只发一次，带 conversationId
+     * 让多会话（QQ 的私聊与群）不会互相抢。
+     */
+    private val _turnDone = MutableSharedFlow<TurnDone>(extraBufferCapacity = 16)
+    val turnDone: SharedFlow<TurnDone> = _turnDone.asSharedFlow()
+
+    /** 一轮对话的最终结果，见 [turnDone] */
+    data class TurnDone(
+        val conversationId: String,
+        val messageId: String,
+        val text: String,
+        val status: MessageStatus,
+    )
 
     /** agent 正在等用户回答的问题 */
     private val _question = MutableStateFlow<PendingQuestion?>(null)
@@ -1025,7 +1060,7 @@ class ChatEngine(
 
         // 3) Agent 开关
         val registry = toolRegistry()
-        val agentOn = !isRoleplay &&
+        val agentOn = !isRoleplay && !forceAgentOff &&
             settings.agentMode != AgentMode.OFF &&
             provider.type == ProviderType.OPENAI_COMPAT &&
             registry.tools.isNotEmpty()
@@ -1609,6 +1644,27 @@ class ChatEngine(
 
         setStreaming(false)
         _live.value = LiveDelta()
+
+        /*
+         * 这一轮说完了：把定稿文本交给在外面等着的通道（QQ 桥接）。
+         *
+         * 放在这里而不是每个 break 之前 —— 工具循环有好几个出口
+         * （正常结束、被拒、停滞、步数到顶），逐个加一处迟早漏一个，
+         * 而漏掉的那个出口会让 QQ 那边永远等不到回复。循环结束后的
+         * 这一个点，所有出口都会经过。
+         */
+        val finalMsg = _messages.value.lastOrNull { it.id == lastMessageId }
+        if (finalMsg != null) {
+            _turnDone.tryEmit(
+                TurnDone(
+                    conversationId = conv.id,
+                    messageId = finalMsg.id,
+                    text = finalMsg.content,
+                    status = finalMsg.status,
+                )
+            )
+        }
+
         /*
          * 设备操控的悬浮条跟着这一轮一起收起。
          *
@@ -2079,13 +2135,17 @@ class ChatEngine(
         // Agent 模式下追加一段工具使用约定：
         // 不加的话模型经常把工具当装饰不用，或者凭记忆编造实时信息。
         //
-        val agentHint = if (settings.agentMode != AgentMode.OFF) {
+        val agentHint = if (settings.agentMode != AgentMode.OFF && !forceAgentOff) {
             // 只写「怎么用」，参数细节留在各工具的 description 里 —— 两边不重复讲
             "\n\n" + AgentGuide.PROMPT + workspaceHint(workDir)
         } else {
             ""
         }
-        return base + agentHint
+        // QQ 等外部通道的附加约定（回复要短、不要用 Markdown 表格…）。
+        // 主引擎这里是空串，不影响任何现有行为。
+        val extra = extraSystemPrompt().trim()
+        val extraBlock = if (extra.isEmpty()) "" else "\n\n" + extra
+        return base + agentHint + extraBlock
     }
 
     /**

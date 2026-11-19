@@ -180,6 +180,9 @@ interface AppStrings {
 
     // B站
     val groupBili: String
+
+    /** QQ 桥接（把 QQ 消息接进对话） */
+    val groupQq: String
     val biliEnable: String
     val biliEnableHint: String
     val biliComment: String
@@ -768,6 +771,7 @@ object Zh : AppStrings {
     override val mcpEmpty = "还没有添加服务器"
 
     override val groupBili = "刷 B站"
+    override val groupQq = "QQ 消息"
     override val biliEnable = "启用 B站工具"
     override val biliEnableHint = "搜索、读字幕、写日报；关掉后模型看不到 bili_* 工具"
     override val biliComment = "允许发评论"
@@ -1434,6 +1438,7 @@ object En : AppStrings {
     override val mcpEmpty = "No servers yet"
 
     override val groupBili = "Bilibili"
+    override val groupQq = "QQ bridge"
     override val biliEnable = "Bilibili tools"
     override val biliEnableHint = "Search, subtitles, daily digest. Off = the bili_* tools disappear"
     override val biliComment = "Allow commenting"
