@@ -199,15 +199,17 @@ internal class MsfClient(
         var resp = call("StatSvc.register", body, login = true)
         // 这个命令的回包有时是 oicq 包装（首字节 0x02，后面 2 字节包长）。
         // 直接喂给 JCE 会把包长当成字段长度，报「还差 1785 万字节」这种数字。
-        SsoFrame.peelOicq(resp)?.takeIf { it.isNotEmpty() }?.let { peeled ->
-            if (runCatching { StatSvcRegister.replyCode(peeled) }.isSuccess) resp = peeled
-        }
-        // 回包结构不对时说清楚收到的是什么，而不是让 JceReader 抛一句「包长度不够」
-        val code = runCatching { StatSvcRegister.replyCode(resp) }.getOrElse {
-            throw IllegalStateException(
-                "上线注册的回包不认识（${resp.size} 字节，开头 ${resp.hex()}）；$lastReply",
+        val peeled = SsoFrame.peelOicq(resp)?.takeIf { it.isNotEmpty() }
+        resp = when {
+            peeled != null && StatSvcRegister.looksLikeReply(peeled) -> peeled
+            StatSvcRegister.looksLikeReply(resp) -> resp
+            // 结构对不上时不能当成功：replyCode 读不出来会退回 0，
+            // 那样任何垃圾包都会「通过」，后面的取消息就全靠运气
+            else -> throw IllegalStateException(
+                "register 回包认不出（${resp.size} 字节，开头 ${resp.hex(40)}）；$lastReply",
             )
         }
+        val code = StatSvcRegister.replyCode(resp)
         if (code != 0) {
             throw IllegalStateException("上线注册被拒（replyCode=$code；$lastReply）")
         }

@@ -92,6 +92,21 @@ internal class JceWriter(initial: Int = 256) {
         out.bytes(v)
     }
 
+    /**
+     * `map<string, byte[]>`，容器里的元素同样要带「tag 0 + 类型」的头。
+     *
+     * 目前只有一处用到：`RequestPacket.sBuffer` 的版本 3 形态
+     * （`RequestDataVersion3`，字段 0 就是这张表）。
+     */
+    fun stringBytesMap(tag: Int, entries: List<Pair<String, ByteArray>>) {
+        head(JceType.MAP, tag)
+        out.int(entries.size)
+        for ((k, v) in entries) {
+            string(0, k)
+            bytes(0, v)
+        }
+    }
+
     fun toByteArray(): ByteArray = out.toByteArray()
 }
 
@@ -117,6 +132,7 @@ internal class JceReader(private val data: ByteArray) {
                 r.bytes(r.int())
             }
             JceType.ZERO -> 0
+            JceType.MAP -> readMap()
             JceType.STRUCT_BEGIN -> {
                 skipStruct()
                 null
@@ -135,6 +151,55 @@ internal class JceReader(private val data: ByteArray) {
         var tag = (b shr 4) and 0x0F
         if (tag == 0x0F) tag = r.byte()
         return type to tag
+    }
+
+    /**
+     * map 的 key/value 在容器里也是「tag 0 + 类型」开头，所以元素要单独读。
+     *
+     * 值的类型不定：版本 3 的 `RequestDataVersion3` 是 `map<string, byte[]>`，
+     * 版本 2 的 `RequestDataVersion2` 是 `map<string, map<string, byte[]>>`。
+     * 服务端两种都会用，所以这里返回 `Any?`，让调用方自己看是字节还是嵌套表。
+     */
+    private fun readMap(): Map<String, Any?> {
+        val n = r.int()
+        val out = LinkedHashMap<String, Any?>(n)
+        repeat(n) {
+            val k = readMapKey()
+            val v = readMapValue()
+            out[k] = v
+        }
+        return out
+    }
+
+    private fun readMapKey(): String {
+        val (type, _) = head()
+        return when (type) {
+            JceType.STRING1 -> String(r.bytes(r.byte()), Charsets.UTF_8)
+            JceType.STRING4 -> String(r.bytes(r.int()), Charsets.UTF_8)
+            JceType.ZERO -> ""
+            else -> {
+                skipValue(type)
+                ""
+            }
+        }
+    }
+
+    private fun readMapValue(): Any? {
+        val (type, _) = head()
+        return when (type) {
+            JceType.SIMPLE_LIST -> {
+                r.byte() // 元素类型 = BYTE
+                r.bytes(r.int())
+            }
+            JceType.STRING1 -> String(r.bytes(r.byte()), Charsets.UTF_8)
+            JceType.STRING4 -> String(r.bytes(r.int()), Charsets.UTF_8)
+            JceType.MAP -> readMap()
+            JceType.ZERO -> ByteArray(0)
+            else -> {
+                skipValue(type)
+                null
+            }
+        }
     }
 
     private fun skipStruct() {
