@@ -242,6 +242,7 @@ object PluginArchive {
          */
         val assets = ArrayList<CordisTranslator.Source>()
         var sourceBytes = 0L
+        var assetBytes = 0L
         var skippedSources = 0
         var skippedBig = 0
 
@@ -283,10 +284,23 @@ object PluginArchive {
              * 读到清单之前谁也不知道后面还有没有。代价是几份 JS 进内存，
              * 收益是「作者只发了 npm 包」时不用让用户回去求人。
              */
-            val wantsSource = isFile && (isSourceName(base) || isPresetAsset(name0)) &&
+            /*
+             * 源码与预设声明**各用各的配额**。
+             *
+             * 共用一份时，dsh-purge 的 163 个 `.js` 会把 160 个名额占满 ——
+             * `presets/` 在 tar 里排在 `lib/` 后面，轮到它时名额已尽，
+             * 两份真正定义预设的文件被跳过，转译只能回头去 JS 里猜。
+             * 这是「读了 160 份源码，预设却全是内部规则说明」的直接原因。
+             */
+            val srcOk = isFile && isSourceName(base) &&
                 size <= CordisTranslator.MAX_FILE &&
-                sources.size + assets.size < CordisTranslator.MAX_FILES &&
+                sources.size < CordisTranslator.MAX_SOURCES &&
                 sourceBytes + size <= CordisTranslator.MAX_TOTAL
+            val assetOk = isFile && isPresetAsset(name0) &&
+                size <= CordisTranslator.MAX_FILE &&
+                assets.size < CordisTranslator.MAX_ASSETS &&
+                assetBytes + size <= CordisTranslator.MAX_ASSET_TOTAL
+            val wantsSource = srcOk || assetOk
             val wantsMeta = size <= MAX_MEMBER && (
                 isMeta ||
                     (isFile && (base == MANIFEST_NAME || base == "package.json"))
@@ -333,15 +347,15 @@ object PluginArchive {
                             pkgName = packageName(body)
                         }
                         body != null && isSourceName(baseName) &&
-                            sources.size + assets.size < CordisTranslator.MAX_FILES &&
+                            sources.size < CordisTranslator.MAX_SOURCES &&
                             sourceBytes + body.size <= CordisTranslator.MAX_TOTAL -> {
                             sourceBytes += body.size
                             sources += CordisTranslator.Source(name, String(body, Charsets.UTF_8))
                         }
                         body != null && isPresetAsset(name) &&
-                            sources.size + assets.size < CordisTranslator.MAX_FILES &&
-                            sourceBytes + body.size <= CordisTranslator.MAX_TOTAL -> {
-                            sourceBytes += body.size
+                            assets.size < CordisTranslator.MAX_ASSETS &&
+                            assetBytes + body.size <= CordisTranslator.MAX_ASSET_TOTAL -> {
+                            assetBytes += body.size
                             assets += CordisTranslator.Source(name, String(body, Charsets.UTF_8))
                         }
                     }
@@ -558,16 +572,33 @@ object PluginArchive {
     }
 
     /**
-     * 独立成文件的预设正文。
+     * 独立成文件的预设正文或声明。
      *
-     * 只认 `presets/` 或 `prompts/` 目录下的文本文件 —— 包根的 README、CHANGELOG、
-     * LICENSE 也很长，但它们是给人看的，当预设导进去只会多出三条没用的选项。
+     * 只认 `presets/` `prompts/` `agents/` `personas/` 下的文本与声明文件 ——
+     * 包根的 README、CHANGELOG、LICENSE 也很长，但它们是给人看的，
+     * 当预设导进去只会多出三条没用的选项。
+     *
+     * ## 1.24.1：把 `.yml` `/.yaml` `/.json` 收进来
+     *
+     * 上一版只认 `.md`，于是 dsh-purge 的 `presets/redteam/preset.yml`
+     * 整份被跳过 —— 里面才是「红队模式」的正文。转译器读不到它，
+     * 只好退回去从 JS 里猜，猜出一堆内部规则说明。
+     *
+     * 深度限一层：`presets/redteam/preset.yml` 是预设，
+     * `presets/redteam/skills/xxx.md` 是随包技能文档，不是预设。
      */
     private fun isPresetAsset(path: String): Boolean {
         val p = path.lowercase()
         if (p.contains("/node_modules/") || p.startsWith("node_modules/")) return false
-        if (!p.endsWith(".md") && !p.endsWith(".txt") && !p.endsWith(".prompt")) return false
-        return p.contains("/presets/") || p.contains("/prompts/") ||
-            p.startsWith("presets/") || p.startsWith("prompts/")
+        if (PRESET_EXT.none { p.endsWith(it) }) return false
+        val dir = PRESET_DIRS.firstOrNull { p.startsWith("$it/") || p.contains("/$it/") } ?: return false
+        val mark = "/$dir/"
+        val at = p.lastIndexOf(mark)
+        val rest = if (at >= 0) p.substring(at + mark.length) else p.substring(dir.length + 1)
+        return rest.count { it == '/' } <= 1
     }
+
+    private val PRESET_DIRS = listOf("presets", "prompts", "agents", "personas")
+
+    private val PRESET_EXT = listOf(".md", ".txt", ".prompt", ".yml", ".yaml", ".json")
 }

@@ -42,7 +42,7 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
 
 导入前会跑一遍完整校验，过了才落盘；同名 id 重复导入是覆盖，不会堆两层。
 
-两条路的配额各 12 个，单个清单 16 000 字符（tgz 里解出来的清单同样受这个限制）。
+两条路的配额各 12 个，单个清单 48 000 字符（tgz 里解出来的清单同样受这个限制）。
 包本身可以到 32 MB —— 解析是流式的，只要清单那一条，其余条目直接跳过，
 所以包里放多少截图都不影响导入。导入的插件在文件系统里没有对应文件，
 所以单独给了「移除导入的插件」。
@@ -93,7 +93,7 @@ APK 从 8 MB 推到 200 MB，还得逐个补 sqlite、sandbox、ripgrep 的移�
 | `tools.when.model` | 同上，只在模型匹配时生效 |
 | `presets[].id` | 预设 id，`[a-z0-9][a-z0-9_-]{1,23}`；全局 id 是 `插件id/预设id` |
 | `presets[].name` | 选择器里显示的名字 |
-| `presets[].systemPrompt` | 选中后作为系统提示，最多 2 000 字 |
+| `presets[].systemPrompt` | 选中后作为系统提示，最多 6 000 字 |
 | `presets[].opening` | 新建对话时自动插入的开场白，可省略 |
 
 `prompt`、`tools`、`presets` 至少写一个，全空等于装了个寂寞，会被拒收。
@@ -170,9 +170,26 @@ tar czf dsh-plugin-my-1.0.0.tgz package/
 包里的清单文件名必须是 `dsh-plugin.json`，位置不限（会在所有条目里找，
 有多份时取路径最浅的那份）。
 
-**官方 Cordis 插件装不了**，这不是没做：那种包里是 `package.json` + JS，
-靠 `apply(ctx)` 在 Node 里跑。手表上没有 Node 运行时。导入时会明确告诉
-用户「这是 Cordis 插件」，而不是静默失败。
+**官方 Cordis 插件可以在导入时转译**，但它能留下的只有提示词。那种包里是
+`package.json` + JS，靠 `apply(ctx)` 在 Node 里跑；手表上没有 Node 运行时，
+所以工具注册、配置读写、钩子这些一律丢弃，只把「最终会写进系统提示的那些话」
+抽成一份草稿，导入前让你逐条核对。
+
+转译优先读包里的 `presets/`：
+
+| 包里的东西 | 转成 |
+|---|---|
+| `presets/<名字>/`（DSH 的 agent 预设目录） | 一条预设：名字与说明取 `preset.yml`，正文取同目录 `agent.cordis.yml` 的 `config.prefix` |
+| `presets/<名字>.md` / `.yml` | 一条预设，文件名即名字，全文即正文 |
+| `lib/*.js` 里的字符串字面量 | 兜底：只有在没有任何 `presets/` 时才猜，且只猜「短名字 + 长正文」的成对写法 |
+
+一条预设常被拆成两个文件（`preset.yml` 只有 `name`/`description`/`order`，
+正文在同目录的 `agent.cordis.yml`），所以按**目录**合并，一个目录一条预设。
+
+`presets/` 下超过一层子目录的文件（例如 `presets/redteam/skills/recon.md`）
+是随包技能文档，不会被当成预设。有 `presets/` 声明时，JS 里的长段中文
+**不会**被当成提示词 —— 那些通常是角色职责、评分口径之类给宿主内部看的说明，
+抽出来只会让每条对话都先背一遍内部文档。
 
 ## 安装
 

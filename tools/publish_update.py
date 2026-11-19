@@ -37,6 +37,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -231,6 +232,45 @@ def check_beta_scope(version_name: str, repo: str, token, allow_minor: bool) -> 
     )
 
 
+def check_variant(apk: Path) -> None:
+    """
+    拒绝 debug 包。
+
+    发过一次：`assembleDebug` 的产物包名是 `com.dshwatch.debug`、用 debug 证书签名、
+    R8 没开，80 MB。传上去之后老用户既收不到更新（应用 id 不同），
+    装上也和正式版并存成两个图标。
+
+    这里不调 aapt/apksigner（发布机上不一定有），直接读 zip 里的 manifest 与证书：
+    包名和 "-debug" 后缀在二进制 XML 的字符串池里是明文，证书 DN 在 DER 里也是明文。
+    """
+    with zipfile.ZipFile(apk) as z:
+        manifest = z.read("AndroidManifest.xml")
+
+    # 二进制 XML 的字符串池可能是 UTF-8 也可能是 UTF-16LE，两种都要查。
+    # 实测 AGP 8.x 把包名写成 UTF-16LE，只查 UTF-8 会漏。
+    hits = any(
+        needle in manifest
+        for needle in (b"com.dshwatch.debug", "com.dshwatch.debug".encode("utf-16-le"))
+    )
+    if hits:
+        sys.exit(
+            "这是 debug 包（包名 com.dshwatch.debug），不能发。\n"
+            "  · 应用 id 与正式版不同，老用户收不到更新；\n"
+            "  · 没开 R8，包体积是 release 的 6~7 倍；\n"
+            "  · 装上去会和正式版并存，出现两个图标。\n\n"
+            "改用 release 产物：gradlew assembleRelease\n"
+            f"  默认路径 {DEFAULT_APK.relative_to(ROOT)}"
+        )
+
+    # v3 签名把证书放在 APK Signing Block 里，不是 META-INF/*.RSA，
+    # 所以直接全文找 DN —— DER 里的 DN 是明文，够用且不用依赖 apksigner。
+    if b"Android Debug" in apk.read_bytes():
+        sys.exit(
+            "这个包的签名是 Android 调试证书，装不到正式版上面（签名不符）。\n"
+            "  改用 release 产物：gradlew assembleRelease"
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="发布应用更新到 GitHub Releases")
     ap.add_argument("apk", nargs="?", default=str(DEFAULT_APK), help="APK 路径")
@@ -253,6 +293,8 @@ def main() -> int:
     apk = Path(args.apk)
     if not apk.is_file():
         sys.exit(f"找不到 APK：{apk}")
+
+    check_variant(apk)
 
     version_code, version_name = read_version()
     notes = args.notes or notes_from_changelog(version_name)

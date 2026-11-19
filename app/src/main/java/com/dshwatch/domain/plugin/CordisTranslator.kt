@@ -45,8 +45,18 @@ object CordisTranslator {
      */
     const val MAX_FILE = 2 * 1024 * 1024
 
-    /** 一个包里最多读几份源码。带 `lib/` + `presets/` 的包通常在 60 份以内 */
-    const val MAX_FILES = 160
+    /** 一个包里最多读几份**源码**。带 `lib/` 的包通常在 60 份以内，留一倍余量 */
+    const val MAX_SOURCES = 160
+
+    /**
+     * 一个包里最多读几份**预设声明**。
+     *
+     * 与源码分开记账。共用一份配额时，dsh-purge 的 163 个 `.js` 会把 160 的
+     * 名额占满，而 `presets/` 在 tar 里排在 `lib/` 之后 —— 等到读它时
+     * 名额已经用光，最关键的两份 `preset.yml` / `agent.cordis.yml` 全部跳过。
+     * 表现就是：转译说「读入 160 份源码」，预设却是从 JS 里猜出来的。
+     */
+    const val MAX_ASSETS = 64
 
     /**
      * 所有源码的累计上限。
@@ -56,6 +66,9 @@ object CordisTranslator {
      */
     const val MAX_TOTAL = 16L * 1024 * 1024
 
+    /** 预设声明的累计上限。两条预设的正文加起来通常不到 100 KB */
+    const val MAX_ASSET_TOTAL = 4L * 1024 * 1024
+
     /** 一段候选要有多长才可能是提示词。短于这个数基本是键名、类名、日志前缀 */
     private const val MIN_LIT = 40
 
@@ -63,10 +76,10 @@ object CordisTranslator {
     private const val MIN_SCORE = 90
 
     /** 一条预设的提示词上限，与 [PluginManifest.MAX_PRESET_PROMPT] 对齐 */
-    private const val MAX_PRESET = 2_000
+    private const val MAX_PRESET = PluginManifest.MAX_PRESET_PROMPT
 
     /** 主提示词上限，与 [PluginManifest.MAX_PROMPT] 对齐 */
-    private const val MAX_APPEND = 4_000
+    private const val MAX_APPEND = PluginManifest.MAX_PROMPT
 
     /** `presets/` 下这些文件是索引或说明，不是预设本身 */
     private val ASSET_IGNORED = setOf("readme", "index", "changelog", "license", "contributing")
@@ -139,21 +152,57 @@ object CordisTranslator {
          * 原因是两者会抢同一段文字：一个写了三条预设的插件，最长那一段本来
          * 属于某条预设，把它再抄进 append 会让「选不选预设都一样」。
          *
-         * 两个来源都要看：代码里的 `{ name: '破甲', prompt: '…' }`，
-         * 以及 `presets/` 下的 `.md` 这种一条一个文件、文件名即预设名的写法。
-         * 按正文去重 —— 同一个文件被两种方式各认一次时，只留前面那一条。
+         * 来源分三档，优先级从高到低：
+         *  1. `presets/` 下的 `.yml` / `.yaml` / `.json` —— 结构化声明，
+         *     作者的预设就在里面（dsh-purge 的「红队模式」是
+         *     `presets/redteam/preset.yml` 的 `config.prefix`）；
+         *  2. `presets/` 下的 `.md` —— 一条一个文件，文件名即预设名；
+         *  3. 代码里的 `{ name: '破甲', prompt: '…' }` —— 启发式配对，
+         *     只在前两档都没有时才用。
+         *
+         * 第三档必须让位：源码里的长中文多半是**规则说明**（「## 指挥职责」
+         * 「数据规模翻倍」），把它们当预设，用户会得到一屏看起来像预设、
+         * 实际全是内部文档的条目 —— 而真正的预设一条都没进来。
          */
-        val presets = (pairPresets(joined) + assetPresets(bundle.assets))
-            .distinctBy { it.systemPrompt.trim() }
-            .take(PluginManifest.MAX_PRESETS)
+        val ids = HashSet<String>()
+        val hasDeclared = bundle.assets.any { isDeclared(it.path) }
+        val declared = declaredPresets(bundle.assets, ids)
+        val presets = when {
+            declared.isNotEmpty() -> declared
+            /*
+             * 有声明文件却一条也没解出来：说明这份 YAML 用了这里没覆盖的写法。
+             * 此时**仍然不回到源码里猜** —— 猜出来的东西一定不是作者的预设，
+             * 给它一个「已导入」的假象，比报错更难查。
+             */
+            hasDeclared -> assetPresets(bundle.assets, ids)
+            else -> pairPresets(joined, ids) + assetPresets(bundle.assets, ids)
+        }.distinctBy { it.systemPrompt.trim() }.take(PluginManifest.MAX_PRESETS)
         val usedByPreset = presets.map { it.systemPrompt.trim() }.toSet()
 
-        val main = strong.firstOrNull { it.first.text !in usedByPreset }
-            ?: weak.firstOrNull { it.first.text !in usedByPreset }
+        /*
+         * 有声明文件时，不再从源码里挑主提示词。
+         *
+         * 这条规则来自一次真实的错译：dsh-purge 的包里 `lib/identity.js`
+         * 写着角色职责、`lib/redteam/score-rules.js` 写着评分口径，它们都是
+         * 给宿主内部用的说明。抽一句当 append，等于每条对话都先背一遍
+         * 「## 指挥职责」—— 与插件真正想做的事（让用户选一条预设）无关。
+         */
+        val main = if (hasDeclared) {
+            null
+        } else {
+            strong.firstOrNull { it.first.text !in usedByPreset }
+                ?: weak.firstOrNull { it.first.text !in usedByPreset }
+        }
 
         if (main == null && presets.isEmpty()) {
+            val why = if (hasDeclared) {
+                "包里有一份 `presets/` 声明，但没从中解出正文 —— 可能用了这里没覆盖的 YAML 写法。" +
+                    "把这份包发给我，补一条解析规则就行。"
+            } else {
+                "它是一段只注册工具或只挂钩子的代码"
+            }
             return PluginLoader.Parsed.Err(
-                "$where 里没有一句像提示词的东西 —— 它是一段只注册工具或只挂钩子的代码。" +
+                "$where 里没有一句像提示词的东西 —— $why。" +
                     "手表上的插件不能执行代码，所以这个包转不出来。可以试：\n" +
                     "· 问作者有没有提供 $MANIFEST（声明式清单）；\n" +
                     "· 如果它只是想「少弹几个确认」，到「AI 能力 → 审批」里自己调。",
@@ -183,7 +232,10 @@ object CordisTranslator {
             return PluginLoader.Parsed.Err("$where 转译出来的草稿不合法：$why（源包的元信息可能不全）")
         }
 
-        return PluginLoader.Parsed.Ok(manifest, note(manifest, bundle, main, presets, scored.size))
+        return PluginLoader.Parsed.Ok(
+            manifest,
+            note(manifest, bundle, main, presets, scored.size, hasDeclared),
+        )
     }
 
     /** 核对说明。用户看完这段才决定要不要开开关 */
@@ -193,6 +245,7 @@ object CordisTranslator {
         main: Pair<Lit, Int>?,
         presets: List<PresetPart>,
         candidates: Int,
+        declared: Boolean,
     ): String {
         val lines = ArrayList<String>()
         val files = bundle.sources.size
@@ -219,6 +272,17 @@ object CordisTranslator {
         if (presets.isNotEmpty()) {
             lines += "· 认出 ${presets.size} 条预设：${presets.joinToString("、") { it.name }}。" +
                 "在供应商 → 提示词 → 预设里选。"
+            if (declared) {
+                /*
+                 * 说清「为什么这次没从源码里抽词」。
+                 *
+                 * 上一版从 `lib/identity.js` 里抽出「## 指挥职责」当预设，
+                 * 用户看到的是四条像模像样、却不是预设的条目 —— 不解释一句，
+                 * 他下次还会怀疑这个数字。
+                 */
+                lines += "· 预设取自包内 `presets/` 的声明文件，正文是其中的 " +
+                    "`config.prefix`；源码这次没有参与猜词（里面的长段中文多半是内部规则说明）。"
+            }
         }
         lines += "丢掉的部分：工具注册、配置读写、钩子 —— App 里没有 JS 运行时，" +
             "这些跑不了，转译只保留它会写进系统提示的那些话。"
@@ -420,17 +484,70 @@ object CordisTranslator {
 
     // ---------------- 预设配对 ----------------
 
+    /** 这类文件是「声明式预设」：交给 [PresetFiles] 解，不要当纯文本 */
+    private fun isDeclared(path: String): Boolean {
+        val p = path.lowercase()
+        return p.endsWith(".yml") || p.endsWith(".yaml") || p.endsWith(".json")
+    }
+
     /**
-     * 从候选里配出「名字 + 正文」的成对关系。
+     * 从 `presets/` 下的声明文件里读预设。
      *
-     * 没有做真正的语法解析 —— 那需要一整个 JS parser。用的是排版上的一个
-     * 稳定规律：一条预设的字面量顺序几乎总是「短名字 → 可选的说明 → 长正文」，
-     * 且三者距离很近（同在一个对象字面量里）。
+     * 这是**第一优先**的来源，也是 dsh-purge 这类包唯一正确的读法：
+     * 一条预设一个目录，`preset.yml` 里是组件装配单，
+     * `persona.config.prefix` 才是写给模型的那段话。
      *
-     * 误配的代价可控：配错的名字只是标题难看，正文仍然是对的；而漏配的
-     * 代价是整段提示词变成一条常驻的 append。所以这里偏向「宁可少配」——
-     * 只认「短段 ≤ 24 字、长段 ≥ 120 字、距离 ≤ 600 字符」这一种最干净的形态。
+     * 名字取文件里的 `name`；没有就用目录名（[PresetFiles.hintOf]）。
+     * 目录名往往就是 `redteam` 这种英文短名 —— 不如「红队模式」好看，
+     * 但它是**这条预设真实的名字**，比从正文里猜一个更像误导。
      */
+    private fun declaredPresets(
+        assets: List<Source>,
+        ids: MutableSet<String>,
+    ): List<PresetPart> {
+        val declared = assets.filter { isDeclared(it.path) }
+        if (declared.isEmpty()) return emptyList()
+
+        /*
+         * **按目录分组**，一个目录合成一条预设。
+         *
+         * dsh-purge 把一条预设拆成两个文件：
+         *
+         *   presets/redteam/preset.yml        name / description / order
+         *   presets/redteam/agent.cordis.yml  组件装配单，正文在 config.prefix
+         *
+         * 逐个文件读会得到两条残片：一条有名字没正文（被长度门槛丢掉），
+         * 一条有正文没名字（名字退成 `agent.cordis`）。合起来才是
+         * DSH 里看到的那一条「红队模式」。
+         */
+        val groups = declared.groupBy { it.path.substringBeforeLast('/', "") }
+        val out = ArrayList<PresetPart>()
+        for ((dir, files) in groups) {
+            if (out.size >= PluginManifest.MAX_PRESETS) break
+            var name = ""
+            var desc = ""
+            val bodies = ArrayList<String>()
+            for (file in files) {
+                for (p in PresetFiles.parse(file.path, file.text)) {
+                    if (name.isBlank()) name = p.name
+                    if (desc.isBlank()) desc = p.description
+                    if (p.prompt.isNotBlank()) bodies += p.prompt
+                }
+            }
+            val body = bodies.joinToString("\n\n").trim()
+            if (body.length < 20) continue
+            val title = name.ifBlank { PresetFiles.hintOf(files.first().path) }.trim()
+            if (title.isEmpty()) continue
+            out += PresetPart(
+                id = presetId(title, ids),
+                name = title.take(PluginManifest.MAX_PRESET_NAME),
+                description = desc.ifBlank { "来自 $dir" }.take(PluginManifest.MAX_DESC),
+                systemPrompt = clip(body, MAX_PRESET),
+            )
+        }
+        return out
+    }
+
     /**
      * 把 `presets/` 下的 `.md` 这类独立文件转成预设。
      *
@@ -438,10 +555,10 @@ object CordisTranslator {
      * 这一类往往比代码里抠出来的更完整：作者写 markdown 时不用考虑转义，
      * 段落、列表、加粗都会原样保留。
      */
-    private fun assetPresets(assets: List<Source>): List<PresetPart> {
+    private fun assetPresets(assets: List<Source>, ids: MutableSet<String>): List<PresetPart> {
         if (assets.isEmpty()) return emptyList()
-        val ids = HashSet<String>()
         return assets.mapNotNull { src ->
+            if (isDeclared(src.path)) return@mapNotNull null
             val text = src.text.trim()
             /*
              * 索引文件与说明文件要排掉，否则「本目录存放预设」会变成一条预设。
@@ -462,12 +579,28 @@ object CordisTranslator {
         }
     }
 
-    private fun pairPresets(all: List<Lit>): List<PresetPart> {        // 不排序：all 已经是「按文件顺序、文件内按出现位置」，排序会把不同文件的
+    /**
+     * 从候选里配出「名字 + 正文」的成对关系。
+     *
+     * 没有做真正的语法解析 —— 那需要一整个 JS parser。用的是排版上的一个
+     * 稳定规律：一条预设的字面量顺序几乎总是「短名字 → 可选的说明 → 长正文」，
+     * 且三者距离很近（同在一个对象字面量里）。
+     *
+     * 误配的代价可控：配错的名字只是标题难看，正文仍然是对的；而漏配的
+     * 代价是整段提示词变成一条常驻的 append。所以这里偏向「宁可少配」——
+     * 只认「短段 ≤ 24 字、长段 ≥ 40 字、距离 ≤ 900 字符」这一种最干净的形态。
+     *
+     * **它是兜底，不是主力。** 包里有 `presets/` 声明文件时，调用方
+     * 根本不会走到这里（见 [translate]）。这一档留给「预设写死在代码里」
+     * 的老式插件 —— 那些包的源码里没有角色职责、评分口径这类内部文档，
+     * 误配概率比 dsh-purge 低得多。
+     */
+    private fun pairPresets(all: List<Lit>, ids: MutableSet<String>): List<PresetPart> {
+        // 不排序：all 已经是「按文件顺序、文件内按出现位置」，排序会把不同文件的
         // 偏移量混在一起，配出跨文件的错误组合
         val shuffled = all
         val out = ArrayList<PresetPart>()
         val used = HashSet<Int>()
-        val ids = HashSet<String>()
 
         for (i in shuffled.indices) {
             if (out.size >= PluginManifest.MAX_PRESETS) break
@@ -533,7 +666,14 @@ object CordisTranslator {
      * 名字本来就该是给用户看的。
      */
     private fun looksLikeName(t: String): Boolean {
-        if (t.length !in 2..24) return false
+        if (t.length !in 2..PluginManifest.MAX_PRESET_NAME) return false
+        /*
+         * 以 `#` 开头的是 markdown 标题，不是名字。
+         *
+         * 上一版从 `lib/identity.js` 里抽出了「## 指挥职责」「## 当前 Desktop 实例」
+         * 当预设名 —— 它们是文档里的小标题，正好落在「短、含中文」的区间里。
+         */
+        if (t.startsWith("#")) return false
         if (t.any { it in "/\\.(){}[]=;:$<>|&*\"'`\n" }) return false
         if (t.any { it in "。！？；" }) return false
 

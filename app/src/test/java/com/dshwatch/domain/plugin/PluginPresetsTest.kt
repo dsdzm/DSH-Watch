@@ -78,8 +78,8 @@ class PluginPresetsTest {
     }
 
     @Test
-    fun `超过六条会被拒`() {
-        val items = (1..7).joinToString(",") { i ->
+    fun `超过上限会被拒`() {
+        val items = (1..PluginManifest.MAX_PRESETS + 1).joinToString(",") { i ->
             """{"id":"p$i","name":"预设$i","systemPrompt":"第 $i 条"}"""
         }
         val bad = """
@@ -92,7 +92,8 @@ class PluginPresetsTest {
         """.trimIndent()
         val parsed = PluginLoader.parse(bad)
         assertThat(parsed).isInstanceOf(PluginLoader.Parsed.Err::class.java)
-        assertThat((parsed as PluginLoader.Parsed.Err).message).contains("最多 6 条")
+        assertThat((parsed as PluginLoader.Parsed.Err).message)
+            .contains("最多 ${PluginManifest.MAX_PRESETS} 条")
     }
 
     // ================= 生效范围 =================

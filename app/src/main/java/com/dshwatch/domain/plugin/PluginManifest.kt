@@ -211,12 +211,16 @@ data class PluginManifest(
         /**
          * 一份清单的字符上限。
          *
-         * schema 3 把它从 8 000 提到 16 000：一条预设的提示词上限是 2 000，
-         * 六条就是 12 000，再加上 prompt 与 tools 段，8 000 明显不够。
+         * 演变：8 000（schema 1）→ 16 000（schema 3 加了预设）→ 48 000（1.24.1）。
+         * 最后一次是因为 dsh-purge 那种预设是一份**完整的 persona 配置**：
+         * 红队模式单条正文三四千字，还有「无限制模式」「子任务」几个变体。
+         * 硬卡在 16 000 会把正文拦腰截断 —— 用户看到的是一条「转译时截断」
+         * 的残篇，比没有更糟：它会照残篇执行。
+         *
          * 再大就不像「声明」而像「塞进来的一篇文章」了 —— 而且它要跟着
          * AppSettings 整块序列化进 DataStore。
          */
-        const val MAX_CHARS = 16_000
+        const val MAX_CHARS = 48_000
 
         const val MAX_PROMPT = 4_000
         const val MAX_NAME = 40
@@ -224,15 +228,15 @@ data class PluginManifest(
         const val MAX_AUTHOR = 40
         const val MAX_TOOLS = 64
 
-        /** 一个插件最多带几条预设。再多，选择器就要翻好几屏 */
-        const val MAX_PRESETS = 6
+        /** 一个插件最多带几条预设。dsh-purge 自带四条，留一倍余量 */
+        const val MAX_PRESETS = 8
 
-        /** 一个插件所有预设的提示词总量 */
-        const val MAX_PRESET_TOTAL = 8_000
+        /** 一个插件所有预设的提示词总量。按 8 条 × 3 000 字估，留出余量 */
+        const val MAX_PRESET_TOTAL = 24_000
 
-        const val MAX_PRESET_PROMPT = 2_000
+        const val MAX_PRESET_PROMPT = 6_000
         const val MAX_PRESET_OPENING = 600
-        const val MAX_PRESET_NAME = 20
+        const val MAX_PRESET_NAME = 30
 
         /**
          * 预设 id。只在插件内部唯一 —— 全局唯一性由「插件 id + 预设 id」拼出来，
