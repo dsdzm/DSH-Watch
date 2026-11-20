@@ -2,6 +2,7 @@ package com.dshwatch.net.qq.msf
 
 import com.dshwatch.core.Logx
 import com.dshwatch.net.qq.sso.ByteWriter
+import com.dshwatch.net.qq.sso.ConfigPush
 import com.dshwatch.net.qq.sso.DeviceProfile
 import com.dshwatch.net.qq.sso.Ecdh
 import com.dshwatch.net.qq.sso.MsfFrame
@@ -70,7 +71,14 @@ internal class MsfClient(
     private var seq = Random.nextInt(0x1000, 0x7FFF)
 
     /** 服务端在响应里回显的会话 id，后续请求要带回去 */
-    private var serverSessionId: ByteArray = ByteArray(0)
+    /**
+     * 会话 id：**由客户端生成、全程不变**，4 个随机字节。
+     *
+     * 不能留空，也不该拿服务端回包里的那个值 —— mirai 里叫
+     * `outgoingPacketSessionId`，一次连接一个，服务端只是回显。
+     * 留空时 0x0A 的注册包会被服务端直接丢掉，症状是「一个包都不回」。
+     */
+    private val sessionId: ByteArray = ByteArray(4).also { java.util.Random().nextBytes(it) }
 
     /** 取消息的游标。第一次为空，之后用服务端下发的那个 */
     var syncCookie: ByteArray = ByteArray(0)
@@ -162,7 +170,7 @@ internal class MsfClient(
             appId = device.subAppId,
             command = "wtlogin.exchange_emp",
             payload = payload,
-            sessionId = serverSessionId,
+            sessionId = sessionId,
             device = device,
             ksid = session.ksid,
             qimei = ByteArray(0),
@@ -185,10 +193,59 @@ internal class MsfClient(
     /**
      * `StatSvc.register`：把这条 TCP 登记成「某个人在线」。
      *
-     * 缺了它，服务端收得到包、也回得出错，但所有业务命令一律 -10008：
-     * 那个码真实含义是「这条连接没登录」，不是「包写错了」。
+     * 缺了它，服务端收得到包、也回得出错，但所有业务命令一律 -10008。
+     *
+     * ## 为什么要试三种
+     *
+     * 服务端对这一包的处理在不同通道上不一样，而**失败时它常常一个字节都不回**，
+     * 只能靠换通道把结论试出来：
+     *
+     * | 方案 | 依据 |
+     * |---|---|
+     * | `0x0A` + D2 | mirai 的做法：外层带 d2、正文用 d2Key 加密 |
+     * | `0x0B` + D2 | 业务通道。这条通道回包最稳定，只是有可能被判「未登录」 |
+     * | `0x0A` + 空钥 | 和换票同一个形态，用来区分「D2 不被认」还是「包本身不被认」 |
+     *
+     * 返回一行说明（成功时含耗时与心跳间隔）；全部失败时抛异常，异常里带每一档的结果。
      */
-    fun register() {
+    fun register(): String {
+        val log = ArrayList<String>()
+        for (plan in REGISTER_PLANS) {
+            val t0 = System.currentTimeMillis()
+            try {
+                val resp = attemptRegister(plan)
+                val code = StatSvcRegister.replyCode(resp)
+                if (code != 0) {
+                    log += "${plan.label} 被拒 replyCode=$code"
+                    continue
+                }
+                val ms = System.currentTimeMillis() - t0
+                val interval = StatSvcRegister.helloInterval(resp)
+                return buildString {
+                    append("通过（").append(plan.label).append("，").append(ms).append("ms")
+                    if (interval > 0) append("，心跳 ").append(interval).append("s")
+                    append("）")
+                    if (log.isNotEmpty()) append("；此前：").append(log.joinToString("；"))
+                }
+            } catch (t: Throwable) {
+                val why = t.message?.replace('\n', ' ')?.take(120) ?: t.javaClass.simpleName
+                log += "${plan.label} $why"
+                if (socket?.isClosed != false) break
+            }
+        }
+        throw IllegalStateException("三种通道都没有回音：\n  " + log.joinToString("\n  "))
+    }
+
+    private class RegisterPlan(
+        val label: String,
+        val type: Int,
+        val encrypt: MsfFrame.Encrypt,
+        /** 外层额外数据是否放 d2（只有 0x0A+D2 需要） */
+        val withD2: Boolean,
+        val timeoutMs: Int,
+    )
+
+    private fun attemptRegister(plan: RegisterPlan): ByteArray {
         val body = StatSvcRegister.online(
             uin = session.uin,
             guid = device.guid,
@@ -196,24 +253,35 @@ internal class MsfClient(
             osVersion = profile.osVersion,
             sdkLevel = profile.sdkLevel,
         )
-        var resp = call("StatSvc.register", body, login = true)
-        // 这个命令的回包有时是 oicq 包装（首字节 0x02，后面 2 字节包长）。
-        // 直接喂给 JCE 会把包长当成字段长度，报「还差 1785 万字节」这种数字。
-        val peeled = SsoFrame.peelOicq(resp)?.takeIf { it.isNotEmpty() }
-        resp = when {
-            peeled != null && StatSvcRegister.looksLikeReply(peeled) -> peeled
-            StatSvcRegister.looksLikeReply(resp) -> resp
-            // 结构对不上时不能当成功：replyCode 读不出来会退回 0，
-            // 那样任何垃圾包都会「通过」，后面的取消息就全靠运气
+        val seq = nextSeq()
+        val packet = MsfFrame.build(
+            type = plan.type,
+            encrypt = plan.encrypt,
+            key = session.d2Key,
+            seq = seq,
+            appId = device.subAppId,
+            uin = session.uin,
+            command = COMMAND_REGISTER,
+            body = body,
+            outerExtra = if (plan.withD2) session.d2 else ByteArray(0),
+            innerExtra = if (plan.type == MsfFrame.PROTOCOL_LOGIN) session.tgt else ByteArray(0),
+            imei = device.imeiBytes,
+            ksid = session.ksid,
+            sessionId = sessionId,
+        )
+        val raw = writeAndRead(packet, seq, COMMAND_REGISTER, plan.timeoutMs)
+        val resp = MsfFrame.parse(raw, session.d2Key)
+        val peeled = SsoFrame.peelOicq(resp.body)?.takeIf { it.isNotEmpty() }
+        return when {
+            peeled != null && StatSvcRegister.looksLikeReply(peeled) -> {
+                Logx.i(TAG, "register 回包是 oicq 包装")
+                peeled
+            }
+            StatSvcRegister.looksLikeReply(resp.body) -> resp.body
             else -> throw IllegalStateException(
-                "register 回包认不出（${resp.size} 字节，开头 ${resp.hex(40)}）；$lastReply",
+                "回包认不出（码 ${resp.code}、正文 ${resp.body.size}B ${resp.body.hex(40)}）",
             )
         }
-        val code = StatSvcRegister.replyCode(resp)
-        if (code != 0) {
-            throw IllegalStateException("上线注册被拒（replyCode=$code；$lastReply）")
-        }
-        Logx.i(TAG, "register 通过，服务端建议心跳 ${StatSvcRegister.helloInterval(resp)}s")
     }
 
     /** 心跳。服务端用这个判断客户端还在不在，一分钟一次就够 */
@@ -333,12 +401,12 @@ internal class MsfClient(
             body = body,
             // 0x0A 的外层额外数据放 d2；0x0B 那一格是序号，由 build 自己写
             outerExtra = if (login) session.d2 else ByteArray(0),
-            // SSO 头里的额外数据：登录之后每个包都要带 tgt，
-            // 服务端靠它把包和登记过的那条连接对上
-            innerExtra = session.tgt,
+            // SSO 头里的额外数据：只有登录型包（0x0A）放 tgt，
+            // 服务端靠它把包和登记过的那条连接对上；业务型包（0x0B）这一格是签名位
+            innerExtra = if (login) session.tgt else ByteArray(0),
             imei = device.imeiBytes,
             ksid = session.ksid,
-            sessionId = serverSessionId,
+            sessionId = sessionId,
         )
         // 序号或命令名任一匹配就算回包：0x0A 的响应不一定回显序号，
         // 0x0B 的响应不一定回显命令名。两个条件同时给，比只认一个稳。
@@ -361,8 +429,8 @@ internal class MsfClient(
     }
 
     private fun remember(command: String, sid: ByteArray) {
-        if (sid.isNotEmpty()) serverSessionId = sid
-        Logx.d(TAG, "收到 $command（会话 id ${sid.size} 字节）")
+        // 只记日志：会话 id 由我们生成，服务端回包里的那个不拿来回填
+        Logx.d(TAG, "收到 $command（服务端会话 id ${sid.size} 字节）")
     }
 
     /**
@@ -382,8 +450,11 @@ internal class MsfClient(
         packet: ByteArray,
         expectSeq: Int?,
         expectCommand: String? = null,
+        timeoutMs: Int = READ_TIMEOUT_MS,
     ): ByteArray = synchronized(this) {
         val s = socket ?: throw IllegalStateException("连接还没建立")
+        // 每种方案自己决定等多久：注册要试三档，不能每档都耗 15 秒
+        s.soTimeout = timeoutMs
         s.getOutputStream().apply {
             write(packet)
             flush()
@@ -407,7 +478,7 @@ internal class MsfClient(
                     "，期间收到 ${seen.size} 个包但都不是：${seen.joinToString("、")}"
                 }
                 throw IllegalStateException(
-                    "等「${expectCommand ?: "回包"}」超时 ${READ_TIMEOUT_MS / 1000}s" + detail +
+                    "等「${expectCommand ?: "回包"}」超时 ${timeoutMs / 1000}s" + detail +
                         (unparsed?.let { "；最后一个认不出的包 $it" } ?: ""),
                     e,
                 )
@@ -427,6 +498,8 @@ internal class MsfClient(
                 pending.addLast(parsed)
                 seen += "${parsed.command.ifEmpty { "无命令名" }}(${parsed.seq})"
                 Logx.d(TAG, "插播推送 ${parsed.command}（seq ${parsed.seq}），先攒着")
+                // 配置下发必须回执，不回服务端就不再往下走（注册会一直没回音）
+                if (parsed.command == ConfigPush.COMMAND) ackConfigPush(parsed)
             } else {
                 seen += "认不出的包"
             }
@@ -440,6 +513,45 @@ internal class MsfClient(
         }
         @Suppress("UNREACHABLE_CODE")
         throw IllegalStateException("unreachable")
+    }
+
+    /** 只发不收：推送回执发完继续等我们自己的回包 */
+    private fun send(packet: ByteArray) {
+        val s = socket ?: throw IllegalStateException("连接还没建立")
+        s.getOutputStream().apply {
+            write(packet)
+            flush()
+        }
+    }
+
+    /**
+     * 回执 `ConfigPushSvc.PushResp`。
+     *
+     * 服务端在换票成功后立刻推 `PushReq`（服务器列表、文件服务器地址），
+     * 客户端不回执它就一直等，之后的 `StatSvc.register` 不会有任何回应 ——
+     * 自检看到的是「收到 3 个推送包，然后彻底安静」，很容易误判成网络问题。
+     */
+    private fun ackConfigPush(push: MsfFrame.Response) {
+        val req = runCatching { ConfigPush.parse(push.body) }.getOrNull()
+        if (req == null) {
+            Logx.w(TAG, "ConfigPush 正文认不出（${push.body.size}B），没法回执")
+            return
+        }
+        val packet = MsfFrame.build(
+            type = MsfFrame.PROTOCOL_SIMPLE,
+            encrypt = MsfFrame.Encrypt.D2,
+            key = session.d2Key,
+            seq = push.seq,
+            appId = device.subAppId,
+            uin = session.uin,
+            command = ConfigPush.RESPONSE,
+            body = ConfigPush.respBody(req.type, req.seq),
+            imei = device.imeiBytes,
+            sessionId = sessionId,
+        )
+        runCatching { send(packet) }
+            .onSuccess { Logx.d(TAG, "已回执 ConfigPush.PushResp（type=${req.type} seq=${req.seq}）") }
+            .onFailure { Logx.w(TAG, "回执 PushResp 失败：${it.message}") }
     }
 
     /**
@@ -522,5 +634,13 @@ internal class MsfClient(
         private const val MAX_PACKET = 4 * 1024 * 1024
         /** 等响应时最多容忍几个插播包，防止服务端一直推、这边死等 */
         private const val MAX_PUSH_SKIP = 16
+        private const val COMMAND_REGISTER = "StatSvc.register"
+
+        /** 注册的三档方案，顺序即优先级 */
+        private val REGISTER_PLANS = listOf(
+            RegisterPlan("0x0A+D2", MsfFrame.PROTOCOL_LOGIN, MsfFrame.Encrypt.D2, withD2 = true, timeoutMs = 10_000),
+            RegisterPlan("0x0B+D2", MsfFrame.PROTOCOL_SIMPLE, MsfFrame.Encrypt.D2, withD2 = false, timeoutMs = 10_000),
+            RegisterPlan("0x0A+空钥", MsfFrame.PROTOCOL_LOGIN, MsfFrame.Encrypt.Empty, withD2 = false, timeoutMs = 8_000),
+        )
     }
 }

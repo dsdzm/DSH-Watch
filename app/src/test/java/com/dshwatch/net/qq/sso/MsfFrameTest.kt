@@ -195,6 +195,53 @@ class MsfFrameTest {
     }
 
     /**
+     * 0x0B 的**内层头**和 0x0A 完全是两回事：
+     *
+     * ```
+     * 0x0A：序号 | subAppId×2 | 12 字节填充 | tgt | 命令名 | 会话 id | imei | …
+     * 0x0B：命令名 | 会话 id | 额外数据 | qimei
+     * ```
+     *
+     * 照抄 0x0A 的头去发 0x0B，服务端会把 subAppId 当命令名长度，整包作废。
+     * 这一条把 0x0B 的明文头逐段读一遍钉住。
+     */
+    @Test
+    fun `业务型包的内层头只有命令名和会话 id`() {
+        val raw = MsfFrame.build(
+            type = MsfFrame.PROTOCOL_SIMPLE,
+            encrypt = MsfFrame.Encrypt.None,
+            key = ByteArray(16),
+            seq = 0x2233,
+            appId = 0x2002EDBD,
+            uin = 10001L,
+            command = "MessageSvc.PbGetMsg",
+            body = byteArrayOf(1, 2, 3),
+            imei = "imei".toByteArray(),
+            sessionId = byteArrayOf(2, 0xB0.toByte(), 0x5B, 0x8B.toByte()),
+        )
+        val r = ByteReader(raw, 4)
+        assertThat(r.int()).isEqualTo(MsfFrame.PROTOCOL_SIMPLE)
+        assertThat(r.byte()).isEqualTo(MsfFrame.Encrypt.None.code)
+        assertThat(r.int()).isEqualTo(0x2233) // 外层序号
+        assertThat(r.byte()).isEqualTo(0)
+        r.lv() // uin 段
+        r.int() // 内层头长度（含自身 4 字节），下面按顺序读
+
+        // 内层头：命令名打头，没有 subAppId，也没有 imei
+        val command = String(r.lv(), Charsets.UTF_8)
+        assertThat(command).isEqualTo("MessageSvc.PbGetMsg")
+        val sessionId = r.lv()
+        assertThat(sessionId.size).isEqualTo(4)
+        val extra = r.lv()
+        assertThat(extra.size).isEqualTo(0) // 签名位留空
+        val qimei = r.lv()
+        assertThat(qimei.size).isEqualTo(0)
+        // 头之后才是正文
+        val body = r.lv()
+        assertThat(body).isEqualTo(byteArrayOf(1, 2, 3))
+    }
+
+    /**
      * 0x0A 与 0x0B 的外层头**形状不同**，这是最容易照抄错的一处：
      *
      * - 0x0A（登录型，如 StatSvc.register）：`[总长][0x0A][加密][d2 长度][d2][0][uin]`
@@ -258,6 +305,9 @@ class MsfFrameTest {
  * 不能叫 `lv32`：[ByteWriter] 自带同名成员（长度不含自身），成员优先，
  * 扩展会被**静默忽略**，包里的长度全部少 4，服务端读到的是错位数据。
  */
+/** 长度含自身 4 字节的段 */
+private fun ByteReader.lv(): ByteArray = bytes(int() - 4)
+
 private fun ByteWriter.lvIncl(b: ByteArray): ByteWriter {
     int(b.size + 4)
     return bytes(b)

@@ -57,22 +57,32 @@ internal object MsfFrame {
         qimei: ByteArray = ByteArray(0),
         sessionId: ByteArray = ByteArray(0),
     ): ByteArray {
-        // 头长度字段**不含**正文段，所以先单独成段再回填
+        // 头长度字段**不含**正文段，所以先单独成段再回填。
+        // 两种包的头**形状完全不同**，不能共用一套字段：
+        //   0x0A：序号、subAppId×2、12 字节填充、额外数据（tgt）、命令名、会话 id、imei、ksid…
+        //   0x0B：只有命令名、会话 id、额外数据、qimei —— 没有序号，也没有 imei/ksid
         val head = ByteWriter(256).apply {
             int(0) // SSO 头长度，写完回填
-            int(seq)
-            int(appId.toInt())
-            int(appId.toInt())
-            hex(FILL_HEX)
-            lv32Inclusive(innerExtra)
-            lv32Inclusive(command.toByteArray(Charsets.UTF_8))
-            lv32Inclusive(sessionId)
-            lv32Inclusive(imei)
-            int(4)
-            short(ksid.size + 2)
-            bytes(ksid)
-            int(4) // 签名位空：这条链路不走 qsign
-            lv32Inclusive(qimei)
+            if (type == PROTOCOL_LOGIN) {
+                int(seq)
+                int(appId.toInt())
+                int(appId.toInt())
+                hex(FILL_HEX)
+                lv32Inclusive(innerExtra)
+                lv32Inclusive(command.toByteArray(Charsets.UTF_8))
+                lv32Inclusive(sessionId)
+                lv32Inclusive(imei)
+                int(4)
+                short(ksid.size + 2)
+                bytes(ksid)
+                int(4) // 签名位空：这条链路不走 qsign
+                lv32Inclusive(qimei)
+            } else {
+                lv32Inclusive(command.toByteArray(Charsets.UTF_8))
+                lv32Inclusive(sessionId)
+                lv32Inclusive(innerExtra)
+                lv32Inclusive(qimei)
+            }
         }
         val header = head.toByteArray().putInt(0, head.size)
         val plain = ByteWriter(header.size + body.size + 4).apply {

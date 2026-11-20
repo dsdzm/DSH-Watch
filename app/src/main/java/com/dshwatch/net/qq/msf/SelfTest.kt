@@ -11,6 +11,10 @@ import com.dshwatch.net.qq.sso.WatchDevice
  * 分不清是没连上、没认证、没上线、心跳挂了还是取消息被拒。所以按顺序跑一遍，
  * 每一步单独报时间与结果 —— 出问题时用户把这段文字贴回来就能定位。
  *
+ * 心跳排在注册**前面**是刻意的：它不加密、正文为空，是这条链路上最轻的包。
+ * 心跳通、注册不通，说明帧和序号都对，问题只在注册那一包；心跳也不通，
+ * 就说明连接本身有问题，不用再往下猜。
+ *
  * @param peerUin 配了「对方 QQ 号」时顺手发一条测试消息，把发送链路也验掉
  */
 internal fun directSelfTest(session: QqSession, device: WatchDevice, peerUin: Long? = null): String {
@@ -22,15 +26,22 @@ internal fun directSelfTest(session: QqSession, device: WatchDevice, peerUin: Lo
         sb.append("① 建连 + 换票（wtlogin.exchange_emp）… 通过，")
             .append(System.currentTimeMillis() - t0).append("ms\n")
 
+        // 心跳只是诊断用的一步：有的服务端不回心跳也不影响业务，
+        // 所以这里失败不算致命，记下来继续往下走
         t0 = System.currentTimeMillis()
-        client.register()
-        sb.append("② 上线注册（StatSvc.register）… 通过，")
-            .append(System.currentTimeMillis() - t0).append("ms\n")
+        val beat = runCatching { client.heartbeat() }
+        sb.append("② 心跳（Heartbeat.Alive）… ").append(
+            if (beat.isSuccess) {
+                "通过，${System.currentTimeMillis() - t0}ms"
+            } else {
+                "无回音（${beat.exceptionOrNull()?.message?.lineSequence()?.firstOrNull()?.take(80)}）"
+            },
+        ).append('\n')
 
         t0 = System.currentTimeMillis()
-        client.heartbeat()
-        sb.append("③ 心跳（Heartbeat.Alive）… 通过，")
-            .append(System.currentTimeMillis() - t0).append("ms\n")
+        val how = client.register()
+        sb.append("③ 上线注册（StatSvc.register）… ").append(how)
+            .append("，").append(System.currentTimeMillis() - t0).append("ms\n")
 
         t0 = System.currentTimeMillis()
         val msgs = client.pollPrivate()
