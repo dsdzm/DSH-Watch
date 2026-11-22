@@ -26,6 +26,31 @@ object AppChangelog {
 
     val entries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.1-beta.24",
+            date = "2026-11-20",
+            highlights = listOf(
+                "工作流程按真实执行顺序逐步排列，多段思考不再只剩最后一条",
+                "交付的文件移到回答正文下面，读完就能点开",
+                "修输入框在部分机型上离键盘偏高：键盘弹出时收起底部导航",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.23",
+            date = "2026-11-20",
+            highlights = listOf(
+                "修复 DeepSeek 账号登录报 HTTP 429：平台按 UA 拦截了请求，现在统一用浏览器 UA",
+                "登录改走系统浏览器，完成授权后自动回到应用；没有浏览器的设备仍用内置页面",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.1-beta.22",
+            date = "2026-11-20",
+            highlights = listOf(
+                "新增 DeepSeek 账号登录：用开放平台账号在应用内授权，对话直接花账号余额，不必自己建 API Key",
+                "新增 账号页：昵称、余额与赠金、退出登录，以及 API Keys / 用量 / 充值 / Harness 官网的快捷跳转",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.1-beta.12",
             date = "2026-11-18",
             highlights = listOf(

@@ -243,7 +243,13 @@ class ChatEngine(
         val request = ChatRequest(
             provider = provider,
             baseUrl = provider.normalizedBaseUrl(),
-            apiKey = keyStore.getApiKey(provider.id).orEmpty(),
+            // 账号登录的供应商没有 API Key，凭据是账号 token；两者都从同一个字段传给后端
+            apiKey = if (provider.accountAuth) {
+                keyStore.getDeepSeekToken().orEmpty()
+            } else {
+                keyStore.getApiKey(provider.id).orEmpty()
+            },
+            accountAuth = provider.accountAuth,
             serverToken = keyStore.getServerToken(provider.id).orEmpty(),
             model = model,
             systemPrompt = req.systemPrompt,
@@ -1134,7 +1140,11 @@ class ChatEngine(
         // 首轮路由靠它判任务类型。取**第一条**用户消息而不是最后一条：
         // 风神的语义是"这个会话在干什么"，而不是"这一句在说什么"
         val firstUserMessage = workingList.firstOrNull { it.role == Role.USER }?.content.orEmpty()
-        val apiKey = keyStore.getApiKey(provider.id).orEmpty()
+        val apiKey = if (provider.accountAuth) {
+            keyStore.getDeepSeekToken().orEmpty()
+        } else {
+            keyStore.getApiKey(provider.id).orEmpty()
+        }
         val token = keyStore.getServerToken(provider.id).orEmpty()
 
         /*
@@ -1419,6 +1429,7 @@ class ChatEngine(
                 provider = provider,
                 baseUrl = provider.normalizedBaseUrl(),
                 apiKey = apiKey,
+                accountAuth = provider.accountAuth,
                 serverToken = token,
                 model = model,
                 systemPrompt = roundPrompt,

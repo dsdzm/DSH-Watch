@@ -1241,8 +1241,7 @@ private fun MessageItem(
         ) {
             AgentWorkBlock(
                 blockKey = message.id,
-                calls = message.toolCalls,
-                reasoning = reasoning,
+                steps = workStepsOf(listOf(message)),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = sizeOf,
@@ -1462,8 +1461,7 @@ private fun AgentTurnItem(
         if (showWork) {
             AgentWorkBlock(
                 blockKey = messages.first().id,
-                calls = calls,
-                reasoning = reasoning,
+                steps = workStepsOf(messages, liveId = live?.messageId, liveReasoning = reasoning),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = sizeOf,
@@ -1589,30 +1587,84 @@ internal data class MessageGroup(val key: String, val messages: List<ChatMessage
  *  4. **产物不藏折叠** —— 构建产物是这一轮的交付物，折叠态下也常显在块尾，
  *     点开即预览、右侧导出，不用先展开工作流。
  */
+/**
+ * 工作流程里的一步。
+ *
+ * 以前这里只有「一条思维链 + 一堆工具卡片」：思考取的是最后一条消息的
+ * `reasoning`，工具是所有消息扁平合并。结果是 10 步的任务只显示 1 条思考，
+ * 且工具永远排在思考后面 —— 与实际执行顺序不符。
+ *
+ * 现在按消息顺序展开成流水：[Thinking] → [Tool]… → [Thinking] → [Tool]…
+ */
+internal sealed interface WorkStep {
+    val key: String
+
+    /** 一段思考。一轮里可能有好几段（每步一次） */
+    data class Thinking(override val key: String, val text: String) : WorkStep
+
+    /** 一次工具调用 */
+    data class Tool(override val key: String, val call: ToolCallRecord) : WorkStep
+}
+
+/**
+ * 把一轮里的消息还原成逐步流程。
+ *
+ * `liveReasoning` 给流式中的最后一条用：那时正文还在增量，
+ * `ChatMessage.reasoning` 还没落盘，直接读模型消息会少一段。
+ */
+internal fun workStepsOf(
+    messages: List<ChatMessage>,
+    liveId: String? = null,
+    liveReasoning: String? = null,
+): List<WorkStep> = buildList {
+    messages.forEachIndexed { index, message ->
+        val text = if (liveId != null && message.id == liveId) {
+            liveReasoning.orEmpty()
+        } else {
+            message.reasoning
+        }
+        if (text.isNotBlank()) {
+            add(WorkStep.Thinking(key = "${message.id}-think-$index", text = text))
+        }
+        message.toolCalls.forEachIndexed { callIndex, call ->
+            add(WorkStep.Tool(key = "${message.id}-tool-$callIndex", call = call))
+        }
+    }
+}
+
+/**
+ * 工作块：把这一轮的所有思考与工具调用收成一处。
+ *
+ * 展开后**按执行顺序一行一行往下排**（思考一段、工具一个，交替出现），
+ * 和用户在桌面上看到的流程一致；每个思考行、工具行都能单独展开看细节。
+ * 折叠态只留一行摘要与（可选的）交付产物。
+ */
 @Composable
 internal fun AgentWorkBlock(
     blockKey: Any,
-    calls: List<ToolCallRecord>,
-    reasoning: String,
+    steps: List<WorkStep>,
     isStreaming: Boolean,
     showReasoning: Boolean,
     sizeOf: (String) -> Long,
     onOpenArtifact: (String) -> Unit,
     onExportArtifact: (String) -> Unit,
+    /** 产物是否画在这张卡片里。手机版把它挪到正文下面，这里就不重复画 */
+    showArtifacts: Boolean = true,
 ) {
     val s = LocalStrings.current
-    // 任务完成前默认**展开**：这一轮的所有操作与思考都要能在同一个工作流程里
-    // 看到（用户明确要求「模型在完成任务之前的所有操作和思考都放在一个工作流程里」）。
+    val calls = steps.filterIsInstance<WorkStep.Tool>().map { it.call }
+    // 任务完成前默认**展开**：这一轮的所有操作与思考都要能在同一个工作流程里看到。
     // 完成后由下面的 LaunchedEffect 收回折叠，只留摘要。
     var expanded by remember(blockKey) { mutableStateOf(isStreaming) }
-    // 任务完成后收回折叠：流式期间可以展开盯过程，落定后回到摘要态，
-    // 想看完整流程用户自己点开 —— 折叠的一行摘要已经说了「几步 · 成没成」
     LaunchedEffect(blockKey, isStreaming) {
         if (!isStreaming) expanded = false
     }
     val running = calls.firstOrNull { !it.isSettled }
     val failedCount = calls.count { it.status == ToolStatus.FAILED || it.status == ToolStatus.DENIED }
-    val title = if (calls.isEmpty()) s.reasoning else s.workflowTitle
+    val hasThinking = steps.any { it is WorkStep.Thinking }
+    val title = if (calls.isEmpty() && hasThinking) s.reasoning else s.workflowTitle
+    // 「几步」按工具调用数算：思考是每一步的内部活动，算进去会让数字虚高
+    val stepCount = if (calls.isNotEmpty()) calls.size else steps.count { it is WorkStep.Thinking }
 
     // 折叠态的一行状态：跑的时候说「正在做什么」，跑完了说「几步 · 成没成」
     val statusLine = when {
@@ -1626,9 +1678,9 @@ internal fun AgentWorkBlock(
             }
         }
         isStreaming -> s.thinking
-        calls.isEmpty() -> ""
-        failedCount > 0 -> "${calls.size} ${s.stepLabel} · ${s.workflowFailed}"
-        else -> "${calls.size} ${s.stepLabel} · ${s.workflowDone}"
+        steps.isEmpty() -> ""
+        failedCount > 0 -> "$stepCount ${s.stepLabel} · ${s.workflowFailed}"
+        else -> "$stepCount ${s.stepLabel} · ${s.workflowDone}"
     }
     val dotColor = when {
         isStreaming && running != null -> MaterialTheme.colorScheme.primary
@@ -1646,12 +1698,9 @@ internal fun AgentWorkBlock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // 卡片本身不可点，行可点 —— 所以 feedback 只能来自 tap()，
-                // 这里不能 quiet
                 .tap(onClick = withHaptic { expanded = !expanded }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 状态点：跑 = 主色、想 = 第三色、成 = 次色、败 = 错误色
             Box(
                 modifier = Modifier
                     .size(6.dp)
@@ -1694,21 +1743,37 @@ internal fun AgentWorkBlock(
         }
 
         if (expanded) {
-            // 展开 = 完整流程：思维链（若开启）+ 每一步工具卡片，顺序即执行顺序
-            if (showReasoning && reasoning.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
-                ReasoningPanel(reasoning = reasoning, streaming = isStreaming)
+            /*
+             * 顺序即执行顺序。
+             *
+             * 最后一段思考在流式期间默认展开 —— 那时它正是「模型此刻在想什么」，
+             * 收起来等于让用户盯着一排「思考中」猜。
+             */
+            val lastThinkingKey = steps.lastOrNull { it is WorkStep.Thinking }?.key
+            steps.forEach { step ->
+                when (step) {
+                    is WorkStep.Thinking -> {
+                        if (!showReasoning) return@forEach
+                        Spacer(Modifier.height(4.dp))
+                        ThinkingCard(
+                            key = step.key,
+                            text = step.text,
+                            streaming = isStreaming && step.key == lastThinkingKey,
+                        )
+                    }
+                    is WorkStep.Tool -> {
+                        Spacer(Modifier.height(4.dp))
+                        ToolCallCard(
+                            call = step.call,
+                            sizeBytes = if (step.call.artifact.isNotBlank()) sizeOf(step.call.artifact) else 0L,
+                            onOpenArtifact = onOpenArtifact,
+                            onExportArtifact = onExportArtifact,
+                            showArtifact = showArtifacts,
+                        )
+                    }
+                }
             }
-            calls.forEach { call ->
-                Spacer(Modifier.height(4.dp))
-                ToolCallCard(
-                    call = call,
-                    sizeBytes = if (call.artifact.isNotBlank()) sizeOf(call.artifact) else 0L,
-                    onOpenArtifact = onOpenArtifact,
-                    onExportArtifact = onExportArtifact,
-                )
-            }
-        } else {
+        } else if (showArtifacts) {
             // 折叠态常显产物卡片：交付物不该藏在「先展开工作流」后面
             calls.forEach { call ->
                 if (call.status == ToolStatus.SUCCESS && call.artifact.isNotBlank()) {
@@ -1720,6 +1785,80 @@ internal fun AgentWorkBlock(
                         onExport = onExportArtifact,
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 一段思考。
+ *
+ * 图3 那种「深度思考 ›」的一行：默认收起，点开看这一段的完整内容。
+ * 与工具卡片同宽同圆角，交替排列时不会一段胖一段瘦。
+ */
+@Composable
+private fun ThinkingCard(key: String, text: String, streaming: Boolean) {
+    val s = LocalStrings.current
+    // 流式中的最后一段默认展开；落定后自动收起
+    var expanded by remember(key) { mutableStateOf(streaming) }
+    LaunchedEffect(key, streaming) {
+        if (!streaming) expanded = false
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassSurface(shape = RoundedCornerShape(10.dp), cornerRadius = 10.dp)
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .tap(onClick = withHaptic { expanded = !expanded }),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (streaming) s.thinking else s.reasoning,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (expanded) s.workflowCollapse else s.workflowExpand,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Filled.KeyboardArrowUp
+                } else {
+                    Icons.Filled.KeyboardArrowDown
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        if (expanded) {
+            Spacer(Modifier.height(3.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

@@ -128,9 +128,10 @@ fun ProviderEditScreen(
             }
             if (toSave.type == ProviderType.DSH_SERVER) {
                 container.keyStore.putSshPassword(toSave.id, sshPassword.ifBlank { null })
-            } else if (!toSave.isBuiltin) {
+            } else if (!toSave.isBuiltin && !toSave.accountAuth) {
                 // 内置项的 key 只在编译期注入、只在请求时按 id 取，不写进本机存储：
-                // 写进去等于把内置 Key 复制一份到加密库里，诊断导出或备份都能带出来
+                // 写进去等于把内置 Key 复制一份到加密库里，诊断导出或备份都能带出来。
+                // 账号供应商同理：凭据是账号 token，这里没有 key 可写。
                 container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
             }
             nav.pop()
@@ -148,10 +149,10 @@ fun ProviderEditScreen(
                     provider = draft.copy(baseUrl = draft.baseUrl.trim()),
                     // 内置项的输入框是空的（也本来就不显示），这里要按 id 取内置 Key，
                     // 否则自检第一步就会卡在「API Key 为空」，看起来像通道坏了
-                    apiKey = if (draft.isBuiltin) {
-                        BuiltinProviders.keyOf(draft.id).orEmpty()
-                    } else {
-                        apiKey.trim()
+                    apiKey = when {
+                        draft.isBuiltin -> BuiltinProviders.keyOf(draft.id).orEmpty()
+                        draft.accountAuth -> container.keyStore.getDeepSeekToken().orEmpty()
+                        else -> apiKey.trim()
                     },
                     serverToken = "",
                 )
@@ -175,7 +176,11 @@ fun ProviderEditScreen(
             runCatching {
                 container.backends.of(draft.type).listModels(
                     provider = draft.copy(baseUrl = draft.baseUrl.trim()),
-                    apiKey = apiKey.trim(),
+                    apiKey = if (draft.accountAuth) {
+                        container.keyStore.getDeepSeekToken().orEmpty()
+                    } else {
+                        apiKey.trim()
+                    },
                     serverToken = "",
                 )
             }.onSuccess { models ->
@@ -276,27 +281,41 @@ fun ProviderEditScreen(
                         onValueChange = { draft = draft.copy(name = it) },
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = s.providerType,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    SegmentedRow(
-                        options = listOf(s.typeOpenAi, s.typeDsh),
-                        selectedIndex = if (draft.type == ProviderType.OPENAI_COMPAT) 0 else 1,
-                        onSelect = { index ->
-                            draft = draft.copy(
-                                type = if (index == 0) ProviderType.OPENAI_COMPAT else ProviderType.DSH_SERVER,
-                            )
-                        },
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = if (draft.type == ProviderType.OPENAI_COMPAT) s.typeOpenAiHint else s.typeDshHint,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
+                    if (draft.accountAuth) {
+                        // 账号供应商的类型不能改：它靠 x-dsh-auth-token 打官方端点，
+                        // 切成 DSH_SERVER 或换地址都会变成一条永远发不出消息的配置
+                        Text(
+                            text = if (LocalStrings.current.isChinese) {
+                                "凭据来自 DeepSeek 账号登录，接口地址与类型固定"
+                            } else {
+                                "Credential comes from your DeepSeek account; endpoint and type are fixed"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    } else {
+                        Text(
+                            text = s.providerType,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        SegmentedRow(
+                            options = listOf(s.typeOpenAi, s.typeDsh),
+                            selectedIndex = if (draft.type == ProviderType.OPENAI_COMPAT) 0 else 1,
+                            onSelect = { index ->
+                                draft = draft.copy(
+                                    type = if (index == 0) ProviderType.OPENAI_COMPAT else ProviderType.DSH_SERVER,
+                                )
+                            },
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = if (draft.type == ProviderType.OPENAI_COMPAT) s.typeOpenAiHint else s.typeDshHint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
             }
@@ -316,6 +335,49 @@ fun ProviderEditScreen(
                         text = BuiltinProviders.of(draft.id)?.note.orEmpty(),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    if (busy == "test") {
+                        GhostButton(
+                            text = s.testing,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {},
+                        )
+                    } else {
+                        GhostButton(
+                            text = s.testConnection,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { test() },
+                        )
+                    }
+                    Spacer(Modifier.height(5.dp))
+                } else if (draft.accountAuth) {
+                    /*
+                     * 账号供应商：没有地址和 Key 可填。
+                     *
+                     * 地址写死成官方 API（账号赠金只能花在官方端点上），
+                     * 凭据来自账号页。这里只留「去账号页」与「测试连接」——
+                     * 用户最常问的「为什么发不出消息」在这两处都能得到答案。
+                     */
+                    val tokenReady = !container.keyStore.getDeepSeekToken().isNullOrBlank()
+                    Text(
+                        text = if (LocalStrings.current.isChinese) {
+                            if (tokenReady) "已用 DeepSeek 账号登录，请求会带账号凭据" else "还没登录 DeepSeek 账号"
+                        } else {
+                            if (tokenReady) "Signed in; requests carry your account credential" else "Not signed in"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (tokenReady) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    GhostButton(
+                        text = if (LocalStrings.current.isChinese) "打开账号页" else "Open account page",
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { nav.push(Screen.DeepSeekAccount) },
                     )
                     Spacer(Modifier.height(6.dp))
                     if (busy == "test") {

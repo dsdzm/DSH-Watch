@@ -93,6 +93,13 @@ fun ToolCallCard(
     sizeBytes: Long = 0L,
     onOpenArtifact: ((String) -> Unit)? = null,
     onExportArtifact: ((String) -> Unit)? = null,
+    /**
+     * 是否把产物卡画在卡片里。
+     *
+     * 手机版关掉它，把产物统一挪到回复正文下面 —— 一排「工作流程」卡片里
+     * 夹着文件，用户读到总结时反而找不到东西在哪。
+     */
+    showArtifact: Boolean = true,
 ) {
     val s = LocalStrings.current
     val perf = LocalPerf.current
@@ -209,7 +216,7 @@ fun ToolCallCard(
         }
 
         // 产物比「详情」重要得多，所以不藏在折叠里
-        if (call.status == ToolStatus.SUCCESS && call.artifact.isNotBlank()) {
+        if (showArtifact && call.status == ToolStatus.SUCCESS && call.artifact.isNotBlank()) {
             Spacer(Modifier.height(5.dp))
             ArtifactCard(
                 path = call.artifact,

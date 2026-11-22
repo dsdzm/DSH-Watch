@@ -92,6 +92,8 @@ import java.io.File
  * 表现是「点进去是空的」，而且编译器不会提醒。
  */
 internal object SettingsGroups {
+    /** 账号：登录态、余额、开放平台入口。放在最前 —— 它决定「有没有可用凭据」 */
+    const val ACCOUNT = "account"
     const val MODEL = "model"
     const val ABILITY = "ability"
     const val CHAT = "chat"
@@ -107,10 +109,11 @@ internal object SettingsGroups {
 
     /** 顺序即一级页的显示顺序。插件、MCP、B站 紧跟「AI 能力」—— 它们扩展的都是能力 */
     val all = listOf(
-        MODEL, ABILITY, PLUGINS, MCP, BILI, QQ, CHAT, APPEARANCE, FILES, DATA, RUNTIME, CONNECTION,
+        ACCOUNT, MODEL, ABILITY, PLUGINS, MCP, BILI, QQ, CHAT, APPEARANCE, FILES, DATA, RUNTIME, CONNECTION,
     )
 
     fun title(id: String, s: AppStrings): String = when (id) {
+        ACCOUNT -> if (s.isChinese) "账号" else "Account"
         MODEL -> s.groupModel
         ABILITY -> s.groupAbility
         CHAT -> s.groupChat
@@ -167,6 +170,13 @@ fun SettingsGroupScreen(
     nav: WatchNavigator,
 ) {
     val s = LocalStrings.current
+
+    // 账号是独立页面（登录态 + 外部跳转），不套这一页的骨架
+    if (groupId == SettingsGroups.ACCOUNT) {
+        com.dshwatch.ui.screens.account.AccountScreen(container = container, nav = nav)
+        return
+    }
+
     val scope = rememberCoroutineScope()
     val update: Update = { block ->
         scope.launch { container.settingsRepo.update(block) }
@@ -190,6 +200,8 @@ fun SettingsGroupScreen(
      */
     val groupContent: @Composable ColumnScope.() -> Unit = {
         when (groupId) {
+            // 账号页自带骨架（它还要放登录状态与外部跳转），这里直接交给它
+            SettingsGroups.ACCOUNT -> {}
             SettingsGroups.MODEL -> ModelGroup(settings, nav, s)
             SettingsGroups.ABILITY -> AbilityGroup(settings, update, container, nav, s)
             SettingsGroups.CHAT -> ChatGroup(settings, update, s)

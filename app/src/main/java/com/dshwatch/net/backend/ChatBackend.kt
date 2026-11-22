@@ -43,6 +43,15 @@ data class ChatRequest(
      * 所以只有供应商判定为 DeepSeek 时才打开，见 ChatEngine 里的判定。
      */
     val echoReasoning: Boolean = false,
+    /**
+     * 这条请求的凭据来自 DeepSeek 账号登录而不是 API Key。
+     *
+     * 两者都放在 [apiKey] 里传（后端只需要一个字符串），区别只在落到哪个头：
+     * API Key → `Authorization: Bearer`，账号 → `x-dsh-auth-token`。
+     * 带一个布尔而不是在这里判断前缀，是因为前缀是别人的格式，
+     * 哪天账号 token 也长成 `sk-` 开头就会静默发错头。
+     */
+    val accountAuth: Boolean = false,
 ) {
     val agentEnabled: Boolean get() = tools.isNotEmpty()
     val displayModel: String get() = model.ifBlank { "default" }

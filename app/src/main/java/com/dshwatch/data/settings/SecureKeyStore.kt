@@ -179,6 +179,31 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         runCatching { prefs.edit().remove(k(BILI_SCOPE, FIELD_BILI_COOKIE)).apply() }
     }
 
+    // ------------------------------------------------------------ DeepSeek 账号
+
+    /**
+     * DeepSeek 账号凭据（平台登录换回来的 token）。
+     *
+     * 和 API Key 同级：它直接对应账号里的余额，泄露等于别人能拿你的钱跑模型。
+     * 所以同样只进加密区，不进设置 JSON、不进导出、不进日志。
+     *
+     * 与 API Key 分开存的原因：一个账号下可以有多条 App 管理的 Key，
+     * 但登录态只有一份 —— 混在一个字段里，退出登录会把用户的 Key 一起抹掉。
+     */
+    override fun getDeepSeekToken(): String? = get(k(DEEPSEEK_SCOPE, FIELD_DEEPSEEK_TOKEN)).orEmpty().ifBlank { null }
+
+    fun putDeepSeekToken(value: String?) = put(k(DEEPSEEK_SCOPE, FIELD_DEEPSEEK_TOKEN), value)
+
+    /**
+     * 本机的登录设备 id。
+     *
+     * 平台用它把「同一台设备上的多次登录」串起来，也用于设备管理页。
+     * 只生成一次，退出登录**不删** —— 删了下次登录会变成一台新设备。
+     */
+    fun getDeepSeekDeviceId(): String? = get(k(DEEPSEEK_SCOPE, FIELD_DEEPSEEK_DEVICE))
+
+    fun putDeepSeekDeviceId(value: String?) = put(k(DEEPSEEK_SCOPE, FIELD_DEEPSEEK_DEVICE), value)
+
     /**
      * 通用加密读写。
      *
@@ -287,6 +312,9 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         /** B站 Cookie 同样是一个合成作用域 */
         private const val BILI_SCOPE = "bili"
         private const val FIELD_BILI_COOKIE = "biliCookie"
+        private const val DEEPSEEK_SCOPE = "deepseekAccount"
+        private const val FIELD_DEEPSEEK_TOKEN = "token"
+        private const val FIELD_DEEPSEEK_DEVICE = "deviceId"
         private const val FIELD_MCP_TOKEN = "mcpToken"
         private const val MCP_SCOPE = "mcp"
         private const val PROBE_KEY = "__probe__"

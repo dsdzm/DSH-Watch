@@ -58,7 +58,13 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
             return@flow
         }
         if (request.apiKey.isBlank()) {
-            emit(ChatEvent.Failure(DshError.Auth("API Key 为空")))
+            emit(
+                ChatEvent.Failure(
+                    DshError.Auth(
+                        if (request.accountAuth) "还没登录 DeepSeek 账号" else "API Key 为空",
+                    ),
+                ),
+            )
             return@flow
         }
 
@@ -142,7 +148,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         // 复用 rawGet：它内部已经切到 Dispatchers.IO。
         // 这里原来是裸的 call.execute()，而「供应商」页是从 Main dispatcher 调它的，
         // 真机上的表现就是「拉取失败: NetworkOnMainThreadException」。
-        val (code, body) = rawGet(endpointOf(provider.normalizedBaseUrl(), "models"), apiKey)
+        val (code, body) = rawGet(endpointOf(provider.normalizedBaseUrl(), "models"), apiKey, provider.accountAuth)
         if (code !in 200..299) throw DshError.Http(code, body)
         val list = runCatching { json.decodeFromString(OaiModelList.serializer(), body) }
             .getOrElse { throw DshError.Parse("模型列表无法解析：${body.take(160)}") }
@@ -207,7 +213,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
 
         // 2) GET /models
         steps += runStep(STEP_MODELS) {
-            val (code, body) = rawGet(endpointOf(base, "models"), apiKey)
+            val (code, body) = rawGet(endpointOf(base, "models"), apiKey, provider.accountAuth)
             if (code !in 200..299) throw DshError.Http(code, body)
             val list = runCatching { json.decodeFromString(OaiModelList.serializer(), body) }
                 .getOrElse { throw DshError.Parse("返回的不是模型列表：${body.take(160)}") }
@@ -239,6 +245,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
                 apiKey = apiKey,
                 body = payload,
                 accept = "application/json",
+                accountAuth = provider.accountAuth,
             )
             if (code !in 200..299) throw DshError.Http(code, body)
             val chunk = runCatching { json.decodeFromString(OaiChunk.serializer(), body) }
@@ -307,11 +314,15 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         }
     }
 
-    private suspend fun rawGet(url: String, apiKey: String): Pair<Int, String> =
+    private suspend fun rawGet(
+        url: String,
+        apiKey: String,
+        accountAuth: Boolean = false,
+    ): Pair<Int, String> =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             val req = Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer $apiKey")
+                .apply { authHeader(apiKey, accountAuth) }
                 .header("Accept", "application/json")
                 .get()
                 .build()
@@ -325,10 +336,11 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         apiKey: String,
         body: String,
         accept: String,
+        accountAuth: Boolean = false,
     ): Pair<Int, String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer $apiKey")
+            .apply { authHeader(apiKey, accountAuth) }
             .header("Accept", accept)
             .post(body.toRequestBody(Http.JSON_MEDIA))
             .build()
@@ -437,11 +449,25 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         )
         return Request.Builder()
             .url(endpoint)
-            .header("Authorization", "Bearer ${r.apiKey}")
+            .apply { authHeader(r.apiKey, r.accountAuth) }
             .header("Accept", if (r.stream) "text/event-stream" else "application/json")
             .post(payload.toRequestBody(Http.JSON_MEDIA))
             .build()
     }
+
+    /**
+     * 凭据落到哪个头。
+     *
+     * 只有一个地方决定这件事：账号 token 走 `x-dsh-auth-token`，
+     * API Key 走 `Authorization: Bearer`。**不要两个都发** ——
+     * 服务端见到 Authorization 会优先按 API Key 校验，账号 token 直接被判无效。
+     */
+    private fun Request.Builder.authHeader(credential: String, account: Boolean): Request.Builder =
+        if (account) {
+            header("x-dsh-auth-token", credential)
+        } else {
+            header("Authorization", "Bearer $credential")
+        }
 
     /** 请求体构造，诊断和正式请求共用，保证「测的就是发的」 */
     private fun buildBody(

@@ -302,6 +302,26 @@ class AppContainer(private val app: Context) {
     val updateCenter = com.dshwatch.domain.update.UpdateCenter(app, settingsRepo, appScope)
 
     /**
+     * DeepSeek 账号：登录态、余额，以及「登录后自动生成的那条供应商」。
+     *
+     * 放在容器而不是页面里：登录要跨页面（账号页发起、网页授权页回调、
+     * 供应商页显示状态），而且聊天请求要从这里取 token。
+     */
+    val deepSeekAccount = com.dshwatch.data.account.DeepSeekAccountRepo(
+        context = app,
+        keyStore = keyStore,
+        settingsRepo = settingsRepo,
+        scope = appScope,
+        language = {
+            when (settings.value.appLanguage) {
+                "en" -> "en"
+                "zh" -> "zh"
+                else -> java.util.Locale.getDefault().language
+            }
+        },
+    )
+
+    /**
      * 长期记忆压缩器。
      *
      * 单例：压缩是"后台悄悄发生"的事，每轮建一个新对象会让同一段时间内
@@ -315,6 +335,19 @@ class AppContainer(private val app: Context) {
     )
 
     init {
+        /*
+         * 有登录态就在后台把昵称与余额拉回来。
+         *
+         * 不挡启动：账号接口挂了也不该让 App 停在白屏上。失败只更新账号页的
+         * 一行提示，界面照常可用（聊天仍会带着本地 token 发出去）。
+         */
+        if (deepSeekAccount.isSignedIn) {
+            appScope.launch {
+                runCatching { deepSeekAccount.refresh() }
+                    .onFailure { Logx.w("AppContainer", "账号资料刷新失败", it) }
+            }
+        }
+
         /*
          * 设备操控的「停止」要一路传到对话引擎。
          *
@@ -341,8 +374,7 @@ class AppContainer(private val app: Context) {
 
         appScope.launch {
             settings.collect { s ->
-                _settingsReady.value = true
-                // 屏幕形状可能是用户在引导页里手选的（ROM 的 isScreenRound 不一定可信）
+                _settingsReady.value = true                // 屏幕形状可能是用户在引导页里手选的（ROM 的 isScreenRound 不一定可信）
                 // 设备探测要读 Resources / WindowManager，个别 ROM 上屏幕形状会抛，
                 // 而它失败不该让整个界面出不来 —— 兜一个默认档继续跑。
                 val prof = runCatching { DeviceProfiler.detect(app, s.cornerInsetDp, s.screenShape) }

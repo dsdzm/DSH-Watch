@@ -67,7 +67,9 @@ import com.dshwatch.domain.model.MessageStatus
 import com.dshwatch.domain.model.ProviderType
 import com.dshwatch.domain.model.ReasoningEffort
 import com.dshwatch.domain.model.Role
+import com.dshwatch.domain.model.ToolStatus
 import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.ui.components.ArtifactCard
 import com.dshwatch.ui.components.AskUserDialog
 import com.dshwatch.ui.components.ChoiceButtons
 import com.dshwatch.ui.components.PanelCard
@@ -79,6 +81,7 @@ import com.dshwatch.ui.media.MediaStrip
 import com.dshwatch.ui.media.MediaViewer
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.screens.chat.AgentWorkBlock
+import com.dshwatch.ui.screens.chat.workStepsOf
 import com.dshwatch.ui.screens.chat.artifactSizeOf
 import com.dshwatch.ui.screens.chat.groupMessages
 import kotlinx.coroutines.Dispatchers
@@ -850,6 +853,20 @@ private fun PhoneTurn(
     val bodyText = if (parsed.hasChoices) parsed.body else afterPanel
     var viewingMedia by remember(last.id) { mutableStateOf<MediaRef?>(null) }
 
+    /*
+     * 这一轮真正交付的文件。
+     *
+     * 同一个路径可能被多次写入（先建后改），按路径去重；只认成功的调用，
+     * 失败的那次写在 `artifact` 里的路径往往根本没生成。
+     */
+    val artifacts = remember(allCalls) {
+        allCalls
+            .mapNotNull { call ->
+                call.artifact.takeIf { call.status == ToolStatus.SUCCESS && it.isNotBlank() }
+            }
+            .distinct()
+    }
+
     if (isUser) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -904,13 +921,14 @@ private fun PhoneTurn(
         if (showsWork) {
             AgentWorkBlock(
                 blockKey = first.id,
-                calls = allCalls,
-                reasoning = reasoning,
+                steps = workStepsOf(messages, liveId = live?.messageId, liveReasoning = reasoning),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = { path -> artifactSizeOf(container, path) },
                 onOpenArtifact = onOpenArtifact,
                 onExportArtifact = { },
+                // 产物挪到正文下面，见下面的 DeliveryList
+                showArtifacts = false,
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -947,6 +965,21 @@ private fun PhoneTurn(
                 text = if (reasoning.isNotBlank()) s.thinking else s.generating,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        /*
+         * 交付的文件。
+         *
+         * 放在正文（总结）之后，而不是夹在工作流程卡片里 —— 用户读完回答，
+         * 下一步就是「东西在哪、点开看看」，位置应该顺着阅读方向往下。
+         */
+        if (!isStreaming && artifacts.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            DeliveryList(
+                paths = artifacts,
+                sizeOf = { path -> artifactSizeOf(container, path) },
+                onOpen = onOpenArtifact,
             )
         }
 
@@ -999,6 +1032,37 @@ private fun PhoneTurn(
 
         viewingMedia?.let { ref ->
             MediaViewer(ref = ref, onClose = { viewingMedia = null })
+        }
+    }
+}
+
+/**
+ * 交付文件列表。
+ *
+ * 一轮任务可能产出好几个文件（表格 + 图 + 代码），逐个平铺而不是塞进一个
+ * 可折叠的「全部产物」—— 手机上多一次点击才能确认「东西在哪」不值得。
+ */
+@Composable
+private fun DeliveryList(
+    paths: List<String>,
+    sizeOf: (String) -> Long,
+    onOpen: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "文件产物 · ${paths.size}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(start = 2.dp, bottom = 6.dp),
+        )
+        paths.forEach { path ->
+            ArtifactCard(
+                path = path,
+                sizeBytes = sizeOf(path),
+                onOpen = onOpen,
+                onExport = null,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
         }
     }
 }

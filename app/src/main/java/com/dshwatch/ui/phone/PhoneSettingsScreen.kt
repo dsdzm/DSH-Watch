@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
@@ -39,7 +40,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,13 +87,17 @@ fun PhoneSettingsScreen(
 ) {
     val s = LocalStrings.current
     val scope = rememberCoroutineScope()
+    val account by container.deepSeekAccount.state.collectAsStateWithLifecycle()
 
     fun update(block: (AppSettings) -> AppSettings) {
         scope.launch { container.settingsRepo.update(block) }
     }
 
     // 手表版的外观分组不在这里出：手机有自己的一页（见 PhoneAppearanceScreen）
-    val groups = SettingsGroups.all.filter { it != SettingsGroups.APPEARANCE }
+    // 账号单独一行放在最前：它是「有没有可用凭据」的入口，不该混在十几个分组里
+    val groups = SettingsGroups.all.filter {
+        it != SettingsGroups.APPEARANCE && it != SettingsGroups.ACCOUNT
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         LargeTopAppBar(
@@ -106,6 +113,21 @@ fun PhoneSettingsScreen(
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // ---------------- 账号 ----------------
+            item { SectionTitle("账号") }
+            item {
+                SettingsRow(
+                    icon = Icons.Outlined.AccountCircle,
+                    title = if (s.isChinese) "DeepSeek 账号" else "DeepSeek account",
+                    summary = when {
+                        !account.signedIn -> if (s.isChinese) "未登录 · 点此用账号余额对话" else "Signed out"
+                        !account.profile?.name.isNullOrBlank() -> account.profile?.name.orEmpty()
+                        else -> if (s.isChinese) "已登录" else "Signed in"
+                    },
+                    onClick = { nav.open(Screen.DeepSeekAccount) },
+                )
+            }
+
             // ---------------- 模型 ----------------
             item { SectionTitle("模型") }
             item {

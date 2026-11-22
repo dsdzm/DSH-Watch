@@ -622,8 +622,11 @@ private fun M3eTurn(
         if (showsWork) {
             AgentWorkBlock(
                 blockKey = messages.first().id,
-                calls = allCalls,
-                reasoning = reasoning,
+                steps = com.dshwatch.ui.screens.chat.workStepsOf(
+                    messages,
+                    liveId = live?.messageId,
+                    liveReasoning = reasoning,
+                ),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = { path -> artifactSizeOf(container, path) },

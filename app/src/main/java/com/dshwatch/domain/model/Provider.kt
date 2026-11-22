@@ -94,8 +94,25 @@ data class Provider(
      * 关掉后附图仍会显示在会话里，只是不进请求。
      */
     val visionInput: Boolean = true,
+
+    /**
+     * 这条供应商走「DeepSeek 账号登录」而不是 API Key。
+     *
+     * 两种凭据打到同一个 `api.deepseek.com`，区别只在请求头：
+     * API Key 是 `Authorization: Bearer sk-…`，账号是 `x-dsh-auth-token: …`。
+     * 单独一个布尔而不是再开一个 [ProviderType]：类型决定**协议**
+     * （OpenAI 兼容 / DSH Remote），账号只是同一套协议下的另一种认证方式 ——
+     * 加一个枚举分支，所有 `when (type)` 都要多一条，还容易漏。
+     *
+     * 打开后 [Provider.baseUrl] 固定指向官方 API，供应商页也不再显示 Key 输入框：
+     * 账号赠金只能花在官方端点上，填个中转站地址是发不出去的。
+     */
+    val accountAuth: Boolean = false,
 ) {
     val isDshServer: Boolean get() = type == ProviderType.DSH_SERVER
+
+    /** 是否由 DeepSeek 账号提供凭据 */
+    val usesDeepSeekAccount: Boolean get() = accountAuth
 
     /**
      * 是不是内置供应商（列表固定、不联网刷新）。

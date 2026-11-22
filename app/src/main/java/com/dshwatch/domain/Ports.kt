@@ -20,4 +20,12 @@ interface SettingsSource {
 interface CredentialSource {
     fun getApiKey(providerId: String): String?
     fun getServerToken(providerId: String): String?
+
+    /**
+     * DeepSeek 账号 token（`x-dsh-auth-token`）。
+     *
+     * 默认返回 null：绝大多数实现（单测里的假凭据、QQ 桥接用的临时引擎）
+     * 不关心账号登录，不该被迫实现它。真正接入账号的是 [com.dshwatch.data.settings.SecureKeyStore]。
+     */
+    fun getDeepSeekToken(): String? = null
 }

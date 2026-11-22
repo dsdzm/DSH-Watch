@@ -137,6 +137,21 @@ private fun ProviderRow(
                         // 它永远是 ✓，写出来只会让人以为可以点进去改
                         append("内置通道 · ")
                         append(provider.defaultModel.ifBlank { "未选模型" })
+                    } else if (provider.accountAuth) {
+                        /*
+                         * 账号模式没有 key 可显示，展示「登录没登录」——
+                         * 这一行是用户判断「为什么发不出消息」的第一现场。
+                         */
+                        append(if (s.isChinese) "DeepSeek 账号" else "DeepSeek account")
+                        append(" · ")
+                        append(provider.defaultModel.ifBlank { "未选模型" })
+                        append(" · ")
+                        append(
+                            when {
+                                hasKey -> if (s.isChinese) "已登录" else "signed in"
+                                else -> if (s.isChinese) "未登录" else "signed out"
+                            },
+                        )
                     } else {
                         append(if (provider.type == ProviderType.DSH_SERVER) s.typeDsh else s.typeOpenAi)
                         append(" · ")
@@ -165,9 +180,9 @@ private fun ProviderRow(
     }
 }
 
-internal fun hasCredential(container: AppContainer, provider: Provider): Boolean =
-    if (provider.type == ProviderType.DSH_SERVER) {
-        !container.keyStore.getServerToken(provider.id).isNullOrBlank()
-    } else {
-        !container.keyStore.getApiKey(provider.id).isNullOrBlank()
-    }
+internal fun hasCredential(container: AppContainer, provider: Provider): Boolean = when {
+    provider.type == ProviderType.DSH_SERVER -> !container.keyStore.getServerToken(provider.id).isNullOrBlank()
+    // 账号模式：凭据是账号 token，不是这一条供应商自己的 API Key
+    provider.accountAuth -> !container.keyStore.getDeepSeekToken().isNullOrBlank()
+    else -> !container.keyStore.getApiKey(provider.id).isNullOrBlank()
+}

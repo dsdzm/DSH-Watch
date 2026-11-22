@@ -40,6 +40,12 @@ sealed interface Screen {
     /** B站扫码登录 */
     data object BiliLogin : Screen
 
+    /** DeepSeek 账号：登录态、余额、开放平台快捷入口 */
+    data object DeepSeekAccount : Screen
+
+    /** DeepSeek 账号网页授权（WebView 里打开平台自己的授权页） */
+    data object DeepSeekLogin : Screen
+
     /** 设置页的二级分组（id 见 SettingsGroups） */
     data class SettingsGroup(val id: String) : Screen
 
@@ -174,6 +180,9 @@ class WatchNavigator internal constructor(
             Screen.ExecSettings -> "exec"
             Screen.DeviceControl -> "devctl"
             Screen.BiliLogin -> "bililogin"
+            Screen.DeepSeekAccount -> "dsaccount"
+            // 授权页不进存档：恢复出来时授权票据早没了，落在账号页才是对的
+            Screen.DeepSeekLogin -> UNRESTORABLE
             Screen.GroupChat -> "group"
             Screen.Donate -> "donate"
             Screen.Thanks -> "thanks"
@@ -211,6 +220,7 @@ class WatchNavigator internal constructor(
                 "exec" -> Screen.ExecSettings
                 "devctl" -> Screen.DeviceControl
                 "bililogin" -> Screen.BiliLogin
+                "dsaccount" -> Screen.DeepSeekAccount
                 "group" -> Screen.GroupChat
                 "donate" -> Screen.Donate
                 "thanks" -> Screen.Thanks

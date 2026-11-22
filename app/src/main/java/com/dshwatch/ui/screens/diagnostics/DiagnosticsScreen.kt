@@ -67,7 +67,13 @@ fun DiagnosticsScreen(
 
     val provider = settings.activeProvider
     val apiKey = remember(provider?.id) {
-        provider?.id?.let { container.keyStore.getApiKey(it) }.orEmpty()
+        val p = provider
+        when {
+            p == null -> ""
+            // 账号模式没有 API Key：诊断要用的凭据是账号 token，否则第一步就误报「Key 为空」
+            p.accountAuth -> container.keyStore.getDeepSeekToken().orEmpty()
+            else -> container.keyStore.getApiKey(p.id).orEmpty()
+        }
     }
     val serverToken = remember(provider?.id) {
         provider?.id?.let { container.keyStore.getServerToken(it) }.orEmpty()
@@ -76,10 +82,10 @@ fun DiagnosticsScreen(
         provider?.let { p ->
             // 内置项连掩码都不给：掩码照样会带出内置 Key 的前几位，
             // 而这一栏对内置通道本来就该只写「内置通道」
-            if (p.isBuiltin) {
-                "内置通道"
-            } else {
-                container.keyStore.masked(
+            when {
+                p.isBuiltin -> "内置通道"
+                p.accountAuth -> if (container.keyStore.getDeepSeekToken().isNullOrBlank()) "未登录账号" else "账号登录"
+                else -> container.keyStore.masked(
                     p.id,
                     if (p.type == ProviderType.DSH_SERVER) SecureKeyStore.KeyType.SERVER_TOKEN
                     else SecureKeyStore.KeyType.API_KEY,

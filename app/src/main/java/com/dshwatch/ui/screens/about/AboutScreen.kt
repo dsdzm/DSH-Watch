@@ -146,6 +146,41 @@ fun AboutScreen(
                 Spacer(Modifier.height(2.dp))
             }
 
+            // ---------------- DeepSeek ----------------
+            /*
+             * 账号与开放平台的快捷入口。
+             *
+             * 放在「作者」之后、「社区」之前：这一屏最常被找的两件事就是
+             * 「我登录了吗 / 还剩多少钱」和「API Key 去哪建」。
+             * 两个都跳出去（一个是账号页，一个是浏览器），不在这里重复实现。
+             */
+            SectionHeader("DeepSeek")
+            SettingCard {
+                SettingRow(
+                    title = if (s.isChinese) "账号与余额" else "Account & balance",
+                    subtitle = if (s.isChinese) "登录后用账号余额对话" else "Sign in to chat on your balance",
+                    trailing = "›",
+                    showDivider = true,
+                    onClick = { nav.push(Screen.DeepSeekAccount) },
+                )
+                SettingRow(
+                    title = if (s.isChinese) "开放平台 · API Keys" else "Platform · API keys",
+                    subtitle = "platform.deepseek.com",
+                    trailing = "↗",
+                    showDivider = false,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://platform.deepseek.com/api_keys"),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    },
+                )
+            }
+
             // ---------------- 社区与支持 ----------------
             // 三个入口各自独立成页：反馈群是出问题才点，捐赠是想谢一下才点，
             // 致谢是想看看这是谁做的 —— 三种场景，挤在这里只会被更新日志淹掉

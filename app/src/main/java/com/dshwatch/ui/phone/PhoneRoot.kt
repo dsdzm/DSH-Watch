@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
@@ -54,6 +56,7 @@ import com.dshwatch.ui.theme.LocalDeviceProfile
  * 栈里有页面就 pop，栈空交给系统（退出 App）。手机上从「记录」按返回，
  * 用户期待的是退出，而不是回到上一个 tab。
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun PhoneRoot(
     container: AppContainer,
@@ -61,6 +64,18 @@ fun PhoneRoot(
 ) {
     val nav = rememberPhoneNavigator()
     val profile = LocalDeviceProfile.current
+
+    /*
+     * 键盘弹出时把底部导航收起来。
+     *
+     * 不只是「看起来更干净」：导航栏在布局里占着 80dp，键盘又从屏幕底往上盖，
+     * 于是对话页的 `imePadding` 等于「屏幕底 − 导航栏 − 键盘」，输入框会
+     * 比键盘顶高出整整一条导航栏。机型不同（手势条 / 三键 / 键盘是否覆盖
+     * 导航区）这条空白的高度也不同 —— 这就是「输入框在不同设备上位置不一样」。
+     *
+     * 收起之后那一块高度回到内容区，输入框正好贴在键盘上沿。
+     */
+    val imeVisible = WindowInsets.isImeVisible
 
     /*
      * 共用页面（酒馆、写作、插件…）内部会直接 `nav.push(Screen.Settings)`。
@@ -153,7 +168,7 @@ fun PhoneRoot(
                 }
             }
         }
-        if (!nav.canGoBack) {
+        if (!nav.canGoBack && !imeVisible) {
             PhoneBottomBar(nav)
         }
     }

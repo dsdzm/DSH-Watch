@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
@@ -25,12 +26,14 @@ import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.BuildConfig
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.bili.BiliMode
@@ -68,6 +71,7 @@ fun SettingsScreen(
     nav: WatchNavigator,
 ) {
     val s = LocalStrings.current
+    val account by container.deepSeekAccount.state.collectAsStateWithLifecycle()
 
     /*
      * 走统一骨架，不要自己拼 `WatchTopBar + WearList`。
@@ -86,9 +90,16 @@ fun SettingsScreen(
                 WearCardRow(
                     icon = groupIcon(id),
                     title = SettingsGroups.title(id, s),
-                    subtitle = summaryOf(id, settings, s),
+                    subtitle = summaryOf(id, settings, s, account.signedIn, account.profile?.name),
                     trailing = "›",
-                    onClick = { nav.push(Screen.SettingsGroup(id)) },
+                    onClick = {
+                        // 账号是独立页面：登录、余额、外部跳转都在里面，不需要二级设置页
+                        if (id == SettingsGroups.ACCOUNT) {
+                            nav.push(Screen.DeepSeekAccount)
+                        } else {
+                            nav.push(Screen.SettingsGroup(id))
+                        }
+                    },
                 )
             }
 
@@ -113,6 +124,7 @@ fun SettingsScreen(
 
 /** 每组一个线性图标：与参考图一致，靠图形先认出「这是哪一类」 */
 private fun groupIcon(id: String): ImageVector = when (id) {
+    SettingsGroups.ACCOUNT -> Icons.Outlined.AccountCircle
     SettingsGroups.MODEL -> Icons.Outlined.Cloud
     SettingsGroups.ABILITY -> Icons.Outlined.AutoAwesome
     SettingsGroups.PLUGINS -> Icons.Outlined.Extension
@@ -126,7 +138,19 @@ private fun groupIcon(id: String): ImageVector = when (id) {
     else -> Icons.Outlined.Wifi
 }
 
-private fun summaryOf(id: String, settings: AppSettings, s: AppStrings): String = when (id) {
+private fun summaryOf(
+    id: String,
+    settings: AppSettings,
+    s: AppStrings,
+    signedIn: Boolean,
+    accountName: String?,
+): String = when (id) {
+    SettingsGroups.ACCOUNT -> when {
+        !signedIn -> if (s.isChinese) "未登录 · 点此用账号余额对话" else "Signed out"
+        !accountName.isNullOrBlank() -> accountName
+        else -> if (s.isChinese) "已登录" else "Signed in"
+    }
+
     SettingsGroups.MODEL -> settings.activeProvider?.name ?: s.entryProviderUnset
 
     SettingsGroups.ABILITY -> {

@@ -353,6 +353,14 @@ internal fun ScreenHost(
             container = container,
             nav = nav,
         )
+        Screen.DeepSeekAccount -> com.dshwatch.ui.screens.account.AccountScreen(
+            container = container,
+            nav = nav,
+        )
+        Screen.DeepSeekLogin -> com.dshwatch.ui.screens.account.DeepSeekLoginScreen(
+            container = container,
+            nav = nav,
+        )
         Screen.ExecSettings -> ExecSettingsScreen(
             container = container,
             settings = settings,
