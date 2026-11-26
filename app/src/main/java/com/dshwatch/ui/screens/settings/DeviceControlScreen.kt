@@ -1,13 +1,16 @@
 package com.dshwatch.ui.screens.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -21,8 +24,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.dshwatch.domain.adb.AdbShell
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.device.BatteryKeepAlive
 import com.dshwatch.domain.device.DeviceControlHub
@@ -76,6 +86,20 @@ fun DeviceControlScreen(
     // 连不上时展开的一行行自查结果。手表上复制粘贴很别扭，直接把结果摊在屏幕上，
     // 截图就能问人。
     var showDiag by remember { mutableStateOf(false) }
+
+    // ADB 直连：地址默认 127.0.0.1:5555（同一台设备），也可填局域网内另一台
+    val adbState by AdbShell.state.collectAsState()
+    var adbAddr by remember { mutableStateOf("") }
+    var adbBusy by remember { mutableStateOf(false) }
+    var adbMsg by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    LaunchedEffect(Unit) {
+        if (adbAddr.isBlank()) {
+            val saved = AdbShell.savedEndpoint(context)
+            adbAddr = saved?.let { "${it.first}:${it.second}" }
+                ?: "${withContext(Dispatchers.IO) { AdbShell.localIpv4() } ?: "127.0.0.1"}:5555"
+        }
+    }
     LaunchedEffect(Unit) {
         var tick = 0
         while (true) {
@@ -364,6 +388,171 @@ fun DeviceControlScreen(
                             },
                         )
                     }
+                }
+            }
+
+            SectionHeader(if (zh) "ADB 直连" else "Direct ADB")
+
+            SettingCard {
+                val adbStatusText = when (val st = adbState) {
+                    is AdbShell.State.On -> if (zh) "已连接 ${st.endpoint}" else "Connected ${st.endpoint}"
+                    is AdbShell.State.Failed -> if (zh) "上次失败：${st.message}" else "Last error: ${st.message}"
+                    AdbShell.State.Off -> if (zh) "未连接" else "Not connected"
+                }
+                SettingRow(
+                    title = if (zh) "通道状态" else "Status",
+                    subtitle = adbStatusText,
+                    trailing = if (adbState is AdbShell.State.On) "✓" else "",
+                    showDivider = false,
+                )
+
+                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                    HintText(
+                        if (zh) {
+                            "Shizuku 起不来的机型可以用这一条。ADB 与 Shizuku 同为 shell 用户，" +
+                                "能力一致，但需要先在电脑上执行一条 adb 命令把端口打开。"
+                        } else {
+                            "Fallback for devices where Shizuku cannot start. Same shell identity " +
+                                "as Shizuku; you first open the port with one adb command on a PC."
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = adbAddr,
+                        onValueChange = { adbAddr = it.take(64) },
+                        label = { Text(if (zh) "地址" else "Address", style = MaterialTheme.typography.labelSmall) },
+                        placeholder = { Text("127.0.0.1:5555", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    Spacer(Modifier.height(6.dp))
+                    Row {
+                        GhostButton(
+                            text = if (adbBusy) {
+                                if (zh) "连接中…" else "Connecting…"
+                            } else if (adbState is AdbShell.State.On) {
+                                if (zh) "重新连接" else "Reconnect"
+                            } else {
+                                if (zh) "连接并授权" else "Connect"
+                            },
+                            onClick = {
+                                if (adbBusy) return@GhostButton
+                                val raw = adbAddr.trim()
+                                val host = raw.substringBeforeLast(':', "").ifBlank { raw }
+                                val port = raw.substringAfterLast(':', "5555").toIntOrNull() ?: 5555
+                                scope.launch {
+                                    adbBusy = true
+                                    adbMsg = if (zh) {
+                                        "正在连接，若手表弹出「允许调试」请点允许。"
+                                    } else {
+                                        "Connecting. Approve the debugging prompt on the watch."
+                                    }
+                                    val r = AdbShell.connect(context, host, port)
+                                    adbBusy = false
+                                    if (r.error.isEmpty()) {
+                                        adbMsg = if (zh) "已连接，可以执行命令。" else "Connected."
+                                        container.settingsRepo.update { it.copy(adbEnabled = true) }
+                                    } else {
+                                        adbMsg = r.error
+                                    }
+                                }
+                            },
+                        )
+                        if (adbState is AdbShell.State.On) {
+                            Spacer(Modifier.width(8.dp))
+                            GhostButton(
+                                text = if (zh) "断开" else "Disconnect",
+                                onClick = {
+                                    AdbShell.disconnect(context)
+                                    adbMsg = if (zh) "已断开，工具不再可用。" else "Disconnected."
+                                    scope.launch {
+                                        container.settingsRepo.update { it.copy(adbEnabled = false) }
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    if (adbMsg.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = adbMsg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = if (zh) "方式一 · USB" else "Option 1 · USB",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    HintText(
+                        if (zh) {
+                            "1. 手表开启开发者选项与 USB 调试，连到电脑；\n" +
+                                "2. 电脑执行 adb tcpip 5555；\n" +
+                                "3. 拔线，在本页填 127.0.0.1:5555（同一台手表）后连接。"
+                        } else {
+                            "1. Enable USB debugging on the watch and connect it to a PC.\n" +
+                                "2. Run: adb tcpip 5555\n" +
+                                "3. Unplug, use 127.0.0.1:5555 here and connect."
+                        },
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (zh) "方式二 · 无线调试" else "Option 2 · Wireless debugging",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    HintText(
+                        if (zh) {
+                            "1. 开发者选项里打开「无线调试」，记下配对端口、连接端口与配对码；\n" +
+                                "2. 电脑依次执行：\n" +
+                                "   adb pair 手表IP:配对端口 配对码\n" +
+                                "   adb connect 手表IP:连接端口\n" +
+                                "   adb tcpip 5555\n" +
+                                "3. 回到本页连接。无线调试会随之关闭，这是正常现象。"
+                        } else {
+                            "1. Turn on Wireless debugging; note the pairing port, connect port and code.\n" +
+                                "2. On a PC run:\n" +
+                                "   adb pair WATCH_IP:PAIR_PORT CODE\n" +
+                                "   adb connect WATCH_IP:CONNECT_PORT\n" +
+                                "   adb tcpip 5555\n" +
+                                "3. Connect here. Wireless debugging turns off afterwards; that is expected."
+                        },
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    GhostButton(
+                        text = if (zh) "复制 adb 命令" else "Copy adb commands",
+                        onClick = {
+                            clipboard.setText(
+                                AnnotatedString(
+                                    "adb tcpip 5555\n" +
+                                        "adb pair <IP>:<PAIR_PORT> <CODE>\n" +
+                                        "adb connect <IP>:<CONNECT_PORT>",
+                                ),
+                            )
+                            adbMsg = if (zh) "命令已复制。" else "Commands copied."
+                        },
+                    )
+
+                    Spacer(Modifier.height(6.dp))
+                    HintText(
+                        if (zh) {
+                            "设备重启后 adbd 不再监听 5555，需要重新执行一次。密钥保存在本机，" +
+                                "再次连接时通常不会再弹窗。"
+                        } else {
+                            "After a reboot adbd stops listening on 5555; run the command again. " +
+                                "The key is stored locally, so later connections usually do not prompt."
+                        },
+                    )
                 }
             }
 

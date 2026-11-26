@@ -120,6 +120,11 @@ class AttachToolsTest {
         assertThat(
             tool.enabled(com.dshwatch.domain.model.AppSettings(shizukuEnabled = true)),
         ).isTrue()
+        // ADB 直连是同权的第二条通道，也必须让工具出现
+        assertThat(
+            tool.enabled(com.dshwatch.domain.model.AppSettings(adbEnabled = true)),
+        ).isTrue()
+        assertThat(tool.enabled(com.dshwatch.domain.model.AppSettings())).isFalse()
     }
 
     @Test
@@ -130,7 +135,7 @@ class AttachToolsTest {
         assertThat(shell).contains("input.copyTo(output)")
 
         val tool = File("src/main/java/com/dshwatch/domain/agent/tools/AttachTools.kt").readText()
-        assertThat(tool).contains("ShizukuShell.runIntoFile(")
+        assertThat(tool).contains("ShellGate.runIntoFile(")
         assertThat(tool).contains("screencap -p")
     }
 }

@@ -335,6 +335,15 @@ data class AppSettings(
     val shizukuEnabled: Boolean = false,
 
     /**
+     * ADB 直连通道。与 [shizukuEnabled] 同权（都是 shell 用户），但走 TCP + RSA 认证，
+     * 不依赖 Shizuku 服务进程。给 Shizuku 起不来的机型留一条备用通道。
+     *
+     * 默认关：它意味着「设备接受一条来自局域网的调试连接」，必须由用户在
+     * 设置页里填地址、亲手连接一次才算启用。
+     */
+    val adbEnabled: Boolean = false,
+
+    /**
      * 已经「始终允许」的提权命令类别（install / logs / display / battery / other）。
      *
      * 只记类别不记命令：用户同意「装应用总是允许」，下次装别的应用不该再问；

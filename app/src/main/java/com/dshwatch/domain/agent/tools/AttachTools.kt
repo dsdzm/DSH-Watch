@@ -213,7 +213,7 @@ object AttachTools {
         override val name = "device_screenshot"
 
         override val description =
-            "给这台设备截屏并把图直接给你看（需要 Shizuku）。" +
+            "给这台设备截屏并把图直接给你看（需要 Shizuku 或 ADB 直连）。" +
                 "device_screen 只给控件文字，布局与图上的字只有截图看得出。调用前先把目标界面留在屏幕上。"
 
         override val safety = ToolSafety.READ_ONLY
@@ -224,7 +224,9 @@ object AttachTools {
          * 没有 Shizuku 的机器上这个工具必然失败，而工具表每轮都要进上下文 ——
          * 让一个注定失败的 schema 常驻是纯浪费，也容易把模型引到"怪路"上。
          */
-        override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = { it.shizukuEnabled }
+        override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = {
+            com.dshwatch.domain.shell.ShellGate.available(it.shizukuEnabled, it.adbEnabled)
+        }
 
         override val parameters = Schema.obj(
             properties = mapOf(
@@ -235,21 +237,8 @@ object AttachTools {
 
         override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult {
             val context = ctx.requireContext()
-            when (com.dshwatch.domain.shell.ShizukuShell.state(context)) {
-                com.dshwatch.domain.shell.ShizukuShell.State.READY -> Unit
-                com.dshwatch.domain.shell.ShizukuShell.State.NOT_INSTALLED -> return ToolResult.fail(
-                    "设备上没有 Shizuku，截不了屏。可以改用 adb_shell 或脚本截图，再 attach_file 那条路径。",
-                )
-
-                com.dshwatch.domain.shell.ShizukuShell.State.NOT_RUNNING -> return ToolResult.fail(
-                    "Shizuku 装在设备上但没在运行。让用户打开 Shizuku 启动服务后再试；" +
-                        "在此之前可以先 attach_file 一张已有的图。",
-                )
-
-                com.dshwatch.domain.shell.ShizukuShell.State.NOT_GRANTED -> return ToolResult.fail(
-                    "Shizuku 在运行但没给 DSH 授权。让用户到「设置 → 设备操控 → Shizuku 提权」点授权。",
-                )
-            }
+            val channel = com.dshwatch.domain.shell.ShellGate.status(context)
+            if (!channel.ready) return ToolResult.fail(channel.detail)
 
             val note = args.strOf("note").orEmpty().trim()
             val dir = File(context.cacheDir, "shots").apply { mkdirs() }
@@ -264,7 +253,8 @@ object AttachTools {
              * 部分旧 ROM 的 toybox 在这个组合下会把换行改写，PNG 头就烂了。
              * 这里干脆让进程的标准输出直接落进文件（见 runIntoFile）。
              */
-            val result = com.dshwatch.domain.shell.ShizukuShell.runIntoFile(
+            val result = com.dshwatch.domain.shell.ShellGate.runIntoFile(
+                context = context,
                 command = "screencap -p",
                 outFile = out,
             )

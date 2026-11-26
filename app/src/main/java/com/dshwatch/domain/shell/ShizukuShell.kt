@@ -100,15 +100,6 @@ object ShizukuShell {
         }.onFailure { Logx.w(TAG, "挂 binder 监听失败：${it.message}") }
     }
 
-    data class Outcome(
-        val exitCode: Int,
-        val stdout: String,
-        val stderr: String,
-        val timedOut: Boolean = false,
-        val error: String = "",
-    ) {
-        val ok: Boolean get() = error.isEmpty() && !timedOut && exitCode == 0
-    }
 
     enum class State {
         /** 设备上没装 Shizuku */
@@ -219,11 +210,11 @@ object ShizukuShell {
      * `command` 里可以带管道、重定向、`&&` —— 一律通过 `sh -c` 交给系统 shell，
      * 与 adb shell 的行为一致。
      */
-    suspend fun run(command: String, timeoutMs: Long = 30_000): Outcome =
+    suspend fun run(command: String, timeoutMs: Long = 30_000): ShellOutcome =
         withContext(Dispatchers.IO) {
-            if (command.isBlank()) return@withContext Outcome(-1, "", "", error = "命令为空")
+            if (command.isBlank()) return@withContext ShellOutcome(-1, "", "", error = "命令为空")
             if (!granted()) {
-                return@withContext Outcome(
+                return@withContext ShellOutcome(
                     -1, "", "",
                     error = "没有 Shizuku 授权。请先在设置里安装并启用 Shizuku，再回来授权。",
                 )
@@ -233,7 +224,7 @@ object ShizukuShell {
                 Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
             }.getOrElse {
                 Logx.e(TAG, "启动进程失败", it)
-                return@withContext Outcome(-1, "", "", error = "启动失败：${it.message}")
+                return@withContext ShellOutcome(-1, "", "", error = "启动失败：${it.message}")
             }
 
             val out = StringBuilder()
@@ -254,7 +245,7 @@ object ShizukuShell {
             runCatching { t2.join(800) }
 
             val code = if (finished) runCatching { process.exitValue() }.getOrDefault(-1) else -1
-            Outcome(
+            ShellOutcome(
                 exitCode = code,
                 stdout = out.toString(),
                 stderr = err.toString(),
@@ -269,17 +260,17 @@ object ShizukuShell {
      * 解码 —— 解出来的是一串乱码，而且原样存回去也还原不了图片。
      * 这里直接把进程的标准输出接到文件流上，不做任何字符转换。
      *
-     * 返回的 [Outcome] 里 `stdout` 恒为空（内容已经进文件了），
-     * 判断成败看 [Outcome.ok] 与文件大小。
+     * 返回的 [ShellOutcome] 里 `stdout` 恒为空（内容已经进文件了），
+     * 判断成败看 [ShellOutcome.ok] 与文件大小。
      */
     suspend fun runIntoFile(
         command: String,
         outFile: java.io.File,
         timeoutMs: Long = 20_000,
-    ): Outcome = withContext(Dispatchers.IO) {
-        if (command.isBlank()) return@withContext Outcome(-1, "", "", error = "命令为空")
+    ): ShellOutcome = withContext(Dispatchers.IO) {
+        if (command.isBlank()) return@withContext ShellOutcome(-1, "", "", error = "命令为空")
         if (!granted()) {
-            return@withContext Outcome(
+            return@withContext ShellOutcome(
                 -1, "", "",
                 error = "没有 Shizuku 授权。请先在设置里安装并启用 Shizuku，再回来授权。",
             )
@@ -288,7 +279,7 @@ object ShizukuShell {
         val process = runCatching {
             Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
         }.getOrElse {
-            return@withContext Outcome(-1, "", "", error = "启动失败：${it.message}")
+            return@withContext ShellOutcome(-1, "", "", error = "启动失败：${it.message}")
         }
 
         val err = StringBuilder()
@@ -310,7 +301,7 @@ object ShizukuShell {
         runCatching { t2.join(800) }
 
         val code = if (finished) runCatching { process.exitValue() }.getOrDefault(-1) else -1
-        Outcome(
+        ShellOutcome(
             exitCode = code,
             stdout = "",
             stderr = err.toString(),
@@ -318,7 +309,8 @@ object ShizukuShell {
         )
     }
 
-    private fun drain(stream: java.io.InputStream, sink: StringBuilder) {        runCatching {
+    private fun drain(stream: java.io.InputStream, sink: StringBuilder) {
+        runCatching {
             stream.bufferedReader().use { reader ->
                 val buf = CharArray(4096)
                 while (true) {
@@ -335,7 +327,7 @@ object ShizukuShell {
     }
 
     /** 拼成给模型看的一段文本 */
-    fun render(outcome: Outcome, command: String): String = buildString {
+    fun render(outcome: ShellOutcome, command: String): String = buildString {
         if (outcome.error.isNotEmpty()) {
             append(outcome.error)
             return@buildString

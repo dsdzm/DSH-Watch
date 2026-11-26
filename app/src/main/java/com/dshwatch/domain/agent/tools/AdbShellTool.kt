@@ -9,6 +9,7 @@ import com.dshwatch.domain.agent.strOf
 import com.dshwatch.domain.shell.ShellAudit
 import com.dshwatch.domain.shell.ShellRisk
 import com.dshwatch.domain.shell.ShellRules
+import com.dshwatch.domain.shell.ShellGate
 import com.dshwatch.domain.shell.ShizukuShell
 import kotlinx.serialization.json.JsonObject
 
@@ -28,13 +29,15 @@ object AdbShellTool : AgentTool {
     override val name = "adb_shell"
 
     override val description =
-        "以 adb（shell 用户，非 root）执行命令，需 Shizuku。" +
+        "以 adb（shell 用户，非 root）执行命令，需 Shizuku 或 ADB 直连。" +
             "能装应用、读日志、改屏幕/电池/系统设置、pm grant。" +
             "purpose 必填：一句话说明为什么跑。普通脚本用 run_script。"
 
     override val safety = ToolSafety.WRITE
 
-    override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = { it.shizukuEnabled }
+    override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = {
+        ShellGate.available(it.shizukuEnabled, it.adbEnabled)
+    }
 
     override val parameters = Schema.obj(
         properties = mapOf(
@@ -54,25 +57,10 @@ object AdbShellTool : AgentTool {
         val command = args.strOf("command")?.trim().orEmpty()
         if (command.isEmpty()) return ToolResult.fail("缺少 command 参数")
 
-        when (ShizukuShell.state(context)) {
-            ShizukuShell.State.NOT_INSTALLED -> return ToolResult.fail(
-                "设备上没有安装 Shizuku。告诉用户：在设置 → 设备操控 → Shizuku 提权 里可以看安装指引；" +
-                    "没有 Shizuku 时只能用 device_* 四个工具做界面操作。",
-            )
+        val channel = ShellGate.status(context)
+        if (!channel.ready) return ToolResult.fail(channel.detail)
 
-            ShizukuShell.State.NOT_RUNNING -> return ToolResult.fail(
-                "Shizuku 已安装但没有运行。告诉用户：打开 Shizuku，按它提示启动服务" +
-                    "（Android 11+ 可用无线调试启动，重启手机后需要重新启动一次）。",
-            )
-
-            ShizukuShell.State.NOT_GRANTED -> return ToolResult.fail(
-                "Shizuku 在运行，但没给 DSH 授权。让用户到 设置 → 设备操控 → Shizuku 提权 里点「授权」。",
-            )
-
-            ShizukuShell.State.READY -> Unit
-        }
-
-        val outcome = ShizukuShell.run(command)
+        val outcome = ShellGate.run(context, command)
         ShellAudit.record(
             context = context,
             command = command,

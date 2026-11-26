@@ -29,6 +29,9 @@ class DshWatchApp : Application() {
         // 推不进来不会重试；界面不能只靠点按钮那一刻的 ping 判断。
         // 越早挂越好（sticky 版会在已经有 binder 时立刻回调一次）。
         com.dshwatch.domain.shell.ShizukuShell.installListeners()
+        // 恢复上次的 ADB 端点，让界面一进来就显示正确的通道状态；
+        // 这里只读配置，不发起连接 —— 启动阶段做网络握手会把冷启动拖慢。
+        runCatching { com.dshwatch.domain.adb.AdbShell.restore(this) }
         // 最开头就写下"启动中"标记。
         //
         // 顺序很重要：必须在任何可能崩的事情之前。这个 App 启动路径上有几个

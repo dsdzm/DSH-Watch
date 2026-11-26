@@ -33,3 +33,6 @@ signing/
 # Python
 __pycache__/
 *.pyc
+
+# 文档流水线中间产物（版本说明的 stage 输出），不进版本库
+output/
