@@ -123,8 +123,8 @@ object HelpContent {
 
         HelpTopic(
             id = "scene",
-            title = t("三个场景", "Three scenes"),
-            summary = t("编程 / 酒馆 / 写作各是什么", "Coding, tavern and writing"),
+            title = t("四个场景", "Four scenes"),
+            summary = t("编程 / 酒馆 / 写作 / 养鱼各是什么", "Coding, tavern, writing and Fish"),
             blocks = listOf(
                 text(
                     "首页按场景分流。切换入口在「设置 → 对话 → 使用场景」，引导页里也能选。",
@@ -141,6 +141,10 @@ object HelpContent {
                 bullet(
                     "写作：同一套角色卡，提示词换成续写，一次 200~600 字。",
                     "Writing: same cards, but the prompt asks for 200–600 characters of prose.",
+                ),
+                bullet(
+                    "养鱼：只有一个角色（大肥鱼），界面是 QQ 式的左右气泡，回复拆成几条短消息连发。",
+                    "Fish: one fixed character, QQ-style bubbles, replies split into a few short messages.",
                 ),
                 note(
                     "切场景不会删掉已有会话，原来的对话在会话列表里都还在。",

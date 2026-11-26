@@ -48,12 +48,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dshwatch.domain.model.Conversation
 import java.util.Calendar
+
+/**
+ * 抽屉底部额外的一项。
+ *
+ * 目前只有养鱼用它放「记忆」：那一页的顶栏收成了和编程页一样的三段，
+ * 原来挂在顶栏上的记忆入口需要有个新家 —— 放进抽屉底部，和「切换模式 / 全部记录」
+ * 同一层级，用得到的时候才出现。
+ */
+data class PhoneDrawerExtra(
+    val title: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit,
+)
 
 /**
  * 左侧历史记录抽屉。
@@ -82,7 +96,8 @@ internal fun PhoneHistoryDrawer(
     sceneLabel: String,
     modelLabel: String,
     onOpen: (Conversation) -> Unit,
-    onNewChat: () -> Unit,
+    /** 新建一段。**养鱼传 null**：那是一条鱼的一辈子，多开一段就断了记忆 */
+    onNewChat: (() -> Unit)? = null,
     onPickScene: () -> Unit,
     onSettings: () -> Unit,
     /** 去记录页整理（多选在那里做，抽屉里放不下两个模式） */
@@ -91,6 +106,10 @@ internal fun PhoneHistoryDrawer(
     onTogglePin: (Conversation) -> Unit,
     onAbout: (Conversation) -> Unit,
     onDelete: (Conversation) -> Unit,
+    /** 某个模式专属的一项（养鱼放「记忆」）；null 时这一行不出现 */
+    extra: PhoneDrawerExtra? = null,
+    /** 同 [extra]，但可以有多个（养鱼：动态 + 记忆） */
+    extras: List<PhoneDrawerExtra> = emptyList(),
 ) {
     var query by remember { mutableStateOf("") }
 
@@ -163,11 +182,13 @@ internal fun PhoneHistoryDrawer(
 
             Spacer(Modifier.height(8.dp))
 
-            DrawerAction(
-                icon = Icons.Filled.Add,
-                title = "新对话",
-                onClick = onNewChat,
-            )
+            if (onNewChat != null) {
+                DrawerAction(
+                    icon = Icons.Filled.Add,
+                    title = "新对话",
+                    onClick = onNewChat,
+                )
+            }
             DrawerAction(
                 icon = Icons.Outlined.PushPin,
                 title = sceneLabel,
@@ -180,6 +201,22 @@ internal fun PhoneHistoryDrawer(
                 trailing = "整理 ›",
                 onClick = onManage,
             )
+            extras.forEach { item ->
+                DrawerAction(
+                    icon = item.icon,
+                    title = item.title,
+                    trailing = "›",
+                    onClick = item.onClick,
+                )
+            }
+            if (extra != null) {
+                DrawerAction(
+                    icon = extra.icon,
+                    title = extra.title,
+                    trailing = "›",
+                    onClick = extra.onClick,
+                )
+            }
 
             Spacer(Modifier.height(6.dp))
             HorizontalDivider(

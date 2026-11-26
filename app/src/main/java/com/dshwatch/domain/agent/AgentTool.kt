@@ -41,10 +41,29 @@ data class ToolResult(
      * 不必再去「工作空间」页里翻。工具本身只管干活，怎么呈现交给 UI。
      */
     val artifact: String = "",
+    /**
+     * 这次调用取到的**图片**（本机绝对路径），要作为图像进模型的眼睛。
+     *
+     * ## 为什么工具结果需要图片通道
+     *
+     * 「设备操控」过去只有一份无障碍读屏的文字快照：能读到"按钮 发送"，
+     * 读不到"这个界面长什么样"。而很多事只有看图才成立 —— 布局有没有错位、
+     * 图表在说什么、用户到底卡在哪一屏。手表这类设备更是连系统截图能力都没有，
+     * 只能靠人对着一张照片描述，而模型明明可以直接看。
+     *
+     * 于是 `attach_file` / `device_screenshot` 把图片路径放进这里，
+     * 由 [com.dshwatch.domain.ChatEngine] 在工具循环的下一轮附成一条用户消息 ——
+     * OpenAI 协议的 `role=tool` 消息不能带图，只能这么做。
+     */
+    val images: List<String> = emptyList(),
 ) {
     companion object {
         fun ok(text: String, artifact: String = "") = ToolResult(true, text, artifact)
         fun fail(text: String) = ToolResult(false, text)
+
+        /** 带图的结果。图必须已经落成本机文件，路径要给绝对路径 */
+        fun withImages(text: String, images: List<String>) =
+            ToolResult(true, text, "", images.filter { it.isNotBlank() })
     }
 }
 
@@ -74,8 +93,23 @@ class ToolContext(
     val prompter: UserPromptChannel = UserPromptChannel(),
     /** agent 设过的闹钟（AlarmManager 自己查不到，只能自己记账） */
     val alarms: com.dshwatch.data.store.AlarmStore? = null,
+    /**
+     * 养鱼：她自己约的主动消息。
+     *
+     * 放在这里而不是让工具自己去拿容器：工具只认识 [ToolContext]，
+     * 这也是单测能构造一个不带 Android 的工具上下文的原因。
+     */
+    val proactive: com.dshwatch.data.store.ProactiveStore? = null,
     /** 多步任务清单（按会话目录分键） */
     val todos: TodoBoard? = null,
+    /**
+     * 养鱼页的外观。
+     *
+     * 让用户能用一句话改自己的页面（「背景换成深蓝，名字叫阿鲤」）——
+     * 工具只写这些字段，具体怎么画是界面的事。为空时（单测 / 非养鱼场景）
+     * 工具直接报「当前没有可改的页面」，不会假装成功。
+     */
+    val fishSkin: com.dshwatch.data.store.FishSkinStore? = null,
     /** 需要界面才能完成的动作（打开页面、弹预览） */
     val uiActions: UiActionChannel? = null,
     /**
@@ -127,7 +161,9 @@ class ToolContext(
         workspaceRoot = workspaceRoot,
         prompter = prompter,
         alarms = alarms,
+        proactive = proactive,
         todos = todos,
+        fishSkin = fishSkin,
         uiActions = uiActions,
         // 新字段必须在这里同步 —— 漏掉不会编译报错，但换会话后工具会静默看不到设置，
         // 那种 bug 极难定位（ToolContextTest 专门钉住这一点）
@@ -172,6 +208,18 @@ interface AgentTool {
      * 是因为「这个工具要不要出现」本来就是工具自己的属性。
      */
     val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean get() = { true }
+
+    /**
+     * 只在某个场景里出现的工具（null = 所有场景都给）。
+     *
+     * 为什么不用 [enabled] 表达这件事：`enabled` 读的是全局设置 `useScene`，
+     * 而"当前这一轮是哪个场景"由**会话**决定。从记录页点进一条养鱼会话时，
+     * `useScene` 可能还停在编程 —— 用 `enabled` 判场景，工具就会无声消失，
+     * 模型明明该能约时间却一次都没约过（1.24.1-beta.39 的真机反馈就是这个）。
+     *
+     * 场景判断放在[com.dshwatch.domain.ChatEngine]里，它手上才有 `scene`。
+     */
+    val onlyInScene: String? get() = null
 
     /** JSON Schema（type: object） */
     val parameters: JsonObject

@@ -121,6 +121,33 @@ fun PhoneRoot(
                     appearance ->
                         PhoneAppearanceScreen(container = container, settings = settings, nav = nav)
 
+                    /*
+                     * 对话页（酒馆 / 写作 / 养鱼共用同一个 Screen）必须走手机版。
+                     *
+                     * 以前它落进下面的 `else`，被当成"共用的次级页"交给 `ScreenHost`——
+                     * 于是从记录里点开一条会话，或者从角色卡点「开始对话」，
+                     * 落地的是一页 `WatchScaffold` 写的界面：顶栏一排小图标、
+                     * 消息整宽一块、输入要再跳一层。用户看到的就是"又回手表了"。
+                     */
+                    page == Screen.RoleplayChat ->
+                        PhoneRoleplayChatScreen(container = container, settings = settings, nav = nav)
+
+                    /*
+                     * 某张卡的历史：手机上用同一套记录页，只是先过滤再显示。
+                     *
+                     * 手表那版是 `WearList`（一行一行、靠滚动选择），在手机上点开
+                     * 一张卡的历史却看到表盘列表，等于把用户扔回另一个界面。
+                     */
+                    page is Screen.SceneSessions ->
+                        PhoneSessionsScreen(
+                            container = container,
+                            settings = settings,
+                            nav = nav,
+                            filterScene = page.scene,
+                            filterCardId = page.cardId,
+                            onBack = { nav.pop() },
+                        )
+
                     else -> WatchStyledPage(bottomInset = true) {
                         ScreenHost(
                             page = page,
@@ -142,23 +169,32 @@ fun PhoneRoot(
                      * 而酒馆首页只能从手表界面进 —— 手机上等于不存在。
                      */
                     PhoneTab.Chat -> when (com.dshwatch.domain.roleplay.Scenes.of(settings.useScene)) {
+                        /*
+                         * 四个模式在手机上都走 MD3 原生页，不再套手表的 `WatchScaffold`。
+                         *
+                         * 以前酒馆 / 写作在这里是 `WatchStyledPage { TavernScreen(...) }`——
+                         * 那是把 200dp 圆屏的骨架补一层状态栏内边距直接摊到手机上：
+                         * 顶栏是「文字标题 + 场景胶囊 + 齿轮」，卡片是玻璃，按钮是 40dp 小方条。
+                         * 和隔壁编程页放在一起像两个 App，所以现在各有一份手机实现，
+                         * 共用 `PhoneChatHeader` / `PhoneComposer` / 底部导航这一套外壳。
+                         */
                         com.dshwatch.domain.roleplay.Scenes.TAVERN ->
-                            WatchStyledPage {
-                                com.dshwatch.ui.screens.tavern.TavernScreen(
-                                    container = container,
-                                    settings = settings,
-                                    nav = nav.watchStack,
-                                )
-                            }
+                            PhoneTavernScreen(container = container, settings = settings, nav = nav)
 
                         com.dshwatch.domain.roleplay.Scenes.WRITING ->
-                            WatchStyledPage {
-                                com.dshwatch.ui.screens.writing.WritingScreen(
-                                    container = container,
-                                    settings = settings,
-                                    nav = nav.watchStack,
-                                )
-                            }
+                            PhoneWritingScreen(container = container, settings = settings, nav = nav)
+
+                        /*
+                         * 养鱼要占满整屏（含状态栏与键盘），所以**不套** WatchStyledPage：
+                         * 那一层会替它补 statusBarsPadding，而它自己已经补过一次，
+                         * 结果顶栏会被顶下去一截，聊天列表少一行。
+                         */
+                        com.dshwatch.domain.roleplay.Scenes.FISH ->
+                            com.dshwatch.ui.screens.fish.FishPhoneScreen(
+                                container = container,
+                                settings = settings,
+                                nav = nav,
+                            )
 
                         else -> PhoneChatScreen(container = container, settings = settings, nav = nav)
                     }

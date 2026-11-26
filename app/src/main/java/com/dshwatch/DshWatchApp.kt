@@ -5,6 +5,7 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.core.CrashLog
 import com.dshwatch.core.Logx
 import com.dshwatch.domain.bili.BiliSchedule
+import com.dshwatch.domain.fish.FishProactiveSchedule
 import com.dshwatch.domain.device.DeviceControlHub
 import com.dshwatch.service.StreamingService
 import kotlinx.coroutines.delay
@@ -134,6 +135,36 @@ class DshWatchApp : Application() {
                     .distinctUntilChanged()
                     .collect { BiliSchedule.sync(this@DshWatchApp, container.settings.value) }
             }.onFailure { Logx.w("Bili", "定时同步失败", it) }
+        }
+
+        /*
+         * 养鱼主动发言：启动时对齐一次，之后设置一改就重排。
+         *
+         * 订阅的键里带上「时间列表」本身：改了 07:00 → 08:00 必须重排，
+         * 而改主题、改模型不该动闹钟 —— 后者每改一次就让下一次触发重新计时，
+         * 用户会发现"越改越不准"。
+         *
+         * 一次性计划（她自己约的）也参与计算，所以要读一次 store；
+         * 读盘失败时按空表处理，至少每天的四个点还能响。
+         */
+        container.appScope.launch {
+            runCatching {
+                container.settings
+                    // 带 fishEnabled：用户在启用卡片上点「开始养鱼」时要立刻排上闹钟，
+                    // 关掉时要立刻撤掉 —— 那一秒差里多响一次，就是一次白花的请求
+                    .map { listOf<Any>(it.fishEnabled, it.fishProactive, it.fishProactiveTimes, it.fishProviderId) }
+                    .distinctUntilChanged()
+                    .collect {
+                        val plans = runCatching {
+                            container.proactiveStore.pending().map { p -> p.triggerAt }
+                        }.getOrDefault(emptyList())
+                        FishProactiveSchedule.sync(
+                            this@DshWatchApp,
+                            container.settings.value,
+                            plans,
+                        )
+                    }
+            }.onFailure { Logx.w("FishProactive", "主动发言同步失败", it) }
         }
         CrashLog.mark("Application.onCreate 结束")
     }

@@ -50,6 +50,7 @@ import com.dshwatch.ui.components.PrimaryButton
 import com.dshwatch.ui.components.cornerSafe
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.components.rememberCameraShot
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.screens.files.FileBrowserPanel
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import com.dshwatch.ui.components.glassSurface
 import com.dshwatch.ui.theme.LocalGlass
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -80,6 +82,15 @@ fun InputScreen(
     val focusRequester = remember { FocusRequester() }
     val settings by container.settings.collectAsStateWithLifecycle()
     val conversation by container.engine.conversation.collectAsStateWithLifecycle()
+
+    /*
+     * 养鱼模式下这一页还承担「插话」。
+     *
+     * 那一页的底部只有一颗「说话」的圆按钮（圆屏底部的横条放不下），
+     * 所以"在她还在发的时候补充一句"必须从这一页进去。发送时若她还在生成，
+     * 先让她停、隔一拍、再把新话发进去 —— 也就是她听到一半改口。
+     */
+    val fishMode = conversation?.scene == com.dshwatch.domain.roleplay.Scenes.FISH
 
     /*
      * 附件。
@@ -124,6 +135,16 @@ fun InputScreen(
         uri?.let { absorb(it) }
     }
 
+    /*
+     * 手表上拍照比传文件常见得多（抬手就拍，文件管理器反而难翻）。
+     * 和「＋ 文件」并排，少一层系统选择器。
+     */
+    val shoot = rememberCameraShot(
+        context = context,
+        onPicked = { uri -> absorb(uri) },
+        onError = { attachNote = it },
+    )
+
     // 只有 DeepSeek 才有峰谷计价，别的供应商显示这行只会是噪音
     val provider = settings.activeProvider
     val model = conversation?.model?.ifBlank { provider?.defaultModel.orEmpty() }.orEmpty()
@@ -149,9 +170,28 @@ fun InputScreen(
      */
     fun submit() {
         val value = text.trim()
+        val atts = attachments.filter { it.ok }
         // 只带附件不写字是合法用法：上传一份文件直接问「这份合同有什么风险」
-        if (value.isEmpty() && attachments.isEmpty()) return
-        if (container.engine.send(value, attachments.filter { it.ok })) {
+        if (value.isEmpty() && atts.isEmpty()) return
+
+        if (fishMode && container.engine.streaming.value) {
+            /*
+             * 插话。
+             *
+             * 引擎在生成中会拒绝新消息（返回 false），所以要先把这一轮停掉。
+             * 中间那 320ms 不是随便等的：它是"她停住听你说"的那一拍，
+             * 短了像机器在排队，长了像没听见。发成功才退页 —— 失败就把字留着，
+             * 用户还能再按一次，而不是白白丢一句话。
+             */
+            scope.launch {
+                container.engine.stop()
+                delay(320)
+                if (container.engine.send(value, atts)) nav.pop() else busy = true
+            }
+            return
+        }
+
+        if (container.engine.send(value, atts)) {
             nav.pop()
         } else {
             busy = true
@@ -186,7 +226,16 @@ fun InputScreen(
             }
             if (busy) {
                 Text(
-                    text = "上一轮还在生成，等它写完再发（内容已保留）",
+                    /*
+                     * 两种场景的"为什么没发出去"不一样：
+                     * 编程是"上一轮还在跑"，养鱼是"她还没停下来"。
+                     * 用同一句话会让人以为这条鱼也卡在工具调用里。
+                     */
+                    text = if (fishMode) {
+                        "她还没停下来，等一下再发（内容已保留）"
+                    } else {
+                        "上一轮还在生成，等它写完再发（内容已保留）"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -254,6 +303,11 @@ fun InputScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Chip(
+                    // 不用 emoji：部分手表 ROM 缺彩色 emoji，会渲染成一个方框
+                    text = "拍照",
+                    onClick = { if (!attachBusy) shoot() },
+                )
+                Chip(
                     text = when {
                         attachBusy -> "读取中…"
                         attachments.isEmpty() -> "＋ 文件"
@@ -302,17 +356,24 @@ fun InputScreen(
 
             Spacer(Modifier.height(6.dp))
 
-            // 快捷指令：手表打字慢，常用意图一键插入
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                QUICK_PROMPTS.forEach { (label, prompt) ->
-                    Chip(text = label, onClick = {
-                        text = if (text.isBlank()) prompt else (text.trimEnd() + "\n" + prompt)
-                    })
+            /*
+             * 快捷指令：手表打字慢，常用意图一键插入。
+             *
+             * 养鱼页不显示：那一列是「解释 / 修 Bug / 写测试」，对着一条鱼发过去
+             * 只会把人设撞坏。那张页面本来就要求一次只说一句人话。
+             */
+            if (!fishMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    QUICK_PROMPTS.forEach { (label, prompt) ->
+                        Chip(text = label, onClick = {
+                            text = if (text.isBlank()) prompt else (text.trimEnd() + "\n" + prompt)
+                        })
+                    }
                 }
             }
             Spacer(Modifier.height(4.dp))

@@ -265,13 +265,6 @@ private fun ModelGroup(settings: AppSettings, nav: WatchNavigator, s: AppStrings
             onClick = { nav.push(Screen.Usage) },
         )
     }
-    Spacer(Modifier.height(6.dp))
-    Text(
-        text = "这里决定「用哪个模型、花多少钱」。换个供应商后，对话页顶部也会跟着变。",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.outline,
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -463,8 +456,7 @@ private fun AppearanceGroup(
             },
         )
         Text(
-            text = "切换后界面立刻换成另一套。手机布局是独立的底部导航界面，" +
-                "这里的主题、缩放、玻璃材质都不会跟过去。",
+            text = "手机与手表为两套独立界面，主题、缩放与材质不互通。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
             modifier = Modifier.padding(top = 4.dp),

@@ -56,6 +56,7 @@ import com.dshwatch.domain.ChatTranscript
 import com.dshwatch.domain.TranscriptFile
 import com.dshwatch.domain.model.Conversation
 import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.domain.sessions.SessionGroups
 import com.dshwatch.ui.components.Chip
 import com.dshwatch.ui.components.ConfirmDialog
 import com.dshwatch.ui.components.EmptyState
@@ -130,6 +131,23 @@ fun SessionsScreen(
         }
     }
 
+    /*
+     * 分组标题要写「酒馆 · 大肥鱼」。
+     *
+     * 手表上这一行字很贵（一屏就七八行），所以只在**真的分了卡**的时候才加，
+     * 单卡的场景（编程、养鱼）标题只写模式名。
+     */
+    var cardNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        cardNames = runCatching {
+            (container.roleCardStore.index(Scenes.TAVERN) + container.roleCardStore.index(Scenes.WRITING))
+                .associate { it.id to it.displayName }
+        }.getOrDefault(emptyMap())
+    }
+    val groups = remember(conversations, cardNames, filtered) {
+        if (filtered) emptyList() else SessionGroups.build(conversations) { cardNames[it].orEmpty() }
+    }
+
     WatchScaffold(
         title = if (filtered && cardTitle.isNotBlank()) cardTitle else s.sessionsTitle,
         onBack = { nav.pop() },
@@ -139,6 +157,9 @@ fun SessionsScreen(
                     selecting = false
                     selectedIds.clear()
                 }
+            } else if (filtered && filterScene == Scenes.FISH) {
+                // 养鱼只有一条鱼、一段话。多开一段就断了记忆与上下文，
+                // 所以这里连入口都不给（理由同手机版记录页）
             } else IconTap(Icons.Filled.Add, s.newChat) {
                 scope.launch {
                     // 过滤模式下「新建」必须落在同一张卡上，
@@ -206,38 +227,17 @@ fun SessionsScreen(
                     )
                 }
             }
-            items(conversations.size, key = { conversations[it].id }) { index ->
-                val conv = conversations[index]
-                ConversationRow(
-                    conversation = conv,
-                    selecting = selecting,
-                    selected = conv.id in selectedIds,
-                    onClick = {
-                        if (selecting) {
-                            if (!selectedIds.remove(conv.id)) selectedIds.add(conv.id)
-                        } else {
-                            scope.launch {
-                                container.engine.open(conv.id)
-                                /*
-                                 * 打开之后回到哪个页面，由会话自己的场景决定，
-                                 * 而不是由「从哪进来」决定 —— 在全局列表里点开一个
-                                 * 酒馆会话，以前会跳进编程对话页，那里没有角色名、
-                                 * 也没有记忆入口，看起来像内容丢了。
-                                 */
-                                if (filtered ||
-                                    (conv.scene.isNotBlank() &&
-                                        conv.scene != com.dshwatch.domain.roleplay.Scenes.CODING)
-                                ) {
-                                    nav.pop()
-                                    nav.push(Screen.RoleplayChat)
-                                } else {
-                                    nav.toChat()
-                                }
-                            }
-                        }
-                    },
-                    onMore = { menuTarget = conv },
-                )
+            if (groups.isEmpty()) {
+                items(conversations.size, key = { conversations[it].id }) { index ->
+                    ConversationItem(conversations[index], selecting, selectedIds, scope, container, nav, filtered, onMore = { menuTarget = it })
+                }
+            } else {
+                groups.forEach { group ->
+                    item(key = "h:${group.key}") { GroupLabel(group.title, group.count) }
+                    items(group.count, key = { group.items[it].id }) { index ->
+                        ConversationItem(group.items[index], selecting, selectedIds, scope, container, nav, filtered, onMore = { menuTarget = it })
+                    }
+                }
             }
             item(key = "__import__") {
                 WatchGhostButton(
@@ -413,6 +413,80 @@ private fun MenuItem(text: String, danger: Boolean = false, onClick: () -> Unit)
             .tap(onClick = withHaptic(onClick))
             .padding(vertical = 8.dp),
     )
+}
+
+/**
+ * 一条会话 + 点击行为。
+ *
+ * 抽出来是因为分组之后同一个渲染要出现两次（不分组 / 分组内）。
+ * 之前是内联在 `items {}` 里的，一分组就得复制一份完整的点击逻辑，
+ * 两份迟早会分叉。
+ */
+@Composable
+private fun ConversationItem(
+    conv: Conversation,
+    selecting: Boolean,
+    selectedIds: MutableList<String>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    container: AppContainer,
+    nav: WatchNavigator,
+    filtered: Boolean,
+    onMore: (Conversation) -> Unit,
+) {
+    ConversationRow(
+        conversation = conv,
+        selecting = selecting,
+        selected = conv.id in selectedIds,
+        onClick = {
+            if (selecting) {
+                if (!selectedIds.remove(conv.id)) selectedIds.add(conv.id)
+            } else {
+                scope.launch {
+                    container.engine.open(conv.id)
+                    /*
+                     * 打开之后回到哪个页面，由会话自己的场景决定，
+                     * 而不是由「从哪进来」决定 —— 在全局列表里点开一个
+                     * 酒馆会话，以前会跳进编程对话页，那里没有角色名、
+                     * 也没有记忆入口，看起来像内容丢了。
+                     */
+                    if (filtered ||
+                        (conv.scene.isNotBlank() && conv.scene != Scenes.CODING)
+                    ) {
+                        nav.pop()
+                        nav.push(Screen.RoleplayChat)
+                    } else {
+                        nav.toChat()
+                    }
+                }
+            }
+        },
+        onMore = { onMore(conv) },
+    )
+}
+
+/** 分组标题。一行小字，左边模式（· 角色），右边条数 */
+@Composable
+private fun GroupLabel(title: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 10.dp, end = 10.dp, top = 4.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "$count",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
 }
 
 @Composable

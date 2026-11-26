@@ -312,6 +312,11 @@ internal fun ScreenHost(
         Screen.Chat -> when (Scenes.of(settings.useScene)) {
             Scenes.TAVERN -> TavernScreen(container = container, settings = settings, nav = nav)
             Scenes.WRITING -> WritingScreen(container = container, settings = settings, nav = nav)
+            Scenes.FISH -> com.dshwatch.ui.screens.fish.FishScreen(
+                container = container,
+                settings = settings,
+                nav = nav,
+            )
             else -> ChatScreen(container = container, settings = settings, nav = nav)
         }
         Screen.Sessions -> SessionsScreen(container = container, nav = nav)
@@ -326,6 +331,21 @@ internal fun ScreenHost(
             filterCardId = page.cardId,
         )
         Screen.Settings -> SettingsScreen(container = container, settings = settings, profile = profile, nav = nav)
+
+        Screen.FishSettings -> com.dshwatch.ui.screens.fish.FishSettingsScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
+        Screen.FishSkin -> com.dshwatch.ui.screens.fish.FishSkinScreen(
+            container = container,
+            nav = nav,
+        )
+        Screen.FishMoments -> com.dshwatch.ui.screens.fish.FishMomentsScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
         Screen.Providers -> ProvidersScreen(container = container, settings = settings, nav = nav)
         Screen.Usage -> UsageScreen(container = container, nav = nav)
         Screen.Pair -> PairScreen(container = container, settings = settings, nav = nav)

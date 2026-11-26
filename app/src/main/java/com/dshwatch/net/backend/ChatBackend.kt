@@ -52,6 +52,14 @@ data class ChatRequest(
      * 哪天账号 token 也长成 `sk-` 开头就会静默发错头。
      */
     val accountAuth: Boolean = false,
+    /**
+     * 后台一次性请求（摘要 / 动态 / 标题）。
+     *
+     * 这类请求没有"字在一个个出来"的反馈，慢就等于卡死，所以走
+     * [com.dshwatch.net.Http.brief] —— 那个客户端带硬超时。聊天不能这么做：
+     * 推理模型首 token 等两分钟是正常的。
+     */
+    val brief: Boolean = false,
 ) {
     val agentEnabled: Boolean get() = tools.isNotEmpty()
     val displayModel: String get() = model.ifBlank { "default" }
@@ -109,6 +117,16 @@ sealed class DshError(message: String, val hint: String? = null) : Exception(mes
 
     class Parse(val detail: String) : DshError("响应解析失败", detail)
 
+    /**
+     * 请求成功了、模型也说话了，但**没有正文**。
+     *
+     * 典型是思考型模型把小额度全花在思维链上（`finish_reason=length`），
+     * 或者只回了 `reasoning_content`。它既不是网络故障，也不是模型名错
+     * （那两种是 404 / 401），所以不能混进「模型没有返回内容」那一句里 ——
+     * 用户照着那句话去改模型名，怎么改都一样。
+     */
+    class Blank(val detail: String) : DshError("模型没有给出正文", detail)
+
     object Canceled : DshError("已停止")
 
 
@@ -131,6 +149,7 @@ sealed class DshError(message: String, val hint: String? = null) : Exception(mes
             is BadConfig -> "配置有误"
             is Server -> "服务端错误"
             is Parse -> "响应格式异常"
+            is Blank -> "模型没有给出正文"
             Canceled -> "已停止"
         }
 

@@ -75,8 +75,23 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
         var reasoningRetried = false
 
         while (true) {
-            val call = Http.client.newCall(buildChatRequest(endpoint, request, withUsage, withReasoning))
+            val client = if (request.brief) Http.brief else Http.client
+            val call = client.newCall(buildChatRequest(endpoint, request, withUsage, withReasoning))
             activeCall = call
+            /*
+             * 协程被取消时**立刻**掐断这条连接。
+             *
+             * `call.execute()` 是阻塞调用，协程取消对它完全不可见 —— 取消之后
+             * 这个线程会一直阻塞到读超时为止。表现在外就是「超时了但界面还在等」：
+             * 手动整理设了时限，却要再等一整个 read timeout 才回来，用户看到的就是
+             * 「一直正在整理」。
+             *
+             * 挂在 Job 的完成回调上（而不是 `onCompletion`）是因为后者要等阻塞调用
+             * 返回才会执行，等于没有。`dispose` 在下面的 finally 里做，
+             * 正常结束时不留悬挂回调。
+             */
+            val cancel = currentCoroutineContext()[kotlinx.coroutines.Job]
+                ?.invokeOnCompletion { runCatching { call.cancel() } }
             var retryWithoutUsage = false
             var retryWithReasoning = false
             try {
@@ -121,6 +136,7 @@ class OpenAiCompatBackend(private val json: Json) : ChatBackend {
                 emit(ChatEvent.Failure(DshError.from(t)))
                 return@flow
             } finally {
+                cancel?.dispose()
                 activeCall = null
             }
 

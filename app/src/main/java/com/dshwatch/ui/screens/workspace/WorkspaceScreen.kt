@@ -63,7 +63,7 @@ import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.theme.MonoSmall
 import com.dshwatch.util.Fmt
-import com.dshwatch.ui.wear.WearList
+import com.dshwatch.ui.wear.FlatList
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 import java.io.File
@@ -221,8 +221,8 @@ fun WorkspaceScreen(
             return@WatchScaffold
         }
 
-        WearList(
-            state = com.dshwatch.ui.wear.rememberKeptListState("workspace"),
+        FlatList(
+            state = com.dshwatch.ui.wear.rememberKeptLazyState("workspace"),
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {

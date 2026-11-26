@@ -1,6 +1,10 @@
 package com.dshwatch
 
 import com.dshwatch.data.store.ConversationStore
+import com.dshwatch.data.store.MemoryHealthStore
+import com.dshwatch.domain.ResponseProbe
+import com.dshwatch.data.store.MemoryStore
+import com.dshwatch.data.store.StoredConversation
 import com.dshwatch.data.workspace.WorkspaceStore
 import com.dshwatch.data.usage.UsageRepository
 import com.dshwatch.domain.ApprovalDecision
@@ -11,12 +15,15 @@ import com.dshwatch.domain.DeviceTier
 import com.dshwatch.domain.PerfProfiles
 import com.dshwatch.domain.SettingsSource
 import com.dshwatch.domain.agent.AgentTool
+import com.dshwatch.domain.agent.PendingQuestion
+import com.dshwatch.domain.agent.UserPromptChannel
 import com.dshwatch.domain.agent.Schema
 import com.dshwatch.domain.agent.ToolContext
 import com.dshwatch.domain.agent.ToolRegistry
 import com.dshwatch.domain.agent.ToolResult
 import com.dshwatch.domain.agent.ToolSafety
 import com.dshwatch.domain.agent.strOf
+import com.dshwatch.domain.agent.tools.BuiltinTools
 import com.dshwatch.domain.model.AgentMode
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
@@ -29,6 +36,8 @@ import com.dshwatch.domain.model.ProviderType
 import com.dshwatch.domain.model.Role
 import com.dshwatch.domain.model.TokenUsage
 import com.dshwatch.domain.model.ToolStatus
+import com.dshwatch.domain.roleplay.MemoryCompressor
+import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.net.backend.BackendRegistry
 import com.dshwatch.net.backend.ChatBackend
 import com.dshwatch.net.backend.ChatEvent
@@ -38,6 +47,8 @@ import com.dshwatch.net.backend.DshError
 import com.dshwatch.net.backend.TurnSanitizer
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.flow.Flow
@@ -45,6 +56,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -100,15 +112,23 @@ class ChatEngineTest {
     /** 假后端：按调用次序播放脚本，并记录每一次请求 */
     private class ScriptedBackend(
         private val scripts: List<List<ChatEvent>>,
+        /** 第一次调用直接抛错，用来模拟"网关不支持非流式" */
+        private val failFirst: Boolean = false,
     ) : ChatBackend {
         var calls = 0
             private set
         val requests = mutableListOf<ChatRequest>()
         var cancelCount = 0
             private set
+        private var failedOnce = false
 
         override fun streamChat(request: ChatRequest): Flow<ChatEvent> = flow {
             requests += request
+            if (failFirst && !failedOnce) {
+                // 只失败一次：重试那次仍然播放脚本第 0 条
+                failedOnce = true
+                throw java.io.IOException("HTTP 400 Bad Request")
+            }
             val script = scripts.getOrElse(calls) { listOf(ChatEvent.Completed) }
             calls++
             script.forEach { emit(it) }
@@ -164,6 +184,19 @@ class ChatEngineTest {
         override fun summarize(args: JsonObject) = args.strOf("text").orEmpty()
     }
 
+    /** 模拟 attach_file / device_screenshot：结果里带一张图 */
+    private class ShotTool : AgentTool {
+        override val name = "shot"
+        override val description = "取一张图"
+        override val safety = ToolSafety.READ_ONLY
+        override val parameters = Schema.obj(properties = emptyMap())
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult =
+            ToolResult.withImages("已截屏", listOf("/tmp/fake-shot.png", "  "))
+
+        override fun summarize(args: JsonObject) = "截屏"
+    }
+
     private class BoomTool : AgentTool {
         override val name = "boom"
         override val description = "总是抛异常"
@@ -179,12 +212,15 @@ class ChatEngineTest {
         backend: ChatBackend,
         tools: List<AgentTool> = emptyList(),
         credentials: CredentialSource = FakeCredentials(),
+        promptChannel: UserPromptChannel? = null,
     ): Pair<ChatEngine, ConversationStore> {
         // 复用 runTest 的调度器，否则 advanceUntilIdle() 覆盖不到存储层协程，断言会 flaky
         val dispatcher = UnconfinedTestDispatcher(scope.testScheduler)
-        val store = ConversationStore(tmp.newFolder("conv"), json, dispatcher)
-        val usage = UsageRepository(tmp.newFolder("usage"), json, dispatcher)
-        val workspace = WorkspaceStore(tmp.newFolder("workspace"), dispatcher)
+        // 无参 newFolder：同一个用例里可能构造两个引擎（共享通道的回归测试），
+        // 固定名字会撞车抛 IOException
+        val store = ConversationStore(tmp.newFolder(), json, dispatcher)
+        val usage = UsageRepository(tmp.newFolder(), json, dispatcher)
+        val workspace = WorkspaceStore(tmp.newFolder(), dispatcher)
         val registry = ToolRegistry(
             context = ToolContext(
                 appContext = null, // JVM 单测里没有 Android Context，下面这些假工具也用不到
@@ -203,6 +239,7 @@ class ChatEngineTest {
             backends = FakeRegistry(backend),
             perfProvider = { PerfProfiles.of(PerfMode.AUTO, DeviceTier.MID) },
             toolRegistry = { registry },
+            promptChannel = promptChannel,
             json = json,
         )
         return engine to store
@@ -489,6 +526,104 @@ class ChatEngineTest {
         assertThat(prompt).contains("cloud_build")
         // 没有收窄时不该出现"本轮只开放"这种限定语
         assertThat(prompt).doesNotContain("本轮只开放")
+    }
+
+    @Test
+    fun `顶栏切换的模型会真的用在请求里`() = runTest {
+        /*
+         * 会话级模型（overrideModel → conv.model）以前只被界面读，runSend 完全不看；
+         * 更糟的是发送时 `conv.copy(model = model)` 会把它覆写回供应商默认值 ——
+         * 顶栏显示换了、请求里还是旧模型，发完连显示都跟着退回去。
+         * 用户看到的就是「表面上换了」。
+         */
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            providers = listOf(provider.copy(models = listOf("test-model", "other-model"))),
+        )
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.overrideModel("other-model")
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().model).isEqualTo("other-model")
+        // 发完之后会话里记的也必须是它，否则下一轮顶栏又跳回默认模型
+        assertThat(engine.conversation.value?.model).isEqualTo("other-model")
+    }
+
+    @Test
+    fun `会话里留着的别家模型名会退回当前供应商的默认值`() = runTest {
+        /*
+         * 换供应商之后，旧供应商的模型名打过去只会换回 404 model not found。
+         * 采用会话模型的前提是它属于当前这家。
+         */
+        val second = provider.copy(id = "p2", name = "Second")
+        val settings = AppSettings(
+            providers = listOf(provider.copy(models = listOf("test-model", "other-model")), second),
+            activeProviderId = second.id,
+        )
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.overrideModel("other-model")
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().model).isEqualTo("test-model")
+    }
+
+    @Test
+    fun `共享提问通道时后构造的引擎不会抢走问题`() = runTest {
+        /*
+         * 容器里有两个引擎（主引擎 + QQ 桥接），而 ToolRegistry 的工具只认识
+         * **一个**全局提问通道。以前两边都往同一个通道注册 handler，后构造的
+         * 把先注册的覆盖掉 —— 主引擎调 ask_user 时，问题进了 QQ 引擎的状态流，
+         * 界面永远不弹窗，五分钟后返回「用户没有回答」。
+         *
+         * 真机表现：ask_user 没有选择页面、工具没有弹窗。
+         */
+        val channel = UserPromptChannel()
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider()
+        val (main, _) = buildEngine(this, settings, backend, promptChannel = channel)
+        val (second, _) = buildEngine(this, settings, backend, promptChannel = channel)
+
+        val job = launch {
+            channel.ask(PendingQuestion(callId = "", question = "要不要继续"))
+        }
+        // 不能用 advanceUntilIdle：它会把 5 分钟的超时一起推完，问题刚出现就被清掉
+        runCurrent()
+
+        assertThat(main.question.value?.question).isEqualTo("要不要继续")
+        assertThat(second.question.value).isNull()
+
+        job.cancel()
+    }
+
+    @Test
+    fun `编程场景不会漏掉 ask_user，也不会带上养鱼工具`() = runTest {
+        /*
+         * 场景过滤是上一版加进来的：`onlyInScene` 只让某个工具出现在一个场景里。
+         * 它一旦写错（比如把"没有场景限制"当成"不在任何场景"），
+         * 后果是编程场景里大批工具无声消失 —— 用户看到的是"ask_user 不能用了"。
+         *
+         * 钉住两头：常规工具必须还在，养鱼工具必须被剔掉。
+         */
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("hi"), ChatEvent.Completed)))
+        val settings = settingsWithProvider().copy(
+            agentMode = AgentMode.AUTO_ALL,
+            useScene = Scenes.CODING,
+        )
+        val (engine, _) = buildEngine(
+            this, settings, backend,
+            tools = listOf(NamedTool("ask_user"), BuiltinTools.ScheduleProactiveTool),
+        )
+
+        engine.send("你好")
+        advanceUntilIdle()
+
+        assertThat(backend.requests.first().tools.map { it.toolName() })
+            .containsExactly("ask_user")
     }
 
     @Test
@@ -1189,4 +1324,641 @@ class ChatEngineTest {
 
         assertThat(engine.messages.value).isEmpty()
     }
+
+    // ================= 长期记忆压缩 =================
+
+    /**
+     * 用户真实反馈的回归：聊到 12:20 时突然翻出 12:00 的话来回复，
+     * 12:00–12:20 的对话像凭空消失。
+     *
+     * 根因是压缩完成时把切点推到了「当前末尾」，而摘要只覆盖发请求那一刻的快照。
+     * 这里用一道闸门按住摘要请求，模拟「请求还没回来，用户又聊了一轮」。
+     */
+    @Test
+    fun `压缩只切到摘要覆盖的末尾，不吃掉期间新聊的内容`() = runTest {
+        val probeGate = CompletableDeferred<Unit>()
+        var streams = 0
+        val backend = object : ChatBackend {
+            override fun streamChat(request: ChatRequest): Flow<ChatEvent> = flow {
+                if (streams++ == 0) {
+                    probeGate.await()
+                    emit(ChatEvent.Text("摘要：聊了几句天气"))
+                } else {
+                    emit(ChatEvent.Text("嗯"))
+                }
+                emit(ChatEvent.Completed)
+            }
+
+            override suspend fun listModels(provider: Provider, apiKey: String, serverToken: String) =
+                emptyList<String>()
+
+            override suspend fun testConnection(provider: Provider, apiKey: String, serverToken: String) =
+                "ok"
+
+            override suspend fun diagnose(provider: Provider, apiKey: String, serverToken: String) =
+                emptyList<DiagStep>()
+
+            override fun cancelActive() {}
+        }
+
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        engine.newConversation(settings, scene = Scenes.TAVERN)
+        val conv = engine.conversation.value!!
+
+        val history = (1..6).map { i ->
+            ConversationStore.newMessage(
+                role = if (i % 2 == 1) Role.USER else Role.ASSISTANT,
+                content = "第 $i 条",
+            )
+        }
+        store.save(StoredConversation(conv, history))
+        engine.open(conv.id)
+        assertThat(engine.snapshotMessages()).hasSize(6)
+
+        val memDir = tmp.newFolder("memory")
+        val memory = MemoryStore(
+            workspaceRoot = { memDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = memory,
+            loadCard = { null },
+        )
+        compressor.maybeCompress(
+            conversationId = conv.id,
+            cardId = "card1",
+            scene = Scenes.TAVERN,
+            contextWindow = 8000,
+            force = true,
+        )
+        advanceUntilIdle() // 跑到 probe 挂起
+
+        // 摘要还在路上，用户又聊了一轮
+        engine.send("刚说到哪儿了")
+        advanceUntilIdle()
+        assertThat(engine.snapshotMessages()).hasSize(8)
+
+        probeGate.complete(Unit)
+        advanceUntilIdle()
+
+        // 切点必须停在压缩时的 6 条，而不是回来时的 8 条
+        assertThat(engine.contextStart()).isEqualTo(6)
+        assertThat(engine.conversation.value?.tavernTurn).isEqualTo(6)
+    }
+
+    /** 压缩期间切到别的会话，绝不能把切点写进那个会话 */
+    @Test
+    fun `会话已切换时不写切点`() = runTest {
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, ScriptedBackend(emptyList()))
+        engine.newConversation(settings, scene = Scenes.TAVERN)
+        val conv = engine.conversation.value!!
+        store.save(
+            StoredConversation(
+                conv,
+                (1..6).map { ConversationStore.newMessage(Role.USER, "第 $it 条") },
+            )
+        )
+        engine.open(conv.id)
+
+        engine.markContextCut(upTo = 6, onlyIfConversation = "another-conversation")
+        advanceUntilIdle()
+
+        assertThat(engine.contextStart()).isEqualTo(0)
+        assertThat(engine.conversation.value?.tavernTurn).isEqualTo(0)
+    }
+
+    /** 不传下标的老用法（手动清上下文）仍然切到当前末尾 */
+    @Test
+    fun `不传下标的切点仍然切到当前末尾`() = runTest {
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, ScriptedBackend(emptyList()))
+        engine.newConversation(settings, scene = Scenes.TAVERN)
+        val conv = engine.conversation.value!!
+        store.save(
+            StoredConversation(
+                conv,
+                (1..6).map { ConversationStore.newMessage(Role.USER, "第 $it 条") },
+            )
+        )
+        engine.open(conv.id)
+
+        engine.markContextCut()
+        advanceUntilIdle()
+
+        assertThat(engine.contextStart()).isEqualTo(6)
+    }
+
+    /**
+     * 摘要原文超出预算时，只能压「最早的一段」。
+     *
+     * 以前是取前 12000 字、切点却推到全部末尾 —— 后面那些内容既没进摘要
+     * 又被切掉，长会话里照样会「突然忘掉最近一段」。
+     */
+    @Test
+    fun `摘要超预算时切点不越过已摘要的范围`() = runTest {
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("摘要"), ChatEvent.Completed)))
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        engine.newConversation(settings, scene = Scenes.TAVERN)
+        val conv = engine.conversation.value!!
+
+        val history = (1..40).map { i ->
+            ConversationStore.newMessage(
+                role = if (i % 2 == 1) Role.USER else Role.ASSISTANT,
+                content = "第 $i 条 " + "字".repeat(1000),
+            )
+        }
+        store.save(StoredConversation(conv, history))
+        engine.open(conv.id)
+
+        val memDir = tmp.newFolder("memory-over-budget")
+        val memory = MemoryStore(
+            workspaceRoot = { memDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = memory,
+            loadCard = { null },
+        )
+        compressor.maybeCompress(
+            conversationId = conv.id,
+            cardId = "card1",
+            scene = Scenes.TAVERN,
+            contextWindow = 128_000,
+            force = true,
+        )
+        advanceUntilIdle()
+
+        // 12000 字预算、每条约 1008 字 → 只能覆盖前 11~12 条，绝不能是 40
+        val cut = engine.contextStart()
+        assertThat(cut).isLessThan(40)
+        assertThat(cut).isAtLeast(2)
+    }
+
+    /**
+     * 养鱼聊过门槛之后，**自动**判定必须真的把记忆写下来。
+     *
+     * 之前的用例全都传了 `force = true`，等于跳过了「该不该压」这一段：
+     * 门槛算错、尾巴取错、会话 id 对不上，任何一种都不会被测出来。
+     * 用户反馈「聊了八十句还是没有记忆」，正是这一段。
+     */
+    @Test
+    fun `养鱼聊满门槛后自动写入记忆`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Text("[-] 他怕黑，睡觉要留一盏灯"),
+                    ChatEvent.Completed,
+                )
+            )
+        )
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        val conv = engine.startNew(settings, Scenes.FISH, "builtin-tavern-feiyu", "大肥鱼")
+
+        val history = (1..13).map { i ->
+            ConversationStore.newMessage(
+                role = if (i % 2 == 1) Role.USER else Role.ASSISTANT,
+                content = "第 $i 句",
+            )
+        }
+        store.save(StoredConversation(conv, history))
+        engine.open(conv.id)
+        assertThat(engine.snapshotMessages()).hasSize(13)
+
+        val memDir = tmp.newFolder("memory-auto")
+        val memory = MemoryStore(
+            workspaceRoot = { memDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        val healthDir = tmp.newFolder("health-auto")
+        val health = MemoryHealthStore(
+            workspaceRoot = { healthDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+            json = json,
+        )
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = memory,
+            loadCard = { null },
+            health = health,
+        )
+        // 不传 force：走真实的门槛判定
+        compressor.maybeCompress(
+            conversationId = conv.id,
+            cardId = "builtin-tavern-feiyu",
+            scene = Scenes.FISH,
+            contextWindow = 8000,
+        )
+        advanceUntilIdle()
+
+        assertThat(backend.calls).isEqualTo(1) // 确实发了一次摘要请求
+        assertThat(memory.entries("builtin-tavern-feiyu")).isNotEmpty()
+        assertThat(engine.contextStart()).isGreaterThan(0)
+        // 体检记录要落到 written，界面才说得清"上次写了几条"
+        assertThat(health.read()?.outcome)
+            .isEqualTo(com.dshwatch.data.store.MemoryHealth.WRITTEN)
+        assertThat(health.read()?.written ?: 0).isGreaterThan(0)
+    }
+
+    /**
+     * 手动点「立即整理」时，界面必须**当场拿到结果**。
+     *
+     * 旧写法是 `maybeCompress` + `delay(5000)` 再读一遍文件：网络慢就读到空，
+     * 界面上却还写着「正在整理」—— 用户看到的就是「记忆整理一直卡住」。
+     * 这条用例钉住返回值：成功要说写了几条，失败要说卡在哪。
+     */
+    @Test
+    fun `手动整理同步返回写了几条`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Text("[-] 他怕黑，睡觉要留一盏灯"),
+                    ChatEvent.Completed,
+                )
+            )
+        )
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        val conv = engine.startNew(settings, Scenes.FISH, "builtin-tavern-feiyu", "大肥鱼")
+
+        val history = (1..13).map { i ->
+            ConversationStore.newMessage(
+                role = if (i % 2 == 1) Role.USER else Role.ASSISTANT,
+                content = "第 $i 句",
+            )
+        }
+        store.save(StoredConversation(conv, history))
+        engine.open(conv.id)
+
+        val memDir = tmp.newFolder("manual-ok")
+        val memory = MemoryStore(
+            workspaceRoot = { memDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = memory,
+            loadCard = { null },
+        )
+
+        val res = compressor.compressNow(
+            conversationId = conv.id,
+            cardId = "builtin-tavern-feiyu",
+            scene = Scenes.FISH,
+            contextWindow = 8000,
+        )
+
+        assertThat(res.ok).isTrue()
+        assertThat(res.added).isGreaterThan(0)
+        // 覆盖句数也要报出来：用户能对上"我聊了十三句，她说整理了十三句"
+        assertThat(res.covered).isEqualTo(13)
+        assertThat(memory.entries("builtin-tavern-feiyu")).isNotEmpty()
+    }
+
+    /** 内容太少时不是"失败"，而是明确说清楚为什么没整理 —— 含具体句数 */
+    @Test
+    fun `内容太少时给出可读的原因`() = runTest {
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("x"), ChatEvent.Completed)))
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        val conv = engine.startNew(settings, Scenes.FISH, "builtin-tavern-feiyu", "大肥鱼")
+        store.save(
+            StoredConversation(
+                conv,
+                listOf(ConversationStore.newMessage(role = Role.USER, content = "在吗")),
+            )
+        )
+        engine.open(conv.id)
+
+        val memDir = tmp.newFolder("manual-few")
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = MemoryStore(
+                workspaceRoot = { memDir },
+                io = UnconfinedTestDispatcher(testScheduler),
+            ),
+            loadCard = { null },
+        )
+        val res = compressor.compressNow(
+            conversationId = conv.id,
+            cardId = "builtin-tavern-feiyu",
+            scene = Scenes.FISH,
+            contextWindow = 8000,
+        )
+
+        assertThat(res.ok).isFalse()
+        assertThat(res.message).contains("太少")
+        assertThat(backend.calls).isEqualTo(0) // 不该为一个"太少"白花一次请求
+    }
+
+    /**
+     * 后端把 401 报成 `ChatEvent.Failure`，不是抛异常。
+     *
+     * 这条事件以前被 probe 静默丢掉，于是"Key 无效"和"模型没说话"在界面上
+     * 是同一句话：「模型没有返回内容」。用户拿这句话没法排查任何东西。
+     */
+    @Test
+    fun `后端拒绝时 probe 抛出真正的原因`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Failure(DshError.Http(401, "{\"error\":\"invalid api key\"}")),
+                    ChatEvent.Completed,
+                )
+            )
+        )
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        val err = runCatching {
+            engine.probe(ResponseProbe(systemPrompt = "s", userText = "u"))
+        }.exceptionOrNull()
+
+        assertThat(err).isInstanceOf(DshError::class.java)
+        assertThat((err as DshError).friendly).contains("401")
+    }
+
+    /**
+     * 工具取到的图片必须作为一条 user 消息进下一轮请求。
+     *
+     * 复现的问题：设备操控能读控件文字，却看不见画面；模型只能请人描述屏幕。
+     * attach_file / device_screenshot 把图交给引擎之后，如果这里不注入，
+     * 模型拿到的只有一句「图在 /xxx.png」—— 等于让它对着路径想象。
+     */
+    @Test
+    fun `工具取到的图片作为一条用户消息进下一轮`() = runTest {
+        val shot = ShotTool()
+        val backend = ScriptedBackend(
+            listOf(
+                toolCallScript(name = "shot", argsChunks = listOf("{}")),
+                listOf(ChatEvent.Text("看到了"), ChatEvent.Completed),
+            )
+        )
+        val (engine, _) = buildEngine(
+            this,
+            settingsWithProvider().copy(agentMode = AgentMode.AUTO_ALL),
+            backend,
+            tools = listOf(shot),
+        )
+
+        engine.send("看看这屏")
+        advanceUntilIdle()
+
+        val history = backend.requests[1].history
+        val withImage = history.firstOrNull { it.images.isNotEmpty() }
+        assertThat(withImage).isNotNull()
+        assertThat(withImage!!.role).isEqualTo("user")
+        // 空串要在 ToolResult 里就被过滤掉，不能把 "" 送进请求
+        assertThat(withImage.images).containsExactly("/tmp/fake-shot.png")
+        // 协议校验仍然要过：多出来的这条 user 消息不能让出站序列变成非法
+        assertThat(TurnSanitizer.validate(history)).isNull()
+    }
+
+    /** 模型读不了图时不要白传，而且要明确告诉用户 —— 否则表现为「怎么答非所问」 */
+    @Test
+    fun `不支持视觉的模型不会收到工具图片`() = runTest {
+        val shot = ShotTool()
+        val backend = ScriptedBackend(
+            listOf(
+                toolCallScript(name = "shot", argsChunks = listOf("{}")),
+                listOf(ChatEvent.Text("好"), ChatEvent.Completed),
+            )
+        )
+        val textOnly = settingsWithProvider().copy(
+            agentMode = AgentMode.AUTO_ALL,
+            providers = listOf(provider.copy(visionInput = false)),
+        )
+        val (engine, _) = buildEngine(this, textOnly, backend, tools = listOf(shot))
+
+        engine.send("看看这屏")
+        advanceUntilIdle()
+
+        // 图不发出去，但要让用户知道：横幅上写明「当前模型读不了图」
+        assertThat(backend.requests[1].history.none { it.images.isNotEmpty() }).isTrue()
+        assertThat(engine.banner.value?.text.orEmpty()).contains("读不了图")
+    }
+
+    /** 摘要请求必须用调用方指定的模型，而不是供应商默认的那只 */
+    @Test
+    fun `摘要请求使用指定的模型`() = runTest {
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("ok"), ChatEvent.Completed)))
+        val settings = settingsWithProvider()
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        val out = engine.probe(
+            ResponseProbe(systemPrompt = "s", userText = "u"),
+            modelOverride = "other-model",
+        )
+
+        assertThat(out).isEqualTo("ok")
+        assertThat(backend.requests.single().model).isEqualTo("other-model")
+    }
+
+    /**
+     * 没指定模型时，摘要必须跟着**会话自己的**模型走。
+     *
+     * 用户报的就是这件事：聊天一切正常，记忆页却显示「模型的 API 或模型名不对」。
+     * 因为顶栏切模型写的是 `conv.model`，而摘要以前只看 `provider.defaultModel` ——
+     * 两个值不一样时，摘要打到一个用户根本没在用的模型名上。
+     */
+    @Test
+    fun `摘要跟着会话自己的模型走`() = runTest {
+        val twoModels = provider.copy(
+            models = listOf("test-model", "glm-x"),
+            defaultModel = "test-model",
+        )
+        val settings = AppSettings(
+            providers = listOf(twoModels),
+            activeProviderId = twoModels.id,
+        )
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Text("ok"), ChatEvent.Completed)))
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        engine.startNew(settings, Scenes.TAVERN, "card-1", "小卡")
+        engine.overrideModel("glm-x")
+
+        engine.probe(ResponseProbe(systemPrompt = "s", userText = "u"))
+
+        assertThat(backend.requests.single().model).isEqualTo("glm-x")
+    }
+
+    /** 没选模型时不许静默返回空串：一句话说清楚，也别白花一次请求 */
+    @Test
+    fun `供应商没选模型时明确报错且不发请求`() = runTest {
+        val bare = provider.copy(models = emptyList(), defaultModel = "")
+        val settings = AppSettings(providers = listOf(bare), activeProviderId = bare.id)
+        val backend = ScriptedBackend(emptyList())
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        val err = runCatching {
+            engine.probe(ResponseProbe(systemPrompt = "s", userText = "u"))
+        }.exceptionOrNull()
+
+        assertThat(err).isInstanceOf(DshError.BadConfig::class.java)
+        assertThat((err as DshError).describeForUser()).contains("没有选择模型")
+        assertThat(backend.calls).isEqualTo(0)
+    }
+
+    /** 摘要为空时，提示里要点名**哪个模型**没说话 —— 只说"模型名不对"等于没说 */
+    @Test
+    fun `摘要为空时提示里带上模型名`() = runTest {
+        // 两次尝试都只回一个 Completed，一个字都没有
+        val backend = ScriptedBackend(listOf(listOf(ChatEvent.Completed)))
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        val conv = engine.startNew(settings, Scenes.FISH, "builtin-tavern-feiyu", "大肥鱼")
+        store.save(
+            StoredConversation(
+                conv,
+                (1..13).map { i ->
+                    ConversationStore.newMessage(
+                        role = if (i % 2 == 1) Role.USER else Role.ASSISTANT,
+                        content = "第 $i 句",
+                    )
+                },
+            )
+        )
+        engine.open(conv.id)
+
+        val memDir = tmp.newFolder("blank-summary")
+        val compressor = MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = MemoryStore(
+                workspaceRoot = { memDir },
+                io = UnconfinedTestDispatcher(testScheduler),
+            ),
+            loadCard = { null },
+        )
+
+        val res = compressor.compressNow(
+            conversationId = conv.id,
+            cardId = "builtin-tavern-feiyu",
+            scene = Scenes.FISH,
+            contextWindow = 8000,
+        )
+
+        assertThat(res.ok).isFalse()
+        assertThat(res.message).contains("test-model")
+        assertThat(res.message).contains("Test")
+    }
+
+    /**
+     * 网关只认流式时，摘要必须还能拿到内容。
+     *
+     * 这类中转很常见：聊天一直好使（走流式），而记忆整理、每日动态、标题
+     * 这些"后台一次性请求"全部返回 400 —— 用户看到的就是「聊了八十句，
+     * 一条记忆都没有」，还查不出错在哪。
+     */
+    @Test
+    fun `非流式摘要失败时改用流式重试`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(listOf(ChatEvent.Text("他怕黑"), ChatEvent.Completed)),
+            failFirst = true,
+        )
+        val settings = settingsWithProvider()
+        val (engine, _) = buildEngine(this, settings, backend)
+
+        val out = engine.probe(ResponseProbe(systemPrompt = "s", userText = "u"))
+
+        assertThat(out).isEqualTo("他怕黑")
+        assertThat(backend.requests).hasSize(2)
+        assertThat(backend.requests[0].stream).isFalse()
+        assertThat(backend.requests[1].stream).isTrue()
+    }
+
+    /** 养鱼没到门槛就不该花钱请求 */
+    @Test
+    fun `养鱼没到门槛不发摘要请求`() = runTest {
+        val backend = ScriptedBackend(emptyList())
+        val settings = settingsWithProvider()
+        val (engine, store) = buildEngine(this, settings, backend)
+        val conv = engine.startNew(settings, Scenes.FISH, "builtin-tavern-feiyu", "大肥鱼")
+        store.save(
+            StoredConversation(
+                conv,
+                (1..5).map { ConversationStore.newMessage(Role.USER, "第 $it 句") },
+            )
+        )
+        engine.open(conv.id)
+
+        val memDir = tmp.newFolder("memory-skip")
+        val memory = MemoryStore(
+            workspaceRoot = { memDir },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        MemoryCompressor(
+            scope = this,
+            engine = engine,
+            memory = memory,
+            loadCard = { null },
+        ).maybeCompress(
+            conversationId = conv.id,
+            cardId = "builtin-tavern-feiyu",
+            scene = Scenes.FISH,
+            contextWindow = 8000,
+        )
+        advanceUntilIdle()
+
+        assertThat(backend.calls).isEqualTo(0)
+        assertThat(memory.entries("builtin-tavern-feiyu")).isEmpty()
+    }
+
+    /**
+     * 「每个模型都一样，全说没有返回内容」—— 这是思考型模型把额度吃光的样子。
+     *
+     * 后台请求只给几百个 token，模型把额度全花在思维链上，`content` 是空的、
+     * `finish_reason` 是 `length`。以前这些信息被丢掉，只能报一句"模型名不对"，
+     * 用户换十个模型都一样。现在要：放大预算重试一次，并在提示里要求只给结果。
+     */
+    @Test
+    fun `只回了思考过程时会加大预算重试`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(
+                listOf(
+                    ChatEvent.Reasoning("我先想想这段对话里他怕黑这件事……"),
+                    ChatEvent.Finish("length"),
+                    ChatEvent.Completed,
+                ),
+                listOf(ChatEvent.Text("[-] 他怕黑，睡觉要留一盏灯"), ChatEvent.Completed),
+            )
+        )
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        val out = engine.probe(ResponseProbe(systemPrompt = "s", userText = "u", maxTokens = 400))
+
+        assertThat(out).contains("他怕黑")
+        assertThat(backend.requests).hasSize(2)
+        // 额度要放大：还是 400 的话，第二次照样只想不说
+        assertThat(backend.requests[1].maxTokens).isGreaterThan(400)
+        // 而且要明确要求"只给结果"，否则它会拿着新额度再想一遍
+        assertThat(backend.requests[1].systemPrompt).contains("只给结果")
+        assertThat(backend.requests[1].stream).isTrue()
+    }
+
+    /** 重试后仍然只有思维链：把原因说出来，别再让用户去换模型名 */
+    @Test
+    fun `重试后仍只有思考过程时说明原因`() = runTest {
+        val backend = ScriptedBackend(
+            listOf(listOf(ChatEvent.Reasoning("想"), ChatEvent.Finish("length"), ChatEvent.Completed))
+        )
+        val (engine, _) = buildEngine(this, settingsWithProvider(), backend)
+
+        val err = runCatching {
+            engine.probe(ResponseProbe(systemPrompt = "s", userText = "u", maxTokens = 400))
+        }.exceptionOrNull()
+
+        assertThat(err).isInstanceOf(DshError.Blank::class.java)
+        assertThat((err as DshError).describeForUser()).contains("思考")
+    }
+
 }

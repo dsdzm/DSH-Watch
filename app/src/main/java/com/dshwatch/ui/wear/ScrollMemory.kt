@@ -147,3 +147,30 @@ fun rememberKeptListState(key: String, keep: Boolean = true): TransformingLazyCo
     }
     return state
 }
+
+/**
+ * `LazyColumn` 版本的滚动记忆（[FlatList] 用）。
+ *
+ * 和 [rememberKeptListState] 是同一套思路，只是换了一种列表状态：
+ * `LazyListState` 自己就有 `firstVisibleItemIndex/Offset`，比
+ * `TransformingLazyColumnState` 的 anchor 更好读。
+ */
+@Composable
+fun rememberKeptLazyState(key: String, keep: Boolean = true): androidx.compose.foundation.lazy.LazyListState {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    if (!keep) return state
+    val (index, offset) = ScrollMemory.itemOf(key)
+
+    androidx.compose.runtime.LaunchedEffect(key) {
+        if (index > 0 || offset > 0) {
+            runCatching { state.scrollToItem(index, offset) }
+        }
+    }
+
+    val idx = state.firstVisibleItemIndex
+    val off = state.firstVisibleItemScrollOffset
+    androidx.compose.runtime.DisposableEffect(key, idx, off) {
+        onDispose { ScrollMemory.putItem(key, idx, off) }
+    }
+    return state
+}

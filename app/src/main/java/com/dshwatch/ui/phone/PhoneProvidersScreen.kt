@@ -185,14 +185,25 @@ private fun ProviderCard(
                     }
                     Text(
                         text = buildString {
-                            append(if (hasKey) "已填 Key" else "没填 Key")
+                            /*
+                             * 内置通道的 key 是编译期注入的，这份包没编进 Key 时，
+                             * 说「没填 Key」会让人以为是自己漏填了 —— 其实设置里
+                             * 根本没给过输入框。说清楚是包里没有，并告诉他点进去能填。
+                             */
+                            val builtinMissing = provider.isBuiltin &&
+                                !com.dshwatch.domain.model.BuiltinProviders.isConfigured(provider.id)
+                            when {
+                                builtinMissing -> append("内置 Key 未编入，点进去填")
+                                hasKey -> append("已填 Key")
+                                else -> append("没填 Key")
+                            }
                             append(" · ")
                             append(provider.defaultModel.ifBlank { "默认模型" })
                             val host = provider.normalizedBaseUrl()
                                 .removePrefix("https://")
                                 .removePrefix("http://")
                                 .trimEnd('/')
-                            if (host.isNotBlank()) append(" · $host")
+                            if (host.isNotBlank() && !builtinMissing) append(" · $host")
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (hasKey) {

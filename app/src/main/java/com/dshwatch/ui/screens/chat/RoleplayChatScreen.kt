@@ -97,6 +97,30 @@ fun RoleplayChatScreen(
     val banner by engine.banner.collectAsStateWithLifecycle()
 
     val scene = Scenes.of(conversation?.scene)
+
+    /*
+     * 养鱼会话交给养鱼页。
+     *
+     * ## 为什么必须转发，而不是"这一页也能凑合显示"
+     *
+     * 从「记录」点开一条养鱼会话时，栈里压的是 `Screen.RoleplayChat`；
+     * 而从对话页顶栏那颗场景按钮切到养鱼时，走的是 `Screen.Chat` →
+     * `FishScreen` → `FishWatchScreen`。两条路以前落到**两个不同的页面** ——
+     * 前者是这一页（经典玻璃、一条消息一个整块、顶栏一排小图标），
+     * 后者是 M3E 的养鱼页。同一条对话换个入口长相全变，用户会以为是两个功能。
+     *
+     * 判据是**会话自己的场景**，不是设置里的当前模式：点开的是哪条，
+     * 就该用哪套界面。返回键由养鱼页自己的顶栏提供（`nav.canGoBack` 此刻为真）。
+     */
+    if (scene == Scenes.FISH) {
+        com.dshwatch.ui.screens.fish.FishWatchScreen(
+            container = container,
+            settings = settings,
+            nav = nav,
+        )
+        return
+    }
+
     val isWriting = scene == Scenes.WRITING
     val listState = rememberLazyListState()
 
@@ -114,7 +138,7 @@ fun RoleplayChatScreen(
     val cardId = conversation?.roleCardId.orEmpty()
     LaunchedEffect(cardId) {
         card = if (cardId.isBlank()) null else runCatching { container.roleCardStore.load(cardId) }.getOrNull()
-        memoryText = if (cardId.isBlank()) "" else container.memoryStore.read(cardId)
+        memoryText = if (cardId.isBlank()) "" else container.memoryStore.render(cardId)
     }
 
     /*
@@ -174,6 +198,7 @@ fun RoleplayChatScreen(
             cardId = cardId,
             scene = scene,
             contextWindow = window,
+            model = conversation?.model.orEmpty(),
         )
     }
 
@@ -185,7 +210,7 @@ fun RoleplayChatScreen(
         actions = {
             IconTap(Icons.Outlined.Memory, "记忆") {
                 scope.launch {
-                    memoryText = if (cardId.isBlank()) "" else container.memoryStore.read(cardId)
+                    memoryText = if (cardId.isBlank()) "" else container.memoryStore.render(cardId)
                 }
                 showInfo = !showInfo
             }
@@ -248,16 +273,22 @@ fun RoleplayChatScreen(
                                 scene = scene,
                                 contextWindow = provider?.contextWindow ?: 8000,
                                 force = true,
+                                model = conversation?.model.orEmpty(),
                             )
-                            memoryText = container.memoryStore.read(cardId)
+                            memoryText = container.memoryStore.render(cardId)
                         }
                     })
                     Spacer(Modifier.height(6.dp))
                     // 预览只给前 300 字 —— 手表屏上再多也读不完。
-                    // 要看全的就点进记忆文档，那里是完整可编辑的原文。
+                    // 这里显示的是**渲染后**的记忆：和发给模型的内容一致，
+                    // 「记得很清楚」在前、「只剩模糊印象」在后，用户一眼就能看出
+                    // 她此刻真正记得什么、哪些已经快忘了。
                     HintText(
-                        memoryText.ifBlank { "还没有写进记忆的内容" }.take(300) +
-                            if (memoryText.length > 300) "\n…（点下面「打开记忆文档」看全部）" else ""
+                        if (memoryText.length > 300) {
+                            memoryText.take(300) + "…"
+                        } else {
+                            memoryText.ifBlank { "还没有写进记忆的内容" }
+                        } + if (memoryText.length > 300) "\n（点下面「打开记忆文档」看全部）" else ""
                     )
                     Spacer(Modifier.height(6.dp))
                     WatchGhostButton(text = "打开记忆文档", onClick = {

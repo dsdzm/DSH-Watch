@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -58,6 +59,8 @@ import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.Conversation
+import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.domain.sessions.SessionGroups
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import kotlinx.coroutines.launch
@@ -80,9 +83,20 @@ fun PhoneSessionsScreen(
     container: AppContainer,
     settings: AppSettings,
     nav: PhoneNavigator,
+    /**
+     * 只看某张卡 / 某个写作设定的会话。
+     *
+     * 从角色卡上的「历史」进来时传这两个值：那时用户想找的是「和这个角色的记录」，
+     * 全局列表里混着几十条别的会话，等于让他重新翻一遍。
+     */
+    filterScene: String = "",
+    filterCardId: String = "",
+    /** 传了就在顶栏左侧放返回箭头（这一页是压栈进来的二级页） */
+    onBack: (() -> Unit)? = null,
 ) {
     val s = LocalStrings.current
     val scope = rememberCoroutineScope()
+    val filtered = filterScene.isNotBlank()
 
     var conversations by remember { mutableStateOf<List<Conversation>>(emptyList()) }
     var reloadKey by remember { mutableIntStateOf(0) }
@@ -90,6 +104,7 @@ fun PhoneSessionsScreen(
     var renameTarget by remember { mutableStateOf<Conversation?>(null) }
     var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
     var renameText by remember { mutableStateOf("") }
+    var cardTitle by remember { mutableStateOf("") }
 
     /*
      * 多选。
@@ -105,8 +120,18 @@ fun PhoneSessionsScreen(
     val selected = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var confirmDelete by remember { mutableStateOf(false) }
 
-    LaunchedEffect(reloadKey) {
-        conversations = runCatching { container.conversationStore.index() }.getOrDefault(emptyList())
+    LaunchedEffect(reloadKey, filterScene, filterCardId) {
+        conversations = runCatching {
+            if (filtered) {
+                container.conversationStore.listFor(filterScene, filterCardId)
+            } else {
+                container.conversationStore.index()
+            }
+        }.getOrDefault(emptyList())
+        if (filtered && cardTitle.isBlank()) {
+            cardTitle = runCatching { container.roleCardStore.load(filterCardId)?.displayName }
+                .getOrNull().orEmpty()
+        }
     }
 
     val shown = remember(conversations, query) {
@@ -118,6 +143,24 @@ fun PhoneSessionsScreen(
                 it.displayTitle.lowercase().contains(q) || it.model.lowercase().contains(q)
             }
         }
+    }
+
+    /*
+     * 分组标题要写「酒馆 · 大肥鱼」，所以得知道卡叫什么。
+     *
+     * 一次读两种卡：酒馆和写作都可能出现，而分组是同一屏里的事，
+     * 分两次读只是多一次磁盘往返。卡被删掉时查不到，标题退化成「未命名角色」。
+     */
+    var cardNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        cardNames = runCatching {
+            (container.roleCardStore.index(Scenes.TAVERN) + container.roleCardStore.index(Scenes.WRITING))
+                .associate { it.id to it.displayName }
+        }.getOrDefault(emptyMap())
+    }
+
+    val groups = remember(shown, cardNames, filtered) {
+        if (filtered) emptyList() else SessionGroups.build(shown) { cardNames[it].orEmpty() }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -134,9 +177,16 @@ fun PhoneSessionsScreen(
                     }
                 } else {
                     Column {
-                        Text(s.sessionsTitle, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = "${conversations.size} 条记录",
+                            text = if (filtered && cardTitle.isNotBlank()) cardTitle else s.sessionsTitle,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (filtered) {
+                                "${Scenes.label(filterScene)} · ${conversations.size} 条记录"
+                            } else {
+                                "${conversations.size} 条记录"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -150,6 +200,10 @@ fun PhoneSessionsScreen(
                         selected.clear()
                     }) {
                         Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                    }
+                } else if (onBack != null) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
             },
@@ -168,11 +222,36 @@ fun PhoneSessionsScreen(
                             contentDescription = if (selected.size == shown.size) "取消全选" else "全选",
                         )
                     }
+                } else if (filtered && filterScene == Scenes.FISH) {
+                    /*
+                     * 养鱼没有「新建」。
+                     *
+                     * 那是一条鱼的一辈子：记忆、上下文、记忆文档全都挂在**同一个**
+                     * conversationId 上。多开一段，用户会看到同一条鱼既不记得刚才，
+                     * 也不记得昨天 —— 割裂感全从这里来。按钮直接不出现，
+                     * 比按下去再提示「不支持」干净。
+                     */
                 } else {
                     IconButton(onClick = {
                         scope.launch {
-                            container.engine.newConversation(settings)
-                            nav.select(PhoneTab.Chat)
+                            /*
+                             * 过滤模式下「新建」必须落在同一张卡上 —— 否则从角色的
+                             * 历史页点新建，会得到一个编程场景的空会话。
+                             */
+                            if (filtered) {
+                                container.engine.startNew(
+                                    settings = settings.copy(
+                                        agentMode = com.dshwatch.domain.model.AgentMode.OFF,
+                                    ),
+                                    scene = filterScene,
+                                    roleCardId = filterCardId,
+                                    title = cardTitle,
+                                )
+                                nav.open(Screen.RoleplayChat)
+                            } else {
+                                container.engine.newConversation(settings)
+                                nav.select(PhoneTab.Chat)
+                            }
                         }
                     }) {
                         Icon(Icons.Filled.Add, contentDescription = s.newChat)
@@ -206,57 +285,82 @@ fun PhoneSessionsScreen(
                 )
             }
         } else {
+            val render: @Composable (Conversation) -> Unit = { conv ->
+                ConversationCard(
+                    conversation = conv,
+                    selecting = selecting,
+                    selected = conv.id in selected,
+                    onClick = {
+                        if (selecting) {
+                            if (!selected.remove(conv.id)) selected.add(conv.id)
+                        } else {
+                            scope.launch {
+                                val scene = Scenes.of(conv.scene)
+                                container.engine.open(conv.id)
+                                /*
+                                 * 打开一条会话，等于把「当前模式」也切过去。
+                                 *
+                                 * 不切的话：设置里停在养鱼，从记录点开一条酒馆会话，
+                                 * 会话是酒馆的、模式还是养鱼 —— 退出去再进对话 tab
+                                 * 又是一条鱼，用户会觉得"点了没反应"。
+                                 */
+                                if (scene != Scenes.of(settings.useScene)) {
+                                    container.settingsRepo.update { it.copy(useScene = scene) }
+                                }
+                                /*
+                                 * 酒馆 / 写作 / 养鱼的会话交给会话页（它按会话场景再分派），
+                                 * 编程才回对话 tab —— 那一页就是编程界面本身。
+                                 */
+                                if (scene == Scenes.CODING) {
+                                    nav.select(PhoneTab.Chat)
+                                } else {
+                                    nav.open(Screen.RoleplayChat)
+                                }
+                            }
+                        }
+                    },
+                    onRename = {
+                        renameTarget = conv
+                        renameText = conv.displayTitle
+                    },
+                    onTogglePin = {
+                        scope.launch {
+                            container.conversationStore.setPinned(conv.id, !conv.pinned)
+                            reloadKey++
+                        }
+                    },
+                    onDelete = { deleteTarget = conv },
+                    onLongPress = {
+                        selecting = true
+                        if (conv.id !in selected) selected.add(conv.id)
+                    },
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(shown, key = { it.id }) { conv ->
-                    ConversationCard(
-                        conversation = conv,
-                        selecting = selecting,
-                        selected = conv.id in selected,
-                        onClick = {
-                            if (selecting) {
-                                if (!selected.remove(conv.id)) selected.add(conv.id)
-                            } else {
-                                scope.launch {
-                                    container.engine.open(conv.id)
-                                    /*
-                                     * 酒馆 / 写作的会话必须交给角色扮演页渲染。
-                                     *
-                                     * 它们带角色卡、开场白、剧情开关，手机对话页不认识这些，
-                                     * 硬塞进去等于把一段对话剥掉上下文展示。
-                                     * 之前所有会话都 `nav.select(Chat)`，于是手机用户点开
-                                     * 一条酒馆记录，看到的是一个陌生的编程界面 —— 这也是
-                                     * 「手机上进不去酒馆」的另一半原因。
-                                     */
-                                    if (com.dshwatch.domain.roleplay.Scenes.of(conv.scene) ==
-                                        com.dshwatch.domain.roleplay.Scenes.CODING
-                                    ) {
-                                        nav.select(PhoneTab.Chat)
-                                    } else {
-                                        nav.open(Screen.RoleplayChat)
-                                    }
-                                }
-                            }
-                        },
-                        onRename = {
-                            renameTarget = conv
-                            renameText = conv.displayTitle
-                        },
-                        onTogglePin = {
-                            scope.launch {
-                                container.conversationStore.setPinned(conv.id, !conv.pinned)
-                                reloadKey++
-                            }
-                        },
-                        onDelete = { deleteTarget = conv },
-                        onLongPress = {
-                            selecting = true
-                            if (conv.id !in selected) selected.add(conv.id)
-                        },
-                    )
+                /*
+                 * 分组只对「全部记录」生效。
+                 *
+                 * 从某张卡的历史压栈进来时，列表里本来就只有这一张卡、这一个模式，
+                 * 再加一行标题等于把仅有的纵向空间花在重复信息上。
+                 */
+                if (groups.isEmpty()) {
+                    items(shown, key = { it.id }) { conv -> render(conv) }
+                } else {
+                    groups.forEach { group ->
+                        item(key = "h:${group.key}") {
+                            SessionGroupHeader(
+                                title = group.title,
+                                count = group.count,
+                                top = group !== groups.first(),
+                            )
+                        }
+                        items(group.items, key = { it.id }) { conv -> render(conv) }
+                    }
                 }
                 item { Spacer(Modifier.height(12.dp)) }
             }
@@ -360,6 +464,40 @@ fun PhoneSessionsScreen(
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text(s.cancel) }
             },
+        )
+    }
+}
+
+/**
+ * 分组标题。
+ *
+ * 用「模式 · 角色」一行写清楚，右边跟条数 —— 条数不是装饰：用户判断
+ * 「这条卡是不是该清理了」就看这个数。
+ *
+ * 第一组上面不留白（顶栏已经给了间距），后面的组各留一段，
+ * 否则整页会像一串连续的卡片，分不出组界。
+ */
+@Composable
+private fun SessionGroupHeader(title: String, count: Int, top: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 6.dp, end = 6.dp, top = if (top) 12.dp else 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "$count 条",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

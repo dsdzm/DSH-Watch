@@ -31,9 +31,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.components.tap
 import com.dshwatch.ui.i18n.LocalStrings
@@ -63,20 +65,18 @@ fun MarkdownText(
     }
     if (blocks.isEmpty()) return
 
-    val colors = markdownInlineColors()
-
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         for ((index, block) in blocks.withIndex()) {
             when (block) {
-                is MdBlock.Heading -> Text(
-                    text = MarkdownInline.render(block.text, colors),
+                is MdBlock.Heading -> RichText(
+                    text = block.text,
                     style = headingStyle(block.level),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 2.dp),
                 )
 
-                is MdBlock.Paragraph -> Text(
-                    text = MarkdownInline.render(block.text, colors),
+                is MdBlock.Paragraph -> RichText(
+                    text = block.text,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -84,16 +84,16 @@ fun MarkdownText(
                 is MdBlock.Bullet -> ListItemRow(
                     marker = block.marker.toString(),
                     level = block.level,
-                    content = MarkdownInline.render(block.text, colors),
+                    text = block.text,
                 )
 
                 is MdBlock.Ordered -> ListItemRow(
                     marker = block.number + ".",
                     level = block.level,
-                    content = MarkdownInline.render(block.text, colors),
+                    text = block.text,
                 )
 
-                is MdBlock.Quote -> QuoteBlock(block, colors)
+                is MdBlock.Quote -> QuoteBlock(block)
                 MdBlock.Divider -> HorizontalDivider(
                     modifier = Modifier.padding(vertical = 3.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
@@ -125,7 +125,7 @@ fun MarkdownText(
                         CodeBlock(key = index, block = block, onCopyCode = onCopyCode)
                     }
                 }
-                is MdBlock.Table -> TableBlock(block, colors)
+                is MdBlock.Table -> TableBlock(block)
             }
         }
     }
@@ -139,8 +139,118 @@ private fun headingStyle(level: Int) = when (level) {
     else -> MaterialTheme.typography.labelLarge
 }
 
+/**
+ * 带公式的正文。
+ *
+ * 段落里出现 `$…$` 时不再原样吐源码：
+ *  - 能压成一行的（上下标、希腊字母、根号）压成一条 [AnnotatedString]，和前后文字同基线；
+ *  - 压不下的（分数、求和）单独画一行，交给 [com.dshwatch.ui.canvas.MathView]。
+ *
+ * 判据在 [MathText.inlineable] 里，见那边的注释。
+ */
 @Composable
-private fun ListItemRow(marker: String, level: Int, content: AnnotatedString) {
+private fun RichText(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+    fontWeight: FontWeight? = null,
+    /** 表格单元格没有竖直空间，公式一律压平 */
+    allowBlock: Boolean = true,
+) {
+    val colors = markdownInlineColors()
+    val pieces = remember(text) { MathText.split(text) }
+    val hasMath = pieces.any { it is MdPiece.Math }
+    if (!hasMath) {
+        Text(
+            text = MarkdownInline.render(text, colors),
+            modifier = modifier,
+            style = style,
+            color = color,
+            maxLines = maxLines,
+            overflow = overflow,
+            fontWeight = fontWeight,
+        )
+        return
+    }
+
+    // 字号可能没指定（主题里继承），压平公式需要一个具体值
+    val resolvedType = if (style.fontSize.isSp) style else style.copy(fontSize = 15.sp)
+    val sizeSp = resolvedType.fontSize.value
+    val blockNeeded = allowBlock && pieces.any { it is MdPiece.Math && !MathText.inlineable(it.latex) }
+
+    if (!blockNeeded) {
+        val annotated = remember(text, colors, sizeSp) {
+            buildAnnotatedString {
+                pieces.forEach { p ->
+                    when (p) {
+                        is MdPiece.Text -> append(MarkdownInline.render(p.text, colors))
+                        is MdPiece.Math -> append(MathText.inline(p.latex, colors, resolvedType.fontSize))
+                    }
+                }
+            }
+        }
+        Text(
+            text = annotated,
+            modifier = modifier,
+            style = resolvedType,
+            color = color,
+            maxLines = maxLines,
+            overflow = overflow,
+            fontWeight = fontWeight,
+        )
+        return
+    }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        pieces.forEach { p ->
+            when (p) {
+                is MdPiece.Text -> if (p.text.isNotBlank()) {
+                    Text(
+                        text = MarkdownInline.render(p.text, colors),
+                        style = resolvedType,
+                        color = color,
+                        fontWeight = fontWeight,
+                    )
+                }
+
+                is MdPiece.Math -> if (MathText.inlineable(p.latex)) {
+                    Text(
+                        text = MathText.inline(p.latex, colors, resolvedType.fontSize),
+                        style = resolvedType,
+                        color = color,
+                        fontWeight = fontWeight,
+                    )
+                } else {
+                    com.dshwatch.ui.canvas.MathView(
+                        latex = p.latex,
+                        color = color,
+                        /*
+                         * 画布版按 sp 取字号，但要比正文明显大一点。
+                         *
+                         * 原先是 1.05 倍，等于和正文同高 —— 而画布公式里同一行
+                         * 的字号是「盒子里最大的那个」，分数、根号一压，
+                         * 主字看起来就比正文小一圈。改到 1.3 倍仍偏小
+                         * （用户第二次反馈「正文里的比较小」），
+                         * 现在 1.45 倍、下限 17sp：和压平公式的 1.1 倍一起，
+                         * 正文与公式的字面高度才对得上。
+                         */
+                        fontSize = maxOf(sizeSp * 1.45f, 17f),
+                        plain = true,
+                        // 宽度富余时撑满气泡：短公式（`v=v_0+at`）本来就该占满一行
+                        autoFit = true,
+                        maxAutoScale = 1.3f,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ListItemRow(marker: String, level: Int, text: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -153,16 +263,17 @@ private fun ListItemRow(marker: String, level: Int, content: AnnotatedString) {
             color = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.width(18.dp),
         )
-        Text(
-            text = content,
+        RichText(
+            text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
         )
     }
 }
 
 @Composable
-private fun QuoteBlock(block: MdBlock.Quote, colors: InlineColors) {
+private fun QuoteBlock(block: MdBlock.Quote) {
     Row(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -174,8 +285,8 @@ private fun QuoteBlock(block: MdBlock.Quote, colors: InlineColors) {
                 .height(20.dp)
         )
         Spacer(Modifier.width(6.dp))
-        Text(
-            text = MarkdownInline.render(block.text, colors),
+        RichText(
+            text = block.text,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
@@ -305,7 +416,7 @@ private fun CodeBlock(key: Int, block: MdBlock.Code, onCopyCode: ((String) -> Un
 }
 
 @Composable
-private fun TableBlock(block: MdBlock.Table, colors: InlineColors) {
+private fun TableBlock(block: MdBlock.Table) {
     val columnCount = maxOf(block.header.size, block.rows.maxOfOrNull { it.size } ?: 0)
     if (columnCount == 0) return
     Box(
@@ -327,11 +438,11 @@ private fun TableBlock(block: MdBlock.Table, colors: InlineColors) {
                 .padding(4.dp),
         ) {
             if (block.header.isNotEmpty()) {
-                TableRow(block.header, columnCount, colors, header = true)
+                TableRow(block.header, columnCount, header = true)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
             block.rows.take(30).forEach { row ->
-                TableRow(row, columnCount, colors, header = false)
+                TableRow(row, columnCount, header = false)
             }
         }
     }
@@ -341,14 +452,13 @@ private fun TableBlock(block: MdBlock.Table, colors: InlineColors) {
 private fun TableRow(
     cells: List<String>,
     columnCount: Int,
-    colors: InlineColors,
     header: Boolean,
 ) {
     Row(modifier = Modifier.padding(vertical = 2.dp)) {
         for (i in 0 until columnCount) {
             val cell = cells.getOrNull(i).orEmpty()
-            Text(
-                text = MarkdownInline.render(cell, colors),
+            RichText(
+                text = cell,
                 style = if (header) {
                     MaterialTheme.typography.labelMedium
                 } else {
@@ -365,6 +475,8 @@ private fun TableRow(
                 modifier = Modifier
                     .width(86.dp)
                     .padding(horizontal = 4.dp),
+                // 单元格只有三行高，公式必须压平，不能画成块
+                allowBlock = false,
             )
         }
     }

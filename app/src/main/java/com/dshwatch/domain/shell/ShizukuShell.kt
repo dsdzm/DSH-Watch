@@ -262,8 +262,63 @@ object ShizukuShell {
             )
         }
 
-    private fun drain(stream: java.io.InputStream, sink: StringBuilder) {
-        runCatching {
+    /**
+     * 执行一条命令，并把 **stdout 的原始字节**写进 [outFile]。
+     *
+     * 只有一个用途：`screencap -p`。截图是二进制，走 [run] 会被当 UTF-8 文本
+     * 解码 —— 解出来的是一串乱码，而且原样存回去也还原不了图片。
+     * 这里直接把进程的标准输出接到文件流上，不做任何字符转换。
+     *
+     * 返回的 [Outcome] 里 `stdout` 恒为空（内容已经进文件了），
+     * 判断成败看 [Outcome.ok] 与文件大小。
+     */
+    suspend fun runIntoFile(
+        command: String,
+        outFile: java.io.File,
+        timeoutMs: Long = 20_000,
+    ): Outcome = withContext(Dispatchers.IO) {
+        if (command.isBlank()) return@withContext Outcome(-1, "", "", error = "命令为空")
+        if (!granted()) {
+            return@withContext Outcome(
+                -1, "", "",
+                error = "没有 Shizuku 授权。请先在设置里安装并启用 Shizuku，再回来授权。",
+            )
+        }
+
+        val process = runCatching {
+            Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+        }.getOrElse {
+            return@withContext Outcome(-1, "", "", error = "启动失败：${it.message}")
+        }
+
+        val err = StringBuilder()
+        val t1 = Thread {
+            runCatching {
+                outFile.parentFile?.mkdirs()
+                process.inputStream.use { input ->
+                    java.io.FileOutputStream(outFile).use { output -> input.copyTo(output) }
+                }
+            }.onFailure { Logx.w(TAG, "写文件失败：${it.message}") }
+        }.apply { isDaemon = true; start() }
+        val t2 = Thread { drain(process.errorStream, err) }.apply { isDaemon = true; start() }
+
+        val finished = runCatching {
+            process.waitForTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+        }.getOrDefault(false)
+        if (!finished) runCatching { process.destroy() }
+        runCatching { t1.join(1500) }
+        runCatching { t2.join(800) }
+
+        val code = if (finished) runCatching { process.exitValue() }.getOrDefault(-1) else -1
+        Outcome(
+            exitCode = code,
+            stdout = "",
+            stderr = err.toString(),
+            timedOut = !finished,
+        )
+    }
+
+    private fun drain(stream: java.io.InputStream, sink: StringBuilder) {        runCatching {
             stream.bufferedReader().use { reader ->
                 val buf = CharArray(4096)
                 while (true) {

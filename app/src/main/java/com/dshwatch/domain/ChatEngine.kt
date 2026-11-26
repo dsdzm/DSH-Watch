@@ -214,19 +214,103 @@ class ChatEngine(
     fun contextStart(): Int = contextStart.coerceIn(0, snapshotMessages().size)
 
     /**
-     * 把上下文切到「当前末尾」，并落盘。
+     * 把上下文切到 [upTo]（相对完整消息的下标），并落盘。
      *
-     * 只在压缩成功后调用。切完之后这一轮之前的内容不再发给模型，
-     * 记忆文档负责在系统提示里补上它。
+     * ## 为什么必须传下标，不能默认取「当前末尾」
+     *
+     * 摘要是一次网络往返，几秒到几十秒。这期间用户完全可能又聊了几轮：
+     *
+     * ```
+     * 12:00 触发压缩 → 快照 N 条 → 发摘要请求
+     * 12:20 用户又聊了 3 轮 → 消息变 M 条
+     * 摘要返回（只总结到 12:00）→ 这里若切到 M
+     * ```
+     *
+     * 12:00–12:20 这一段既没进摘要、又被切点排除，下一轮请求里彻底消失。
+     * 现象就是「聊着聊着，它突然翻出二十分钟前的话来回复」。
+     *
+     * 所以切点只能推到**摘要实际覆盖到的末尾**（压缩时的快照 size）。
+     *
+     * [onlyIfConversation]：压缩期间用户可能切走了。这时把切点写进另一个会话
+     * 会直接毁掉那个会话的上下文，必须校验。
      */
-    suspend fun markContextCut() {
-        val size = snapshotMessages().size
-        contextStart = size
+    suspend fun markContextCut(
+        upTo: Int = snapshotMessages().size,
+        onlyIfConversation: String? = null,
+    ) {
         val conv = _conversation.value ?: return
+        if (onlyIfConversation != null && conv.id != onlyIfConversation) {
+            Logx.w(TAG, "压缩完成时会话已切换，放弃切点：$onlyIfConversation")
+            return
+        }
+        // 压缩期间可能删过消息，下标要重新夹一次，不能越界
+        val size = upTo.coerceIn(0, snapshotMessages().size)
+        contextStart = size
         val updated = conv.copy(tavernTurn = size)
         _conversation.value = updated
         runCatching { persist(updated) }
             .onFailure { Logx.e(TAG, "上下文压缩落盘失败", it) }
+    }
+
+    /**
+     * 后台一次性请求（摘要 / 动态 / 标题）实际会打给哪家、哪个模型。
+     *
+     * ## 为什么单独抽出来
+     *
+     * 用户报「记忆页显示模型的 API 或模型名不对」，而他聊天完全正常 ——
+     * 因为聊天走的是**会话自己的** `providerId + model`（顶栏切模型写的就是它），
+     * 而摘要以前只看 `provider.defaultModel`。这两者常常不是同一个：
+     * 顶栏换过模型、或者供应商的默认模型字段填错/为空，聊天好好的，
+     * 摘要却打到一个不存在的模型名上，回来一片空白，只能写一句含糊的
+     * 「模型没有返回内容」。
+     *
+     * 所以优先级与聊天路径对齐：调用方指定 > 会话自己的 > 供应商默认。
+     * 会话模型要能对得上当前供应商才采用（换过供应商后旧模型名只会换回 404）。
+     *
+     * 配不上就直接抛 [DshError.BadConfig]，让调用方把「是哪家、哪个模型」
+     * 原封不动说给用户 —— 这时候沉默是最坏的选择。
+     */
+    suspend fun briefTarget(providerId: String = "", modelOverride: String = ""): BriefTarget {
+        val settings = settingsRepo.current()
+        /*
+         * 供应商：默认用当前活动的，也可以指定。
+         *
+         * 养鱼的长期记忆、每日动态都在后台跑，而用户完全可能只给养鱼配了一家 API
+         * （「默认使用 API」就是这个意思）—— 这时候 activeProvider 是空的或另一家。
+         */
+        val provider = providerId.takeIf { it.isNotBlank() }
+            ?.let { id -> settings.providers.firstOrNull { it.id == id } }
+            ?: settings.activeProvider
+            ?: throw DshError.BadConfig("还没有配置供应商，去「设置 → 模型」里加一个")
+
+        val conv = _conversation.value
+        val sessionModel = conv?.model.orEmpty().takeIf { m ->
+            m.isNotBlank() &&
+                conv?.providerId.orEmpty().let { it.isBlank() || it == provider.id } &&
+                (provider.models.isEmpty() || m in provider.models)
+        }
+        val model = modelOverride.ifBlank {
+            sessionModel ?: provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        }
+        if (model.isBlank()) {
+            throw DshError.BadConfig("供应商「${provider.name}」还没有选择模型")
+        }
+        val key = if (provider.accountAuth) {
+            keyStore.getDeepSeekToken().orEmpty()
+        } else {
+            keyStore.getApiKey(provider.id).orEmpty()
+        }
+        val token = keyStore.getServerToken(provider.id).orEmpty()
+        if (key.isBlank() && token.isBlank()) {
+            throw DshError.Auth(
+                if (provider.accountAuth) {
+                    "还没登录 DeepSeek 账号"
+                } else {
+                    "供应商「${provider.name}」没有填 API Key"
+                },
+            )
+        }
+        return BriefTarget(provider = provider, model = model, apiKey = key, serverToken = token)
     }
 
     /**
@@ -235,22 +319,29 @@ class ChatEngine(
      * 复用同一条后端通道，但**不带工具、不落盘、不进历史** —— 它就是一次
      * 普通的 chat 请求，拿回纯文本。单开一条只会让取消/超时逻辑多一份。
      */
-    suspend fun probe(req: ResponseProbe): String {
-        val settings = settingsRepo.current()
-        val provider = settings.activeProvider ?: return ""
-        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
-        if (model.isBlank()) return ""
+    suspend fun probe(
+        req: ResponseProbe,
+        providerId: String = "",
+        /**
+         * 指定模型（空 = 会话自己的模型，再空 = 供应商默认）。
+         *
+         * 必须能指定：会话正在用一个具体模型说话，摘要却回落到供应商默认，
+         * 两个模型对"什么算一件事"的判断不一样，记忆读起来会像另一个人写的。
+         * 更常见的故障是供应商的 defaultModel 为空 —— 那时这里直接返回空串，
+         * 表现为「聊了八十句，一条记忆都没有」，且没有任何报错。
+         */
+        modelOverride: String = "",
+    ): String {
+        val target = briefTarget(providerId, modelOverride)
+        val provider = target.provider
+        val model = target.model
         val request = ChatRequest(
             provider = provider,
             baseUrl = provider.normalizedBaseUrl(),
             // 账号登录的供应商没有 API Key，凭据是账号 token；两者都从同一个字段传给后端
-            apiKey = if (provider.accountAuth) {
-                keyStore.getDeepSeekToken().orEmpty()
-            } else {
-                keyStore.getApiKey(provider.id).orEmpty()
-            },
+            apiKey = target.apiKey,
             accountAuth = provider.accountAuth,
-            serverToken = keyStore.getServerToken(provider.id).orEmpty(),
+            serverToken = target.serverToken,
             model = model,
             systemPrompt = req.systemPrompt,
             history = listOf(ChatTurn(role = "user", content = req.userText)),
@@ -261,12 +352,138 @@ class ChatEngine(
             reasoningEffort = com.dshwatch.domain.model.ReasoningEffort.DEFAULT,
             usageInStream = false,
             tools = emptyList(),
+            // 后台一次性请求走带硬超时的客户端，见 Http.brief
+            brief = true,
         )
         val sb = StringBuilder()
-        backends.of(provider.type).streamChat(request).collect { ev ->
-            if (ev is ChatEvent.Text) sb.append(ev.delta)
+        var failure: Throwable? = null
+        /*
+         * 后端把 4xx/5xx 报成 `ChatEvent.Failure` 而不是抛异常。
+         *
+         * 这里以前只认 `ChatEvent.Text`，失败事件被静默丢掉 —— 于是「HTTP 401」
+         * 和「模型什么都没说」在调用方看来完全一样，界面只能写一句含糊的
+         * 「模型没有返回内容」。真正的原因（Key 无效 / 余额不足 / 限流）
+         * 恰好在那个事件里。
+         */
+        var backendError: Throwable? = null
+        /*
+         * 思维链与结束原因。
+         *
+         * 「每个模型都一样，全都说没有返回内容」这件事，最典型的成因是
+         * **回答被思考过程吃光了**：后台请求只给 400 个 token，推理模型把这点
+         * 额度全花在思考上，`content` 就是空的，`finish_reason` 是 `length`。
+         * 这些信息本来就在流里，以前被丢掉，所以只能报一句含糊的"没有返回内容"。
+         */
+        val thinking = StringBuilder()
+        var finish = ""
+        try {
+            backends.of(provider.type).streamChat(request).collect { ev ->
+                when (ev) {
+                    is ChatEvent.Text -> sb.append(ev.delta)
+                    is ChatEvent.Reasoning -> thinking.append(ev.delta)
+                    is ChatEvent.Finish -> finish = ev.reason
+                    is ChatEvent.Failure -> backendError = ev.error
+                    else -> Unit
+                }
+            }
+        } catch (ce: CancellationException) {
+            /*
+             * 取消必须原样往上抛。
+             *
+             * 以前这里是 `runCatching`，它连 CancellationException 一起吞掉，
+             * 于是超时/退出页面之后还会**继续走下面的流式重试**再发一次请求 ——
+             * 界面上的「正在整理」因此要多挂一整个请求的时间，看起来就是卡死。
+             */
+            throw ce
+        } catch (t: Throwable) {
+            failure = t
+            Logx.w(TAG, "摘要请求（非流式）失败", t)
         }
-        return sb.toString()
+        if (sb.isBlank()) {
+            (backendError as? Throwable)?.let {
+                Logx.w(TAG, "摘要请求被拒绝：${it.message}", it)
+                throw it
+            }
+        }
+        if (sb.isNotBlank()) return sb.toString()
+
+        /*
+         * 空回答的两种形态都值得再给一次机会：
+         *
+         *  - `finish == "length"`：额度被思考吃光了；
+         *  - 有思维链、没正文：它把答案只写在思维链里。
+         *
+         * 这时候重试要**同时**做两件事：把上限放大（400 → 1600），
+         * 并且明确要求「只给结果」。只放大上限不够 —— 模型可能又把新额度
+         * 拿去思考一遍；只加要求也不够 —— 额度还是不够。
+         */
+        val starved = finish == "length" || thinking.isNotBlank()
+        val widened = if (starved) {
+            request.copy(
+                maxTokens = (request.maxTokens * 4).coerceIn(1_600, 4_000),
+                stream = true,
+                systemPrompt = request.systemPrompt + DIRECT_ANSWER_HINT,
+            )
+        } else {
+            // 没线索时按老办法：用聊天那条流式通道再试一次（只认 stream 的网关）
+            request.copy(stream = true)
+        }
+        Logx.i(
+            TAG,
+            "摘要为空（finish=$finish，思考 ${thinking.length} 字），" +
+                if (starved) "加大预算重试 maxTokens=${widened.maxTokens}" else "改流式重试",
+        )
+
+        var retryError: Throwable? = null
+        val retryText = StringBuilder()
+        var retryFinish = ""
+        var retryThinking = 0
+        try {
+            backends.of(provider.type).streamChat(widened).collect { ev ->
+                when (ev) {
+                    is ChatEvent.Text -> retryText.append(ev.delta)
+                    is ChatEvent.Reasoning -> retryThinking += ev.delta.length
+                    is ChatEvent.Finish -> retryFinish = ev.reason
+                    is ChatEvent.Failure -> backendError = ev.error
+                    else -> Unit
+                }
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            retryError = t
+            Logx.w(TAG, "摘要请求（流式重试）也失败", t)
+        }
+        if (retryText.isNotBlank()) return retryText.toString()
+
+        (backendError as? Throwable)?.let {
+            Logx.w(TAG, "摘要请求（流式重试）被拒绝：${it.message}", it)
+            throw it
+        }
+
+        /*
+         * 两次都空，但手里有证据 —— 说清楚它到底干了什么。
+         *
+         * 这条比「模型没有返回内容（可能是模型名或 Key 不对）」有用得多：
+         * 模型名不对是 404，Key 不对是 401，都不会走到这里。走到这里说明
+         * 请求成功了、模型也说话了，只是**说的都不是正文**。
+         */
+        val sawThinking = thinking.isNotEmpty() || retryThinking > 0
+        if (sawThinking || finish == "length" || retryFinish == "length") {
+            val detail = when {
+                sawThinking && (finish == "length" || retryFinish == "length") ->
+                    "它把输出额度都用在了思考上（已加大上限重试），没有留下正文"
+                sawThinking -> "它只回了思考过程，没有给出正文（已要求它直接说结果，仍为空）"
+                else -> "输出被长度上限截断了，没有留下正文"
+            }
+            throw DshError.Blank(detail)
+        }
+
+        // 两次都失败就把异常抛出去：调用方据此记「请求失败」，
+        // 而不是含糊的「摘要为空」
+        failure?.let { throw it }
+        retryError?.let { throw it }
+        return ""
     }
 
     private val _live = MutableStateFlow(LiveDelta())
@@ -338,8 +555,20 @@ class ChatEngine(
     private val sessionApproved = mutableSetOf<String>()
 
     init {
-        // 工具集先于引擎构造（AppContainer 里的顺序相反），所以这里做后置注册
-        promptChannel?.handler = { q -> awaitUserAnswer(q) }
+        /*
+         * 工具集先于引擎构造（AppContainer 里的顺序相反），所以这里做后置注册。
+         *
+         * **只在通道还空着时注册。**
+         *
+         * 这个通道是全局单例（`ToolRegistry` 的工具只认识它一个），而容器里有两个
+         * 引擎实例：主引擎和 QQ 桥接引擎。后构造的会覆盖先注册的 handler ——
+         * 于是主引擎调用 `ask_user` 时，问题被塞进另一个引擎的 `_question`，
+         * 用户眼前的界面永远等不到弹窗，五分钟后工具返回「用户没有回答」。
+         * 真机表现就是「工具没有弹窗、ask_user 没有选择页面」。
+         */
+        if (promptChannel != null && promptChannel.handler == null) {
+            promptChannel.handler = { q -> awaitUserAnswer(q) }
+        }
     }
 
     /** 生成开始/结束的回调，供前台服务启停 */
@@ -489,10 +718,20 @@ class ChatEngine(
 
     /** 只改本会话使用的模型，不影响供应商默认值 */
     suspend fun overrideModel(model: String) {
-        val conv = _conversation.value ?: return
+        val settings = settingsRepo.current()
+        val existing = _conversation.value
+        /*
+         * 还没有会话时也要生效。
+         *
+         * 新对话页（列表里没有可续的会话）上切模型，原来这里是 `?: return` ——
+         * 点了没反应，发出去用的还是供应商默认模型，和"表面上换了"是同一件事。
+         * 这里建一个不落盘的会话壳，等第一条消息落盘时把 model 一起写进去
+         * （与 [startNew] 的约定一致：空对话不进列表）。
+         */
+        val conv = existing ?: startNew(settings, scene = settings.useScene)
         val updated = conv.copy(model = model, updatedAt = System.currentTimeMillis())
         _conversation.value = updated
-        persist(updated)
+        if (existing != null) persist(updated)
     }
 
     suspend fun deleteMessage(messageId: String) {
@@ -551,12 +790,39 @@ class ChatEngine(
         return true
     }
 
+    /**
+     * 主动发言：在没有用户消息的情况下，让她说一轮。
+     *
+     * 和 [send] 的区别只有两点：不追加用户消息、额外带一段只存在于请求里的提示。
+     * 其余（历史、记忆、系统提示、落盘）完全一样 —— 这样"她主动说的那句话"
+     * 和"她回你的那句话"在数据上没有任何特殊之处，历史、搜索、导出都不用改。
+     *
+     * @param providerId / @param model 养鱼设置里指定的那家（空 = 当前活动供应商）
+     * @return false 表示这一轮没排上（上一轮还在生成）
+     */
+    fun proactive(hint: String, providerId: String = "", model: String = ""): Boolean {
+        if (job?.isActive == true) return false
+        job = appScope.launch {
+            guardedRun {
+                runSend(
+                    proactiveHint = hint,
+                    providerId = providerId,
+                    modelOverride = model,
+                )
+            }
+        }
+        return true
+    }
+
     /** 当前选中的模型若是出图 / 出视频模型，返回类型；文本模型返回 null */
     private suspend fun mediaKindOfActiveModel(): MediaKind? {
         val settings = settingsRepo.current()
         val provider = settings.activeProvider ?: return null
         if (provider.type != ProviderType.OPENAI_COMPAT) return null
-        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        // 会话级模型优先，否则顶栏切到 image 模型后仍按文本模型发请求
+        val model = _conversation.value?.model.orEmpty()
+            .takeIf { m -> m.isNotBlank() && (provider.models.isEmpty() || m in provider.models) }
+            ?: provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
         return MediaModels.kindOf(model)
     }
 
@@ -820,7 +1086,13 @@ class ChatEngine(
             _banner.value = Banner("还没有配置供应商，请到「供应商」里新增一个")
             return
         }
-        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        /*
+         * 出图 / 出视频也用会话级模型：顶栏切到某个 image 模型之后，
+         * 该走的是那个模型，而不是供应商的默认对话模型。
+         */
+        val model = _conversation.value?.model.orEmpty()
+            .takeIf { m -> m.isNotBlank() && (provider.models.isEmpty() || m in provider.models) }
+            ?: provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
         if (model.isBlank()) {
             _banner.value = Banner("供应商「${provider.name}」还没有选择模型")
             return
@@ -980,9 +1252,19 @@ class ChatEngine(
 
     private suspend fun runSend(
         userText: String = "",
-        regenerateOf: String,
+        regenerateOf: String = "",
         existingHistory: List<ChatMessage>? = null,
         attachments: List<com.dshwatch.domain.model.Attachment> = emptyList(),
+        /**
+         * 主动发言：这段提示只进请求，不落成一条用户消息。
+         *
+         * 见 [proactive]。为空表示普通的一轮对话。
+         */
+        proactiveHint: String? = null,
+        /** 指定供应商（空 = 当前活动的那个）。养鱼的「默认使用 API」走这里 */
+        providerId: String = "",
+        /** 指定模型（空 = 供应商的默认模型） */
+        modelOverride: String = "",
         /**
          * 续写目标：历史里**不含**它，请求时作为最后一条 assistant 补进去，
          * 生成结果写回同一个消息 id，界面上是「这段话接着变长」而不是新冒出一条。
@@ -992,13 +1274,37 @@ class ChatEngine(
         branchVersions: List<com.dshwatch.domain.model.MessageVersion> = emptyList(),
     ) {
         val settings = settingsRepo.current()
-        val provider = settings.activeProvider
+        /*
+         * 供应商选择：优先用调用方指定的那家。
+         *
+         * 主动发言发生在用户不在场的时候（早上七点），而"当前活动供应商"
+         * 可能停在昨晚写代码用的那家。养鱼的设置里可以单独指一家；
+         * 指定的那家被删了，就退回当前活动的，不要让整轮直接失败。
+         */
+        val provider = providerId.takeIf { it.isNotBlank() }
+            ?.let { id -> settings.providers.firstOrNull { it.id == id } }
+            ?: settings.activeProvider
         if (provider == null) {
             _banner.value = Banner("还没有配置供应商，请到「供应商」里新增一个")
             return
         }
 
-        val model = provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        /*
+         * 模型优先级：调用方指定 > 会话级选择 > 供应商默认值。
+         *
+         * 会话级那一档是顶栏的模型切换写的（[overrideModel] → `conv.model`）。
+         * 以前这里只有 provider.defaultModel，于是顶栏显示换了、请求里还是旧模型；
+         * 更糟的是下面 `conv.copy(model = model)` 会把会话的选择覆写回默认值，
+         * 连顶栏都会自己退回去 —— 用户看到的就是「表面上换了」。
+         *
+         * 会话模型必须属于当前供应商才采用：换过供应商之后，旧供应商的模型名
+         * 打过去只会换回 404 model not found。
+         */
+        val sessionModel = _conversation.value?.model.orEmpty()
+            .takeIf { m -> m.isNotBlank() && (provider.models.isEmpty() || m in provider.models) }
+        val model = modelOverride.ifBlank {
+            sessionModel ?: provider.defaultModel.ifBlank { provider.models.firstOrNull().orEmpty() }
+        }
         if (model.isBlank()) {
             _banner.value = Banner("供应商「${provider.name}」还没有选择模型，请到「供应商」里选一个")
             return
@@ -1029,7 +1335,16 @@ class ChatEngine(
         // 1) 追加用户消息（重新生成时不追加）
         val newUserMessage: ChatMessage?
         val workingList: List<ChatMessage>
-        if (regenerateOf.isEmpty()) {
+        if (proactiveHint != null) {
+            /*
+             * 主动发言不追加用户消息。
+             *
+             * 提醒是"系统在她耳边说了一句"，不是对方发来一条 —— 落成用户消息
+             * 会让下一轮历史里出现一句没人说过的话，模型之后还会引用它。
+             */
+            newUserMessage = null
+            workingList = history
+        } else if (regenerateOf.isEmpty()) {
             newUserMessage = ConversationStore.newMessage(
                 role = Role.USER,
                 content = userText,
@@ -1043,8 +1358,8 @@ class ChatEngine(
             workingList = history
         }
 
-        // 2) 标题（用首条用户消息，不额外消耗 token）
-        if (conv.title.isBlank() || conv.title == "新对话") {
+        // 2) 标题（用首条用户消息，不额外消耗 token）。主动发言没有用户消息，跳过
+        if (proactiveHint == null && (conv.title.isBlank() || conv.title == "新对话")) {
             val seed = workingList.firstOrNull { it.role == Role.USER }?.content.orEmpty()
             if (seed.isNotBlank()) conv = conv.copy(title = autoTitle(seed))
         }
@@ -1066,10 +1381,28 @@ class ChatEngine(
 
         // 3) Agent 开关
         val registry = toolRegistry()
-        val agentOn = !isRoleplay && !forceAgentOff &&
+        /*
+         * 养鱼是角色扮演，但**需要一个工具**：让她能约"待会儿来找你"。
+         *
+         * 这里不放全量工具面 —— 一旦她能读文件、跑脚本，聊天就变成了
+         * 编程助手在扮演女朋友。白名单只有一个 `schedule_proactive`，
+         * 其余场景（酒馆 / 写作）仍然一个工具都不给。
+         */
+        val fishScene = scene == com.dshwatch.domain.roleplay.Scenes.FISH
+        val sceneTools = if (fishScene) {
+            registry.tools.filter { it.name in FISH_TOOL_WHITELIST }
+        } else {
+            /*
+             * 只在别的场景出现的工具，这里先剔掉。
+             *
+             * 判定用的是**会话的场景**，不是全局设置 —— 见 [AgentTool.onlyInScene]。
+             */
+            registry.tools.filter { it.onlyInScene == null || it.onlyInScene == scene }
+        }
+        val agentOn = (!isRoleplay && !forceAgentOff || (fishScene && sceneTools.isNotEmpty())) &&
             settings.agentMode != AgentMode.OFF &&
             provider.type == ProviderType.OPENAI_COMPAT &&
-            registry.tools.isNotEmpty()
+            sceneTools.isNotEmpty()
         /*
          * 工具表全量下发。
          *
@@ -1082,7 +1415,15 @@ class ChatEngine(
         // 读 8 个文件改 5 个文件的重构，20 步根本不够；而模型卡住时，
         // 20 步全是重复调同一个工具，白烧二十轮 token。
         // 真正会失控的是"原地打转"，交给 ProgressTracker 判断；这里的上限只防病态情况。
-        val maxSteps = if (agentOn) HARD_STEP_CEILING else 1
+        // 养鱼最多四步：约时间 / 写动态各算一次工具调用，之后还要留两步说话。
+        // 以前给 2 步，参数写错一次（模型很爱把 after_minutes 写成 "两小时"）
+        // 就用光了 —— 工具报错、她一句话没说，用户在等一句"吃了吗"。
+        // 仍然是有界的：4 步之内必然收口，不会在工具循环里转圈。
+        val maxSteps = when {
+            !agentOn -> 1
+            fishScene -> 4
+            else -> HARD_STEP_CEILING
+        }
         val progressTracker = if (agentOn) ProgressTracker() else null
 
         // 插件：常驻段在这里算一次，路由段每轮现算（风神只在首轮插手）
@@ -1103,6 +1444,16 @@ class ChatEngine(
             if (scene == com.dshwatch.domain.roleplay.Scenes.WRITING) {
                 com.dshwatch.domain.roleplay.TavernPrompt.buildWriting(
                     card, memory, recent, opening = card.greeting,
+                )
+            } else if (scene == com.dshwatch.domain.roleplay.Scenes.FISH) {
+                // 养鱼：聊天形态 + 去鱼八股的文风铁律，见 FishPrompt 的注释
+                com.dshwatch.domain.roleplay.FishPrompt.build(
+                    card = card,
+                    memory = memory,
+                    extraLore = recent,
+                    proactive = settings.fishProactive,
+                    // 工具没下发时不许承诺"你可以自己约时间" —— 她会照着做，然后失败
+                    schedule = agentOn,
                 )
             } else {
                 com.dshwatch.domain.roleplay.TavernPrompt.build(card, memory, recent)
@@ -1185,6 +1536,35 @@ class ChatEngine(
                 reasoning = continuation.reasoning,
             )
         }
+        /*
+         * 主动发言的提示：**只进请求，不进消息列表**。
+         *
+         * 用 user 角色而不是 system：多数兼容端点只接受开头一条 system，
+         * 半路再塞一条要么被忽略、要么直接 400。代价是模型可能把它当成
+         * 对方说的话 —— 所以提示本身的措辞已经说明"对方看不到这条"，
+         * 并且禁止它把这件事说出口（见 FishProactive.hint）。
+         */
+        if (proactiveHint != null) {
+            turns = turns + ChatTurn(role = "user", content = proactiveHint)
+        }
+        /*
+         * 养鱼：把「只发话、不写过程」压到**消息序列的最末尾**。
+         *
+         * 系统提示再长也在这一轮开头，而模型对"刚刚读到的那句话"依从度最高。
+         * `FishPrompt` 里已经有同样的要求，这里只是把它挪到离生成最近的位置：
+         * 提示拉住大多数，这条兜住"读过后被几百字人设冲淡"的。
+         *
+         * 不落库 —— 每轮请求重新拼，历史里不会留下这句注记。
+         * 只加在养鱼：编程场景的思考本来就该出现在工作流里，不该被这句话压掉。
+         */
+        if (fishScene && turns.isNotEmpty() && turns.last().role == "user") {
+            val last = turns.last()
+            turns = turns.dropLast(1) + last.copy(
+                content = last.content.trimEnd() +
+                    "\n\n（后台注记，不必回应：这一轮只输出你实际要发出去的话。" +
+                    "不要写你挑句子、数条数、判断发不发的思考过程，也不要写\"发了\"\"就这些\"。）",
+            )
+        }
         // 供应商不支持图片输入时，图仍留在会话里可回看，但不进请求
         if (!provider.visionInput) {
             turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
@@ -1198,6 +1578,15 @@ class ChatEngine(
          * 图没发出去，而不是让他对着「怎么答非所问」猜。
          */
         val builtinSpec = com.dshwatch.domain.model.BuiltinProviders.of(provider.id)
+        /*
+         * 「这一轮能不能收图」要算一次、反复用：历史消息在这里筛一次，
+         * 而工具在循环中途塞进来的图（attach_file / device_screenshot）
+         * 是在这之后才出现的 —— 再按 `visionInput` 单独判一次会漏掉
+         * 内置通道的模型级判定（智谱那类一家混放视觉与纯文本的情况），
+         * 结果就是纯文本模型收到图、整单 400。
+         */
+        val canTakeImages = provider.visionInput &&
+            (builtinSpec == null || model in builtinSpec.visionModels)
         if (builtinSpec != null && model !in builtinSpec.visionModels) {
             val hadImages = turns.any { it.images.isNotEmpty() }
             turns = turns.map { if (it.images.isEmpty()) it else it.copy(images = emptyList()) }
@@ -1281,7 +1670,7 @@ class ChatEngine(
              * 这一层只是让提示词里的【可用工具】名单和 tools 数组保持一致，
              * 否则模型会从名单里读到它不能用的工具，然后反复尝试。
              */
-            val visibleTools = registry.tools.filter { it.name !in blockedNames }
+            val visibleTools = sceneTools.filter { it.name !in blockedNames }
             val allowed = overlay?.allowedTools
             val roundNames = if (allowed != null) {
                 visibleTools.filter { it.name in allowed }.map { it.name }
@@ -1357,7 +1746,16 @@ class ChatEngine(
                     status = MessageStatus.STREAMING,
                     model = model,
                     providerId = provider.id,
-                    parentId = newUserMessage?.id ?: regenerateOf,
+                    /*
+                     * 主动发言没有用户消息，就挂在上一条消息后面 ——
+                     * 界面上「重新生成」按的是"谁触发了我"，挂空会找不到它。
+                     */
+                    parentId = newUserMessage?.id
+                        ?: if (proactiveHint != null) {
+                            _messages.value.lastOrNull()?.id.orEmpty()
+                        } else {
+                            regenerateOf
+                        },
                     stepIndex = if (agentOn) step else 0,
                 )
             }
@@ -1449,8 +1847,12 @@ class ChatEngine(
                  * 截出来是半句话。DeepSeek 的 title 扩展是模型读完这一轮后给的短标题，
                  * 质量高得多，而且不额外计一次请求 —— 它挂在正常回答的响应里。
                  * 第二轮起再要就是白花 token，所以条件里带 user 消息条数。
+                 *
+                 * 推理型模型（-pro / reasoner）不带这个字段：官方直接 400，
+                 * 见 [DeepSeekPricing.supportsTitleExtension]。
                  */
-                titleRequested = !titleAsked && (conversationUserTurns == 1) && deepSeekProvider,
+                titleRequested = !titleAsked && (conversationUserTurns == 1) &&
+                    deepSeekProvider && com.dshwatch.domain.DeepSeekPricing.supportsTitleExtension(model),
                 /*
                  * 思考模式的多轮对话必须把上一轮的 reasoning_content 带回，
                  * 少一条就整单 400。非 DeepSeek 不开：OpenAI 官方与部分严格网关
@@ -1569,6 +1971,11 @@ class ChatEngine(
                     reasoning = result.reasoning,
                 )
 
+            /*
+             * 这一批工具里，有没有"把图片递进来"的（attach_file / device_screenshot）。
+             * 收集到 [pickedImages] 里，循环末尾统一附成一条 user 消息。
+             */
+            val pickedImages = mutableListOf<String>()
             val executed = executeTools(
                 calls = result.toolCalls,
                 messageId = placeholder.id,
@@ -1576,8 +1983,10 @@ class ChatEngine(
                 registry = registry,
                 deniedTools = deniedTools,
                 sessionDir = conv.workDir,
-                blocked = blockedNames,
+                blocked = blockedNames +
+                    if (fishScene) emptySet() else FISH_TOOL_WHITELIST,
                 mustConfirm = pluginConfirm,
+                images = pickedImages,
             )
             executed.forEach { call ->
                 // 插件在这里接管工具结果 —— 这是**唯一**能省下 tool 结果 token 的位置。
@@ -1607,6 +2016,37 @@ class ChatEngine(
                     content = content.ifBlank { "(无输出)" },
                     toolCallId = call.id,
                 )
+            }
+
+            /*
+             * 工具取到的图片，附成一条 user 消息跟在工具结果后面。
+             *
+             * ## 为什么要多这一条消息
+             *
+             * OpenAI 的 `role=tool` 消息只有文本字段，图片放进去会被服务端拒或忽略。
+             * 而"我刚截的这张图"必须让模型**在看的那一刻**看到 —— 只在工具文字里写
+             * 一句「图在 /xxx.png」等于让它对着路径想象画面。
+             *
+             * 用 user 角色而不是别的：多数兼容端点只接受开头一条 system，
+             * 半路再塞 system 要么被忽略要么直接 400（和 `proactive` 注记同一个理由）。
+             * 措辞上明确说是系统附的，免得她以为这是对方发来的照片。
+             */
+            if (pickedImages.isNotEmpty()) {
+                val usable = if (canTakeImages) {
+                    pickedImages.distinct()
+                } else {
+                    // 这个模型读不了图：不要白传，也别让它以为图还在手上
+                    _banner.value = Banner("当前模型读不了图，刚截的图没有发出去；切到视觉模型再看")
+                    emptyList()
+                }
+                if (usable.isNotEmpty()) {
+                    turns = turns + ChatTurn(
+                        role = "user",
+                        content = "（系统附上 ${usable.size} 张图，是你刚才自己取到的。直接看图回答，" +
+                            "不要请用户再发一遍，也不要描述文件名。）",
+                        images = usable,
+                    )
+                }
             }
 
             if (!currentCoroutineContext().isActive) break
@@ -1820,6 +2260,8 @@ class ChatEngine(
         sessionDir: String,
         blocked: Set<String> = emptySet(),
         mustConfirm: Set<String> = emptySet(),
+        /** 收集"工具取到的图片"（绝对路径），由调用方在下一轮附成一条 user 消息 */
+        images: MutableList<String>? = null,
     ): List<ToolCallRecord> {
         // 工具集是应用级单例，而工作目录是每个会话各自的 —— 这里换一副「眼镜」，
         // 之后所有相对路径都会被解析到本会话的目录下。
@@ -1951,6 +2393,9 @@ class ChatEngine(
                     Logx.e(TAG, "工具 ${tool.name} 执行异常", t)
                     ToolResult.fail("执行异常：${t.javaClass.simpleName}: ${t.message}")
                 }
+            if (result.ok && result.images.isNotEmpty()) {
+                images?.addAll(result.images)
+            }
             val rec = call.copy(
                 status = if (result.ok) ToolStatus.SUCCESS else ToolStatus.FAILED,
                 // 工具结果**完整**回灌，不再落盘压缩。v1.6 曾把超长结果换成
@@ -2314,6 +2759,15 @@ class ChatEngine(
         private const val HARD_STEP_CEILING = 200
 
         /**
+         * 养鱼场景唯一开放的工具。
+         *
+         * 写在引擎里而不是让工具自己决定：工具是"能力"，场景是"允不允许用"。
+         * 放在同一个地方，加第二个养鱼工具时改一行就够，也不会有人在酒馆里
+         * 顺手把工具面放开。
+         */
+        private val FISH_TOOL_WHITELIST = setOf("schedule_proactive", "fish_skin")
+
+        /**
          * 每次都必须确认的工具（已迁到 [ApprovalPolicy.ALWAYS_CONFIRM]）。
          *
          * shell 也仍然每次确认，但多了「本会话允许」；js 不再强制拦。
@@ -2321,6 +2775,16 @@ class ChatEngine(
          */
         val ALWAYS_CONFIRM_TOOLS = ApprovalPolicy.ALWAYS_CONFIRM
         private const val TAG = "ChatEngine"
+
+        /**
+         * 重试时补在系统提示末尾的一句。
+         *
+         * 只在「上一轮只回了思维链」时用。思考型模型的第一反应是继续想，
+         * 不明确禁止，它会拿着放大后的额度再想一遍，正文还是空的。
+         */
+        private const val DIRECT_ANSWER_HINT =
+            "\n\n【这一次只给结果】直接输出要交付的内容本身，" +
+                "不要复述思考过程，不要解释，不要加开场白。"
 
         /**
          * 由插件的「禁用集 + 白名单」算出本次任务真正要拦下的工具。

@@ -39,7 +39,19 @@ object BuiltinProviders {
         /** 设置页给用户看的说明：为什么看不到 key */
         val note: String,
         val key: () -> String,
-    )
+    ) {
+        /**
+         * 这个包里到底有没有编进 Key。
+         *
+         * Key 是**构建期**从环境变量 / local.properties 注入的（见 `app/build.gradle.kts`），
+         * 一份源码可以被编出「有内置额度」和「没有内置额度」两种包 —— 发版机上有 key，
+         * 别人的机器上没有。所以它必须是个运行时能查的状态，不能假定为真。
+         *
+         * 为假时，界面上要把内置通道标成「未配置」并允许用户填自己的 Key，
+         * 否则用户只会看到一句「API Key 为空」，而设置里根本没有能填的地方。
+         */
+        val configured: Boolean get() = key().isNotBlank()
+    }
 
     /**
      * Agnes：2 文本 + 2 出图 + 1 视频。
@@ -132,6 +144,9 @@ object BuiltinProviders {
      */
     fun keyOf(providerId: String): String? =
         of(providerId)?.key?.invoke()?.takeIf { it.isNotBlank() }
+
+    /** 这个包里有没有编进这家的 Key */
+    fun isConfigured(providerId: String): Boolean = of(providerId)?.configured == true
 }
 
 /**

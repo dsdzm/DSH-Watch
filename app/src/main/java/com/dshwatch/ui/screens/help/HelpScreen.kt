@@ -45,8 +45,8 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.i18n.Zh
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
-import com.dshwatch.ui.wear.WearList
-import com.dshwatch.ui.wear.rememberKeptListState
+import com.dshwatch.ui.wear.FlatList
+import com.dshwatch.ui.wear.rememberKeptLazyState
 import com.dshwatch.ui.wear.wearVerticalScroll
 
 /**
@@ -62,8 +62,8 @@ fun HelpListScreen(nav: WatchNavigator) {
     val chinese = s === Zh
 
     WatchScaffold(title = s.helpTitle, onBack = { nav.pop() }) {
-        WearList(
-            state = rememberKeptListState("help"),
+        FlatList(
+            state = rememberKeptLazyState("help"),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(HelpContent.topics.size) { index ->

@@ -15,16 +15,16 @@ package com.dshwatch.domain.agent
 object DeviceGuide {
 
     val PROMPT: String = """
-
 【设备操控】
-你可以操作这台手表上的其他 App：device_screen 读屏、device_act 点击/输入/翻页、device_open 打开应用。操作期间 App 在后台，**用户看不到这段对话**，只在屏幕底部看到一行提示和停止按钮。因此：
+你可以操作其他 App：device_screen 读屏、device_act 点击/输入/翻页、device_open 打开应用。操作期间 App 在后台，**用户看不到这段对话**，只能看到底部一条提示。因此：
 
-- 需要用户决定、输入密码/验证码、确认支付时，用 device_handoff 交还，**不要用 ask_user**（用户看不见那个问题）；
+- 需要用户决定、密码/验证码、支付确认时用 device_handoff 交还，**不要用 ask_user**（用户看不见那个问题）；
 - 每步先 device_screen；动作后返回的屏幕就是事实，不要凭想象推断；
-- 翻页用 device_act 的 scroll（真的滑一屏），不要靠反复按 back 或连点；横向列表用 direction=right/left；
-- 动作后返回的屏幕和之前一样，说明没生效或效果不在读屏里 —— 换做法，别重复同一个动作；
-- 读不到控件（游戏、自绘界面）时用 x、y 按坐标点，不要放弃；
-- 权限管理、应用安装、系统界面只能读不能点，工具会直接拒绝 —— 用户要改让他自己来；
-- 任务结束先用一句话说明做了什么，再停止调用工具，用户回到对话页要能立刻看懂结果。
+- 翻页用 scroll，不要反复按 back 或连点；横向列表用 direction=right/left；
+- 返回的屏幕跟之前一样 = 没生效，换做法，别重复同一个动作；
+- 读不到控件（游戏、自绘界面）时用 x、y 按坐标点；
+- **看不清就上图**：device_screenshot 截屏，或 attach_file 递入本地图片（手表不会截图就先 adb_shell 存图）；
+- 权限管理、应用安装、系统界面只能读不能点 —— 要改让用户自己来；
+- 结束先用一句话说明做了什么，再停止调用工具，用户回来要能看懂。
 """.trimEnd()
 }

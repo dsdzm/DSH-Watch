@@ -57,6 +57,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1653,12 +1654,18 @@ internal fun AgentWorkBlock(
 ) {
     val s = LocalStrings.current
     val calls = steps.filterIsInstance<WorkStep.Tool>().map { it.call }
-    // 任务完成前默认**展开**：这一轮的所有操作与思考都要能在同一个工作流程里看到。
-    // 完成后由下面的 LaunchedEffect 收回折叠，只留摘要。
-    var expanded by remember(blockKey) { mutableStateOf(isStreaming) }
+    /*
+     * 展开状态分三种：用户说了开、用户说了关、还没表态。
+     *
+     * 以前是 `expanded = isStreaming` + 「流一结束就置 false」——
+     * 用户在流式期间点开，紧接着这一轮结束，LaunchedEffect 又把它折回去，
+     * 于是「点了没反应」。现在只要用户碰过，后续任何自动逻辑都不能再改。
+     */
+    var manual by remember(blockKey) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(blockKey, isStreaming) {
-        if (!isStreaming) expanded = false
+        if (!isStreaming && manual == null) manual = false
     }
+    val expanded = manual ?: isStreaming
     val running = calls.firstOrNull { !it.isSettled }
     val failedCount = calls.count { it.status == ToolStatus.FAILED || it.status == ToolStatus.DENIED }
     val hasThinking = steps.any { it is WorkStep.Thinking }
@@ -1698,7 +1705,9 @@ internal fun AgentWorkBlock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .tap(onClick = withHaptic { expanded = !expanded }),
+                // 手表上一行 labelMedium 只有 18dp 高，手指落上去十次有三次在卡片留白里
+                .heightIn(min = 30.dp)
+                .tap(onClick = withHaptic { manual = !expanded }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -1755,11 +1764,13 @@ internal fun AgentWorkBlock(
                     is WorkStep.Thinking -> {
                         if (!showReasoning) return@forEach
                         Spacer(Modifier.height(4.dp))
-                        ThinkingCard(
-                            key = step.key,
-                            text = step.text,
-                            streaming = isStreaming && step.key == lastThinkingKey,
-                        )
+                        key(step.key) {
+                            ThinkingCard(
+                                key = step.key,
+                                text = step.text,
+                                streaming = isStreaming && step.key == lastThinkingKey,
+                            )
+                        }
                     }
                     is WorkStep.Tool -> {
                         Spacer(Modifier.height(4.dp))
@@ -1799,11 +1810,18 @@ internal fun AgentWorkBlock(
 @Composable
 private fun ThinkingCard(key: String, text: String, streaming: Boolean) {
     val s = LocalStrings.current
-    // 流式中的最后一段默认展开；落定后自动收起
-    var expanded by remember(key) { mutableStateOf(streaming) }
+    /*
+     * 同上：用户点过就以用户为准。
+     *
+     * 旧写法是「流式结束就折起来」。用户在正文生成到一半时点开这一段，
+     * 思考恰好结束（streaming 由 true 变 false），下一帧就自己折回去 ——
+     * 表现就是「思维链点不开，一直被流式折叠」。
+     */
+    var manual by remember(key) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(key, streaming) {
-        if (!streaming) expanded = false
+        if (!streaming && manual == null) manual = false
     }
+    val expanded = manual ?: streaming
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1813,7 +1831,8 @@ private fun ThinkingCard(key: String, text: String, streaming: Boolean) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .tap(onClick = withHaptic { expanded = !expanded }),
+                .heightIn(min = 28.dp)
+                .tap(onClick = withHaptic { manual = !expanded }),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(

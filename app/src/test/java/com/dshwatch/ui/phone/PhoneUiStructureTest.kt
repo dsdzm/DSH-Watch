@@ -51,6 +51,8 @@ class PhoneUiStructureTest {
             "PhoneSessionsScreen.kt",
             "PhoneSettingsScreen.kt",
             "PhoneOnboarding.kt",
+            "PhoneScenes.kt",
+            "PhoneRoleplayChat.kt",
         )
         for (page in pages) {
             val body = code(src(page))
@@ -88,10 +90,16 @@ class PhoneUiStructureTest {
     fun `手机版能进酒馆与写作`() {
         // 之前只把 PhoneChatScreen 写死在「对话」tab 上，场景切换只存在于手表界面，
         // 手机用户根本进不去这两个模式。三处都必须有出口，缺一处就断链。
+        //
+        // 现在这两个模式在手机上各自有一份 MD3 实现（`PhoneScenes.kt`），
+        // 不再借手表的 `TavernScreen` / `WritingScreen` —— 那两份是为 200dp 圆屏写的。
         val root = code(src("PhoneRoot.kt"))
         assertThat(root).contains("Scenes.of(settings.useScene)")
-        assertThat(root).contains("TavernScreen(")
-        assertThat(root).contains("WritingScreen(")
+        assertThat(root).contains("PhoneTavernScreen(")
+        assertThat(root).contains("PhoneWritingScreen(")
+        assertThat(root).doesNotContain("screens.tavern.TavernScreen")
+        assertThat(root).doesNotContain("screens.writing.WritingScreen")
+        assertThat(root).contains("FishPhoneScreen(")
 
         val chrome = code(src("PhoneChatChrome.kt"))
         assertThat(chrome).contains("fun PhoneSceneSheet(")
@@ -99,6 +107,21 @@ class PhoneUiStructureTest {
 
         val chat = code(src("PhoneChatScreen.kt"))
         assertThat(chat).contains("PhoneSceneSheet(")
+    }
+
+    @Test
+    fun `酒馆与写作的手机版共用同一套顶栏与卡片`() {
+        val scenes = code(src("PhoneScenes.kt"))
+        // 四个模式的顶栏必须是同一颗：☰ + 标题/副标题 + 模型药丸
+        assertThat(scenes).contains("PhoneChatHeader(")
+        assertThat(scenes).contains("PhoneModelSheet(")
+        assertThat(scenes).contains("PhoneHistoryDrawer(")
+        // 卡片不再用玻璃
+        assertThat(scenes).doesNotContain("glassSurface(")
+        // 两份列表页收拢成一个实现，靠参数区分
+        assertThat(scenes).contains("private fun PhoneRoleList(")
+        assertThat(scenes).contains("showImport = false")
+        assertThat(scenes).contains("showImport = true")
     }
 
     @Test
@@ -136,7 +159,9 @@ class PhoneUiStructureTest {
         val chat = code(src("PhoneChatScreen.kt"))
         val chrome = code(src("PhoneChatChrome.kt"))
         assertThat(chat).contains("PhoneAttachSheet(")
-        assertThat(chat).contains("ActivityResultContracts.TakePicture()")
+        // 拍照实现搬进了公共组件（手表输入页也用同一份），
+        // 这里改断言调用点，具体 contract 由 CameraShot 自己保证
+        assertThat(chat).contains("rememberCameraShot(")
         assertThat(chat).contains("PickVisualMedia")
         assertThat(chat).contains("ActivityResultContracts.OpenDocument()")
         assertThat(chrome).contains("fun PhoneAttachSheet(")
@@ -202,5 +227,60 @@ class PhoneUiStructureTest {
     fun `次级页复用同一份 ScreenHost 而不是另写一套`() {
         val root = code(src("PhoneRoot.kt"))
         assertThat(root).contains("ScreenHost(")
+    }
+
+    @Test
+    fun `角色对话页与写作对话页在手机上有自己的实现`() {
+        // 这两件事以前都落进 `else -> ScreenHost`：从角色卡点「开始对话」、
+        // 从记录点开一条会话，落地的都是 `WatchScaffold` 写的那一页。
+        val root = code(src("PhoneRoot.kt"))
+        assertThat(root).contains("Screen.RoleplayChat ->")
+        assertThat(root).contains("PhoneRoleplayChatScreen(")
+
+        val page = code(src("PhoneRoleplayChat.kt"))
+        assertThat(page).contains("PhoneChatHeader(")
+        assertThat(page).contains("PhoneComposer(")
+        // 对话页是压栈进来的：顶栏必须有返回，不能被当成根页
+        assertThat(page).contains("onBack =")
+        // 写作的正文整宽铺开，不塞进 0.86 宽的气泡
+        assertThat(page).contains("isWriting")
+        assertThat(page).contains("fillMaxWidth(if (fullWidth) 1f else 0.86f)")
+    }
+
+    @Test
+    fun `养鱼会话交给养鱼页渲染而不是角色对话页`() {
+        // 「从记录点进养鱼的对话，回到手表对话页」的根因：会话页不看会话自己的场景。
+        val page = code(src("PhoneRoleplayChat.kt"))
+        assertThat(page).contains("scene == Scenes.FISH")
+        assertThat(page).contains("FishPhoneScreen(")
+
+        // 那一页本来是对话 tab 的根；被压栈进来时要能退回记录列表
+        val fish = File("src/main/java/com/dshwatch/ui/screens/fish/FishPhoneScreen.kt").readText()
+        assertThat(fish).contains("onBack: (() -> Unit)? = null")
+    }
+
+    @Test
+    fun `从记录打开会话会把当前模式一起切过去`() {
+        // 不切的话：设置停在养鱼，点开一条酒馆会话——会话是酒馆的、界面还是鱼，
+        // 用户会以为"点了没反应"。
+        val sessions = code(src("PhoneSessionsScreen.kt"))
+        assertThat(sessions).contains("val scene = Scenes.of(conv.scene)")
+        assertThat(sessions).contains("copy(useScene = scene)")
+
+        val chat = code(src("PhoneChatScreen.kt"))
+        assertThat(chat).contains("copy(useScene = target)")
+    }
+
+    @Test
+    fun `某张卡的历史在手机上也是记录页`() {
+        // 手表那版是 WearList：点开一张卡的历史却看到表盘列表，等于换了 App
+        val root = code(src("PhoneRoot.kt"))
+        assertThat(root).contains("Screen.SceneSessions")
+        assertThat(root).contains("filterCardId")
+
+        val sessions = code(src("PhoneSessionsScreen.kt"))
+        assertThat(sessions).contains("filterScene")
+        assertThat(sessions).contains("listFor(")
+        assertThat(sessions).contains("onBack")
     }
 }

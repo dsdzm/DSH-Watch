@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Pets
 import androidx.compose.material.icons.outlined.TheaterComedy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -110,6 +111,7 @@ fun ScenePickerDialog(
 fun sceneIcon(scene: String): ImageVector = when (Scenes.of(scene)) {
     Scenes.TAVERN -> Icons.Outlined.TheaterComedy
     Scenes.WRITING -> Icons.Outlined.AutoStories
+    Scenes.FISH -> Icons.Outlined.Pets
     else -> Icons.Outlined.Code
 }
 

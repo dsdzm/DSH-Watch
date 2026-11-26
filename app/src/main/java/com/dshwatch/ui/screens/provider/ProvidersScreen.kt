@@ -36,7 +36,7 @@ import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
-import com.dshwatch.ui.wear.WearList
+import com.dshwatch.ui.wear.FlatList
 import kotlinx.coroutines.launch
 
 @Composable
@@ -63,8 +63,8 @@ fun ProvidersScreen(
             EmptyState(title = s.addProvider, hint = s.typeOpenAiHint)
             return@WatchScaffold
         }
-        WearList(
-            state = com.dshwatch.ui.wear.rememberKeptListState("providers"),
+        FlatList(
+            state = com.dshwatch.ui.wear.rememberKeptLazyState("providers"),
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -137,6 +137,17 @@ private fun ProviderRow(
                         // 它永远是 ✓，写出来只会让人以为可以点进去改
                         append("内置通道 · ")
                         append(provider.defaultModel.ifBlank { "未选模型" })
+                        /*
+                         * 但「这份包压根没编进 Key」要明说。
+                         *
+                         * 那种包内置通道一用就鉴权失败，而用户看到的只是一行
+                         * 正常的「内置通道 · agnes-3.0-flash」—— 他不会想到是包里
+                         * 少了东西。标出来，他才会点进去填自己的 Key。
+                         */
+                        if (!com.dshwatch.domain.model.BuiltinProviders.isConfigured(provider.id)) {
+                            append(" · ")
+                            append(if (s.isChinese) "未配置 Key" else "no key")
+                        }
                     } else if (provider.accountAuth) {
                         /*
                          * 账号模式没有 key 可显示，展示「登录没登录」——
@@ -161,7 +172,15 @@ private fun ProviderRow(
                     }
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (
+                    provider.isBuiltin &&
+                    !com.dshwatch.domain.model.BuiltinProviders.isConfigured(provider.id)
+                ) {
+                    // 这不是「提示」，是「现在发不出消息」—— 用错误色
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

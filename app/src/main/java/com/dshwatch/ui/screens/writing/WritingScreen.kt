@@ -171,7 +171,7 @@ fun WritingScreen(
                 scope.launch { container.settingsRepo.update { it.copy(useScene = id) } }
                 when (id) {
                     Scenes.TAVERN -> { nav.popToRoot(); nav.push(Screen.TavernHome) }
-                    Scenes.CODING -> nav.popToRoot()
+                    Scenes.CODING, Scenes.FISH -> nav.popToRoot()
                     else -> Unit
                 }
             },
@@ -295,7 +295,7 @@ private fun WritingCardRow(
  *  - 其余整段当成一条常驻条目
  */
 @Composable
-private fun ImportDialog(
+internal fun ImportDialog(
     onDismiss: () -> Unit,
     onImportWorld: (String) -> Unit,
     onImportPlugin: (String, String) -> Unit,

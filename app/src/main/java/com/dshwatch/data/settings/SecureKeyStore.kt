@@ -85,6 +85,15 @@ class SecureKeyStore(context: Context) : com.dshwatch.domain.CredentialSource {
         return com.dshwatch.domain.model.BuiltinProviders.keyOf(providerId)
     }
 
+    /**
+     * 只读本机存过的那一份，**不**回落到内置 Key。
+     *
+     * 编辑页要用它预填输入框。若那里直接调 [getApiKey]，内置通道会把编译期注入的
+     * Key 原样填进输入框 —— 用户在手表上顺手点一下保存，这份 Key 就被复制进了
+     * 本机加密库，之后导出诊断或备份都可能把它带出去。
+     */
+    fun storedApiKey(providerId: String): String? = get(k(providerId, FIELD_API_KEY))
+
     /** 内置 key 是否可用（设置页/诊断页用来提示「内置额度已就绪」） */
     fun hasBuiltinKey(): Boolean =
         com.dshwatch.domain.model.BuiltinProviders.all.any { it.key().isNotBlank() }

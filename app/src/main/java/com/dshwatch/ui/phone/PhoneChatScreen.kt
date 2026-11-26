@@ -54,6 +54,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.data.attachment.AttachmentStore
+import com.dshwatch.ui.components.rememberCameraShot
 import com.dshwatch.domain.Choices
 import com.dshwatch.domain.LiveDelta
 import com.dshwatch.domain.Panels
@@ -276,41 +277,17 @@ fun PhoneChatScreen(
     }
 
     /*
-     * 拍照：把相机的输出写到缓存目录，再用 FileProvider 换一个可写的 uri。
+     * 拍照：直接拉起系统相机，回来就是一张原图。
      *
-     * 不用 `TakePicturePreview` —— 那个只回一张缩略图（一百多 dp 的位图），
-     * 发给模型等于把照片糊成马赛克。也不用自己申请 CAMERA 权限：
-     * `ACTION_IMAGE_CAPTURE` 由相机 App 拍，本进程一行权限都不用加。
+     * 实现在 [rememberCameraShot] 里 —— 手表那边的输入页用的是同一份，
+     * 不再各写一遍（两处最容易分叉的地方是 FileProvider 的 authority 和
+     * 缓存目录，写错一处就只在某一种设备上「点拍照没反应」）。
      */
-    val cameraDir = remember { File(context.cacheDir, "camera").apply { mkdirs() } }
-    var pendingPhoto by remember { mutableStateOf<File?>(null) }
-    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val file = pendingPhoto
-        pendingPhoto = null
-        if (ok && file != null) {
-            val uri = runCatching {
-                FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-            }.getOrNull()
-            if (uri != null) addUri(uri) else attachNote = "照片没存下来，换个方式再试"
-        }
-    }
-
-    fun shoot() {
-        val file = File(cameraDir, "IMG_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg")
-        val uri = runCatching {
-            FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-        }.getOrNull()
-        if (uri == null) {
-            attachNote = "这台设备没有可用的相机"
-            return
-        }
-        pendingPhoto = file
-        val ok = runCatching { takePicture.launch(uri) }.isSuccess
-        if (!ok) {
-            pendingPhoto = null
-            attachNote = "这台设备没有相机应用"
-        }
-    }
+    val shoot = rememberCameraShot(
+        context = context,
+        onPicked = { uri -> addUri(uri) },
+        onError = { attachNote = it },
+    )
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -326,13 +303,24 @@ fun PhoneChatScreen(
                 onOpen = { conv ->
                     scope.launch {
                         drawerState.close()
+                        val target = Scenes.of(conv.scene)
                         engine.open(conv.id)
                         /*
-                         * 酒馆 / 写作的会话必须交给角色扮演页渲染：它们带角色卡、
+                         * 打开别的模式的会话 = 切到那个模式。
+                         *
+                         * 只 open 不改 useScene 的话，返回根页时对话 tab 还按旧模式
+                         * 分发：引擎里是酒馆会话，界面却是编程页 —— 那一页不认识
+                         * 角色卡，消息会显示成没有上下文的普通问答。
+                         */
+                        if (target != Scenes.of(settings.useScene)) {
+                            container.settingsRepo.update { it.copy(useScene = target) }
+                        }
+                        /*
+                         * 酒馆 / 写作 / 养鱼的会话交给会话页渲染：它们带角色卡、
                          * 开场白、剧情开关，手机对话页不认识这些，硬塞进去等于
                          * 把一段对话剥掉上下文展示。
                          */
-                        if (Scenes.of(conv.scene) != Scenes.CODING) nav.open(Screen.RoleplayChat)
+                        if (target != Scenes.CODING) nav.open(Screen.RoleplayChat)
                     }
                 },
                 onNewChat = {
@@ -481,6 +469,7 @@ fun PhoneChatScreen(
                 onAttach = { showAttach = true },
                 onSend = { submit() },
                 onStop = { engine.stop() },
+                onCamera = shoot,
             )
         }
     }
@@ -647,7 +636,18 @@ fun PhoneChatScreen(
             activeProviderId = settings.activeProviderId,
             currentModel = conversation?.model?.ifBlank { provider?.defaultModel.orEmpty() }.orEmpty(),
             onPickProvider = { p ->
-                scope.launch { container.settingsRepo.update { it.copy(activeProviderId = p.id) } }
+                scope.launch {
+                    container.settingsRepo.update { it.copy(activeProviderId = p.id) }
+                    /*
+                     * 会话里记的是上一家的模型名。不清掉的话，顶栏显示的名字
+                     * 不属于这一家，而请求会按「不属于当前供应商」退回默认值 ——
+                     * 又变回「表面和实际不一致」。
+                     */
+                    val convModel = engine.conversation.value?.model.orEmpty()
+                    if (convModel.isNotBlank() && convModel !in p.models) {
+                        engine.overrideModel(p.defaultModel.ifBlank { p.models.firstOrNull().orEmpty() })
+                    }
+                }
             },
             onPickModel = { model ->
                 showModelPicker = false

@@ -89,7 +89,7 @@ object TavernPrompt {
 
         if (memory.isNotBlank()) {
             append("\n【你记得的事】（之前对话的摘要，按时间顺序，越靠后越近）\n")
-            append(memory.trim().take(MEMORY_CHAR_BUDGET)).append('\n')
+            append(memoryForPrompt(memory)).append('\n')
         }
 
         val lore = buildLore(card, extraLore)
@@ -191,7 +191,7 @@ object TavernPrompt {
         }
         if (memory.isNotBlank()) {
             append("\n【前情提要】（已写内容的摘要）\n")
-            append(memory.trim().take(MEMORY_CHAR_BUDGET)).append('\n')
+            append(memoryForPrompt(memory)).append('\n')
         }
         val lore = buildLore(card, extraLore)
         if (lore.isNotBlank()) {
@@ -219,23 +219,90 @@ object TavernPrompt {
      */
     fun greetingOf(card: RoleCard): String = card.greeting.trim()
 
-    /** 长期记忆压缩时给模型的指令 */
-    fun compressInstruction(scene: String): String = if (scene == Scenes.WRITING) {
-        """把下面的正文压缩成一段【前情提要】，用于之后续写时复述。
+    /**
+     * 长期记忆压缩时给模型的指令。
+     *
+     * ## 为什么要拆成「一条一件事」
+     *
+     * 以前一次压缩产出一整段 400 字摘要。那段话里通常混着七八件事，
+     * 而记忆的寿命是按条目算的 —— 整段一起新、一起旧、一起忘，
+     * 于是"三天前那次吵架"和"刚才吃了什么"永远同生共死。
+     *
+     * 拆成事件之后才能做「按时间遗忘」「多次提起加深印象」「情绪重的固化」。
+     * 代价是每条第 30 字左右必然丢细节，但这个取舍是用户明确要的：
+     * 他要的是像人一样"记得有这回事、细节模糊"，不是一份精确的会议纪要。
+     *
+     * 写作场景不拆：续写要的是连贯的前情提要，碎片事件反而会写崩。
+     */
+    fun compressInstruction(scene: String, remembered: List<String> = emptyList()): String =
+        if (scene == Scenes.WRITING) {
+            """把下面的正文压缩成一段【前情提要】，用于之后续写时复述。
 要求：
 - 按时间顺序，只写已发生的关键事件、人物关系变化、重要设定揭示。
 - 保留专有名词、地点、数字、伏笔；不要保留原文句子、不要评论文笔。
 - 用第三人称概述，不要加入原文没有的内容。
 - 控制在 400 字以内。
 只输出这段提要本身。"""
-    } else {
-        """把下面的对话压缩成一段【记忆】，用于之后继续扮演时复述。
+        } else {
+            buildString {
+                append(
+                    """把下面的对话拆成 1~5 条「她真正会记住的事」，每行一条。
+
+格式：标记 + 空格 + 内容。
+"""
+                )
+                if (remembered.isNotEmpty()) {
+                    append("\n【她已经记得的事】（带编号，供你对照）\n")
+                    remembered.forEachIndexed { i, t ->
+                        append(i + 1).append(". ").append(t).append('\n')
+                    }
+                    append(
+                        """
+如果下面这段对话是在说上面**同一件事**（补充细节、又提了一次、有了新进展），
+就用 `[=编号]` 开头，后面写合并后的完整一句，例如：
+[=2] 答应了每周日陪用户看电影，约在晚上八点
+这样她不会把同一件事记成好几条。
+
+如果是新的事，用下面的标记开头：
+"""
+                    )
+                }
+                append(
+                    """[*] 她认为很重要、以后会一直记得的：约定、承诺、身份、创伤、告白
+[!] 让她情绪波动很大的：吵架、受伤、惊喜、被理解、被需要、离别
+[-] 普通的事：聊过什么、做过什么、知道了什么小习惯
+
 要求：
-- 按时间顺序，写"谁做了什么、关系发生了什么变化、承诺过什么、知道了哪些秘密"。
-- 保留专有名词与数字；不要保留原句，不要评论，不要写"用户说/我回复"这种流水账。
-- 用第三人称概述，不要编造对话里没有的情节。
-- 控制在 400 字以内。
-只输出这段记忆本身。"""
+- 一条一件事，30 字以内，第三人称，直接写内容。
+- 不要写"用户说""我回答"这类流水账。
+- 保留专有名词、地点、数字、昵称。
+- 平淡的日常最多留一条，宁可少写也不要凑数。
+- 只输出这些行，不要标题、不要解释、不要空行。"""
+                )
+            }
+        }
+
+    /**
+     * 记忆进提示词前的兜底截断。
+     *
+     * 正常路径上 [com.dshwatch.data.store.MemoryStore.render] 已经按预算分好档，
+     * 这里只处理两种情况：
+     *
+     *  - **渲染过的**（开头是「（记得很清楚）」）：清晰档在前、模糊档在后，
+     *    砍尾巴；
+     *  - **旧格式原文**（`## 时间戳` 分段）：最新在末尾，必须留末尾 ——
+     *    以前这里用的是 `take()`，留下的是最早 6000 字，正是用户反馈的
+     *    「聊着聊着突然翻出很早以前的话」。
+     */
+    internal fun memoryForPrompt(memory: String): String {
+        val text = memory.trim()
+        if (text.length <= MEMORY_CHAR_BUDGET) return text
+        if (text.startsWith("（记得很清楚）") || text.startsWith("（只剩模糊印象的）")) {
+            return text.take(MEMORY_CHAR_BUDGET) + "\n（更早的记忆已经模糊了）"
+        }
+        val tail = text.takeLast(MEMORY_CHAR_BUDGET)
+        val boundary = tail.indexOf("\n## ")
+        return if (boundary >= 0) tail.substring(boundary + 1) else tail
     }
 
     /** 记忆文档的总预算：超过就只保留最新的部分（按"## 时间戳"分段取尾部） */

@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package com.dshwatch.data.store
 
 import com.dshwatch.domain.roleplay.BuiltinCards
@@ -128,6 +130,30 @@ class RoleCardStoreTest {
 
         s.ensureBuiltins(BuiltinCards.all())
         assertThat(s.load(first.id)?.name).isEqualTo("我改过的名字")
+    }
+
+    @Test
+    fun `升级后新增的内置卡会补给老用户`() = runTest {
+        val s = store()
+        // 模拟旧版本：库里只有老卡，还没有大肥鱼
+        s.ensureBuiltins(BuiltinCards.all().filter { it.name != "大肥鱼" })
+        assertThat(s.index(Scenes.TAVERN).map { it.name }).doesNotContain("大肥鱼")
+
+        // 新版本第一次启动：缺的那张要补进来
+        s.ensureBuiltins(BuiltinCards.all())
+        assertThat(s.index(Scenes.TAVERN).map { it.name }).contains("大肥鱼")
+    }
+
+    @Test
+    fun `用户删掉内置卡后重启不会复活`() = runTest {
+        val s = store()
+        s.ensureBuiltins(BuiltinCards.all())
+        val victim = s.index(Scenes.TAVERN).first { it.name == "大肥鱼" }
+        s.delete(victim.id)
+
+        // 已记过账的 id 不再尝试，删了就是删了
+        s.ensureBuiltins(BuiltinCards.all())
+        assertThat(s.index(Scenes.TAVERN).map { it.id }).doesNotContain(victim.id)
     }
 
     @Test

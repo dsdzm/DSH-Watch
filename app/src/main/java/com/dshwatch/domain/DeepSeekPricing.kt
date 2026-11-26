@@ -102,4 +102,28 @@ object DeepSeekPricing {
         val haystack = "$baseUrl $model $providerName".lowercase()
         return haystack.contains("deepseek")
     }
+
+    /**
+     * 这个模型认不认 `title: {enabled:true}` 这个扩展字段。
+     *
+     * 官方对推理型（`-pro` / `reasoner` / `thinking`）明确不支持，会整单 400：
+     *
+     * > The server-side tool calls (...) and the title generation feature are
+     * > unavailable for model deepseek-v4-pro. Please use deepseek-flash instead.
+     *
+     * 而 [isDeepSeek] 只看字符串里有没有 "deepseek"，pro 也被判成 DeepSeek ——
+     * 于是每开一个新会话、第一轮就带 title 字段，直接被拒。用户看到的
+     * 是一个和自己操作毫无关系的 400，很容易怪到「模型切换没生效」头上。
+     *
+     * 标题只是锦上添花：本地 `autoTitle` 截前 18 字已经够用，
+     * 拿不准的时候一律不问，比拿一轮对话去赌一次 400 划算。
+     */
+    fun supportsTitleExtension(model: String): Boolean {
+        val m = model.lowercase()
+        val reasoningOnly = m.contains("reasoner") ||
+            m.contains("thinking") ||
+            m.contains("-pro") ||
+            m.endsWith("pro")
+        return !reasoningOnly
+    }
 }

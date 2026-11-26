@@ -22,6 +22,12 @@ import org.junit.Test
  *     主线程消息周期。手表把界面回收重建时主线程正忙着全量重组，这一轮
  *     消息排出去几秒 —— 死线就是这么走完的。日志里 onStartCommand
  *     连一行都没打出来，说明它根本没轮到执行。
+ *  4. **1.24.1-beta.35**（sprd 手表，API 28）：进前台已经挪到 onCreate 了，
+ *     但**请求本身**是后台线程发的（`onStreamingChanged` 在 Dispatchers.Default）。
+ *     系统的计时器从收到请求那一刻起跑，跟应用主线程忙不忙无关；界面重建时
+ *     主线程要跑几秒 Compose，onCreate 排不上。3 秒看门狗醒了两次、
+ *     stopService 也按了，ServiceRecord 那时还没 create，计时器没被摘掉 ——
+ *     5 秒到点，RemoteServiceException 带走整个进程。
  *
  * 这几条都不会编译报错、也不会在正常测试里冒出来，只能靠源码结构守住。
  */
@@ -87,15 +93,67 @@ class StreamingServiceRuleTest {
     }
 
     @Test
+    fun `拉起服务的请求必须回主线程发`() {
+        val svc = code("service/StreamingService.kt")
+        val hold = functionBody(svc, "private fun hold(").substringBefore("private fun issueStart(")
+        assertTrue("hold() 不见了", hold.isNotEmpty())
+        assertTrue(
+            "不能在调用方线程上直接发 startForegroundService：onStreamingChanged 走的是 " +
+                "Dispatchers.Default，系统的死线计时器会当场开跑，而 onCreate 排在" +
+                "主线程那轮全量重组后面 —— 1.24.1-beta.35 的崩溃就是这么来的",
+            !hold.contains("startForegroundService"),
+        )
+        assertTrue(
+            "要么本来就在主线程直接执行，要么 post 到主线程；两条分支都要有",
+            hold.contains("Looper.myLooper() == Looper.getMainLooper()") && hold.contains("mainHandler.post"),
+        )
+    }
+
+    @Test
     fun `startForegroundService 之后必须挂死线看门狗`() {
         val svc = code("service/StreamingService.kt")
-        val hold = functionBody(svc, "private fun hold(").substringBefore("private fun release(")
+        val issue = functionBody(svc, "private fun issueStart(")
+            .substringBefore("private fun watchForegroundDeadline(")
         assertTrue(
             "拉起服务后要盯死线：进不了前台就主动 stopService 撤销，" +
                 "framework 会把 SERVICE_FOREGROUND_TIMEOUT_MSG 摘掉，计时器随之取消",
-            hold.contains("watchForegroundDeadline"),
+            issue.contains("watchForegroundDeadline"),
         )
-        assertTrue("看门狗必须只对成功拉起的这次生效", hold.contains("onSuccess"))
+        assertTrue("看门狗必须只对成功拉起的这次生效", issue.contains("onSuccess"))
+        assertTrue(
+            "已经 release 掉的请求不该再拉起一个没有任务的服务",
+            issue.contains("holds.isEmpty()"),
+        )
+    }
+
+    @Test
+    fun `进前台成功要留痕`() {
+        val svc = code("service/StreamingService.kt")
+        val enter = functionBody(svc, "private fun enterForegroundQuietly(")
+            .substringBefore("private fun minimalNotification(")
+        assertTrue(
+            "成功路径必须有记录：beta.35 那次崩溃只能靠「没有任何失败日志」反推 onCreate 没跑，" +
+                "下次要能一眼分清是没跑还是跑了不被认",
+            enter.contains("Logx.remember"),
+        )
+    }
+
+    @Test
+    fun `看门狗从请求发出时刻算起，不是从想发的时刻`() {
+        val svc = code("service/StreamingService.kt")
+        val issue = functionBody(svc, "private fun issueStart(")
+            .substringBefore("private fun watchForegroundDeadline(")
+        assertTrue(
+            "看门狗必须拿「发出时刻」去比：主线程排了几秒才发出的请求是健康的，" +
+                "拿 requestedAt 去比会把它当成失败，刚进前台就被自己撤掉",
+            issue.contains("watchForegroundDeadline(app, seq, issuedAt)"),
+        )
+        val watchdog = functionBody(svc, "private fun watchForegroundDeadline(")
+            .substringBefore("private fun release(")
+        assertTrue(
+            "比较的基准也得换成 issuedAt",
+            watchdog.contains("foregroundedAt >= issuedAt"),
+        )
     }
 
     @Test

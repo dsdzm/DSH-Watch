@@ -95,14 +95,14 @@ fun ProviderEditScreen(
         )
     }
     var apiKey by remember(providerId) {
-        // 内置项的 key 不读进可编辑状态：一旦读出来，它就同时存在于
-        // 输入框缓存和截图里了，而这一栏对用户本来就不该存在
-        mutableStateOf(
-            existing
-                ?.takeIf { !it.isBuiltin }
-                ?.let { container.keyStore.getApiKey(it.id) }
-                .orEmpty(),
-        )
+        /*
+         * 只预填**本机存过**的那份，不读编译期内置 Key。
+         *
+         * 内置 Key 一旦读进输入框，它就同时存在于界面状态和截图里了；而这一栏
+         * 在「内置 Key 已就绪」时本来就不该存在。只在这份包没编进 Key 时，
+         * 才把用户自己填过的那份显示出来 —— 那种情况下这一栏是他的唯一出路。
+         */
+        mutableStateOf(existing?.let { container.keyStore.storedApiKey(it.id) }.orEmpty())
     }
     var sshPassword by remember(providerId) {
         mutableStateOf(existing?.let { container.keyStore.getSshPassword(it.id) }.orEmpty())
@@ -128,11 +128,18 @@ fun ProviderEditScreen(
             }
             if (toSave.type == ProviderType.DSH_SERVER) {
                 container.keyStore.putSshPassword(toSave.id, sshPassword.ifBlank { null })
-            } else if (!toSave.isBuiltin && !toSave.accountAuth) {
-                // 内置项的 key 只在编译期注入、只在请求时按 id 取，不写进本机存储：
-                // 写进去等于把内置 Key 复制一份到加密库里，诊断导出或备份都能带出来。
-                // 账号供应商同理：凭据是账号 token，这里没有 key 可写。
-                container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
+            } else if (!toSave.accountAuth) {
+                /*
+                 * 内置项一般不写 key：它的 key 只在编译期注入、只在请求时按 id 取，
+                 * 写进本机等于把内置 Key 复制一份到加密库，诊断导出或备份都能带出来。
+                 *
+                 * 例外是「这份包根本没编进内置 Key」：那时用户填的这份是唯一可用的
+                 * 凭据，不写就等于让他每次发消息都鉴权失败。
+                 */
+                val builtinMissing = toSave.isBuiltin && !BuiltinProviders.isConfigured(toSave.id)
+                if (!toSave.isBuiltin || builtinMissing) {
+                    container.keyStore.putApiKey(toSave.id, apiKey.trim().ifBlank { null })
+                }
             }
             nav.pop()
         }
@@ -150,7 +157,9 @@ fun ProviderEditScreen(
                     // 内置项的输入框是空的（也本来就不显示），这里要按 id 取内置 Key，
                     // 否则自检第一步就会卡在「API Key 为空」，看起来像通道坏了
                     apiKey = when {
-                        draft.isBuiltin -> BuiltinProviders.keyOf(draft.id).orEmpty()
+                        // 内置通道优先用编译期注入的 Key；这份包没编进 Key 时，
+                        // 退回用户在这里填的那份 —— 否则自检第一步就卡在「API Key 为空」
+                        draft.isBuiltin -> BuiltinProviders.keyOf(draft.id) ?: apiKey.trim()
                         draft.accountAuth -> container.keyStore.getDeepSeekToken().orEmpty()
                         else -> apiKey.trim()
                     },
@@ -330,7 +339,37 @@ fun ProviderEditScreen(
                      * 地址写死才不会让内置额度打到别的服务上，key 也不能换
                      * （换了就不是内置通道了，用户想要自己的 key 应该新建一个供应商）。
                      * 留一个测试按钮，是为了让「额度是不是用完了」这种问题能自查。
+                     *
+                     * 唯一的例外：**这份包没编进 Key**。
+                     *
+                     * Key 是构建期注入的，一份源码能编出「有内置额度」和
+                     * 「没有内置额度」两种包。没有的那种，用户选中内置模型后只会
+                     * 收到「鉴权失败：API Key 为空」，而设置里没有任何能填的地方 ——
+                     * 那是死路。所以这种情况下必须把输入框放出来。
                      */
+                    val builtinReady = BuiltinProviders.isConfigured(draft.id)
+                    if (!builtinReady) {
+                        Text(
+                            text = if (LocalStrings.current.isChinese) {
+                                "这个安装包没有内置 Key，内置通道现在用不了。" +
+                                    "在下面填一个自己的 Key 就能继续用；或者返回去新建一个供应商。"
+                            } else {
+                                "This build ships without a built-in key. " +
+                                    "Paste your own key below to use this channel."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        TextRow(
+                            label = s.apiKey,
+                            value = apiKey,
+                            placeholder = s.apiKeyHint,
+                            isSecret = true,
+                            onValueChange = { apiKey = it },
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
                     Text(
                         text = BuiltinProviders.of(draft.id)?.note.orEmpty(),
                         style = MaterialTheme.typography.labelSmall,

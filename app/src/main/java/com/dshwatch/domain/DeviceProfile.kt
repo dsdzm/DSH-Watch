@@ -40,6 +40,16 @@ data class DeviceProfile(
     val autoCornerInsetDp: Int,
     val totalMemMb: Int,
     val cores: Int,
+    /**
+     * **硬件**是不是手表（`uiMode` / `android.hardware.type.watch`）。
+     *
+     * ⚠️ 不要用它决定「用哪套界面」。整机走哪套界面由设置里的设备类型决定
+     * （自动 / 手表 / 手机），解析在 `DeviceKinds.isPhone`，结果通过
+     * `LocalPhoneUi` 往下传。这里只是硬件事实：用户可以在手机上选「手表」，
+     * 也可以在方表上选「手机」，两者不一致时以设置为准。
+     *
+     * 已经踩过一次：养鱼页用它分派，导致整机是手表界面时那一页仍是手机版。
+     */
     val isWatch: Boolean,
     val sdkInt: Int,
     /** 屏幕很窄，需要进一步压缩组件尺寸 */

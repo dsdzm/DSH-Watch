@@ -130,7 +130,20 @@ fun CanvasCard(
         }
         Spacer(Modifier.height(6.dp))
         when (kind) {
-            CanvasKind.MATH -> MathView(latex = source, compact = compact)
+            /*
+             * 卡片态要看清，但不能再「撑满就够大」。
+             *
+             * 19sp 是上一版为了「卡片里也看清」加上去的，结果带角标的分式
+             * 在卡片里比正文高出一倍，字一大，任何一点上下标位移都被放大成
+             * 明显的错位（用户说的「太大导致错位了」）。16.5sp 接近正文的
+             * 阅读字号，靠 autoFit 吃满宽度——短式子仍然能放大，长式子更紧凑。
+             */
+            CanvasKind.MATH -> MathView(
+                latex = source,
+                fontSize = if (compact) 16.5f else 22f,
+                autoFit = true,
+                maxAutoScale = if (compact) 1.5f else 2.2f,
+            )
             CanvasKind.MINDMAP -> MindMapView(source = source, compact = compact)
             CanvasKind.GEOMETRY -> GeometryView(source = source, compact = compact)
         }
@@ -212,7 +225,14 @@ private fun RoundFullscreen(
                     .align(Alignment.Center)
                     .width(d * 0.86f),
             ) {
-                MathView(latex = source, fontSize = 24f, maxHeight = d * 0.40f)
+                MathView(
+                    latex = source,
+                    fontSize = 28f,
+                    maxHeight = d * 0.40f,
+                    // 全屏就是「让我看清」，短公式撑满圆内的横条
+                    autoFit = true,
+                    maxAutoScale = 2.6f,
+                )
             }
 
             // 二维图形：必须整个矩形都在圆内，用内接正方形，再留 4% 余量
@@ -295,7 +315,12 @@ private fun WideFullscreen(
                 .clip(RoundedCornerShape(12.dp)),
         ) {
             when (kind) {
-                CanvasKind.MATH -> MathView(latex = source, fontSize = 26f)
+                CanvasKind.MATH -> MathView(
+                    latex = source,
+                    fontSize = 30f,
+                    autoFit = true,
+                    maxAutoScale = 2.4f,
+                )
                 CanvasKind.MINDMAP -> MindMapView(source = source, modifier = Modifier.fillMaxSize())
                 CanvasKind.GEOMETRY -> GeometryView(source = source, modifier = Modifier.fillMaxSize())
             }

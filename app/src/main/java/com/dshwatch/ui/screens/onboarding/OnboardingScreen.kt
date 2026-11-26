@@ -502,6 +502,7 @@ private val SceneChoices = listOf(
     Triple(Scenes.CODING, "编程 / 干活", "写代码、跑脚本、查资料、做任务"),
     Triple(Scenes.TAVERN, "角色扮演", "和角色聊天，看剧情怎么走"),
     Triple(Scenes.WRITING, "写作", "写小说、续写、整理设定"),
+    Triple(Scenes.FISH, "养鱼", "跟大肥鱼聊天，像发消息一样"),
 )
 
 @Composable

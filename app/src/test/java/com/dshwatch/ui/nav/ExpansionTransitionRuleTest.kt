@@ -256,9 +256,16 @@ class ExpansionTransitionRuleTest {
             "ui/screens/workspace/WorkspaceScreen.kt" to "workspace",
         ).forEach { (path, key) ->
             val s = stripComments(read(path))
+            /*
+             * 两种状态都算数：鱼眼列表用 TransformingLazyColumnState，
+             * 普通列表用 LazyListState —— 变的是列表类型，不变的是
+             * 「离开再回来要停在原位」。
+             */
             assertTrue(
-                "$path 必须用 rememberKeptListState(\"$key\")，否则返回后跳回顶部",
-                s.contains("rememberKeptListState(\"$key\")"),
+                "$path 必须用带记忆的滚动状态（rememberKeptListState / rememberKeptLazyState），" +
+                    "否则返回后跳回顶部",
+                s.contains("rememberKeptListState(\"$key\")") ||
+                    s.contains("rememberKeptLazyState(\"$key\")"),
             )
         }
     }

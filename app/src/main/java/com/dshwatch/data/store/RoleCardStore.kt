@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -31,8 +32,13 @@ class RoleCardStore(
 ) {
 
     private val indexFile = File(dir, "index.json")
+
+    /** 内置卡安装账本：只存 id，用来区分「从来没见过」和「用户删掉了」 */
+    private val seededFile = File(dir, "builtin-seeded.json")
+
     private val mutex = Mutex()
     private var cache: MutableList<RoleCard>? = null
+    private var seededCache: MutableSet<String>? = null
 
     init {
         if (!dir.exists()) dir.mkdirs()
@@ -112,15 +118,35 @@ class RoleCardStore(
     }
 
     /**
-     * 首次启动时铺一批内置卡。
+     * 安装内置卡。
      *
-     * 用"索引为空"判断而不是记一个版本号：用户把内置卡全删了之后，
-     * 我们不希望下次启动又给他塞回来。
+     * 两个相互冲突的诉求要同时满足：
+     *
+     *  - 应用升级后**新增**的内置卡，老用户必须能看到（大肥鱼就是这么进来的）；
+     *  - 用户**删掉**的内置卡，下次启动不能又冒出来。
+     *
+     * 只靠索引判断做不到：索引非空就整批跳过，新卡进不来；只看 id 缺失就补，
+     * 删掉的又会复活。所以单独记一本账（`builtin-seeded.json`）：
+     * 凡是"这一次决定处理过"的 id 都记下来，以后不再碰。
+     *
+     * 另外按名称去重 —— 早期版本的内置卡 id 是随机生成的，老用户库里已经
+     * 有一份同名的，不能再塞一张一模一样的进去。
      */
     suspend fun ensureBuiltins(cards: List<RoleCard>): Unit = withContext(io) {
-        val empty = mutex.withLock { readIndexLocked().isEmpty() }
-        if (!empty) return@withContext
-        cards.forEach { save(it.copy(builtin = true)) }
+        val present = mutex.withLock { readIndexLocked().toList() }
+        val handled = mutex.withLock { readSeededLocked().toSet() }
+        val ids = present.map { it.id }.toSet()
+        val names = present.map { it.name }.toSet()
+
+        val fresh = cards.filter { it.id.isNotBlank() && it.id !in handled }
+        val install = fresh.filter { it.id !in ids && it.name !in names }
+        install.forEach { save(it.copy(builtin = true)) }
+
+        // 同名的旧卡、以及已经存在同 id 的，也算处理过：下次不再尝试
+        val next = handled + fresh.map { it.id }
+        if (next.size != handled.size) {
+            mutex.withLock { writeSeededLocked(next) }
+        }
     }
 
     private fun file(id: String) = File(dir, "$id.json")
@@ -145,6 +171,31 @@ class RoleCardStore(
     private fun writeIndexLocked(list: List<RoleCard>) {
         cache = list.toMutableList()
         writeAtomic(indexFile, json.encodeToString(ListSerializer(RoleCard.serializer()), list))
+    }
+
+    private fun readSeededLocked(): MutableSet<String> {
+        seededCache?.let { return it }
+        val loaded = if (seededFile.exists()) {
+            runCatching {
+                json.decodeFromString(ListSerializer(String.serializer()), seededFile.readText())
+                    .toMutableSet()
+            }.getOrElse {
+                Logx.w(TAG, "内置卡账本解析失败，按空处理", it)
+                mutableSetOf()
+            }
+        } else {
+            mutableSetOf()
+        }
+        seededCache = loaded
+        return loaded
+    }
+
+    private fun writeSeededLocked(ids: Set<String>) {
+        seededCache = ids.toMutableSet()
+        writeAtomic(
+            seededFile,
+            json.encodeToString(ListSerializer(String.serializer()), ids.sorted()),
+        )
     }
 
     private fun writeAtomic(target: File, content: String) {

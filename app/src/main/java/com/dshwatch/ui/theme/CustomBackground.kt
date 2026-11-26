@@ -84,7 +84,7 @@ object CustomBackground {
     /**
      * 解码一张用户选的图，长边不超过 [SAVE_MAX]，并应用 EXIF 旋转。
      *
-     * API 28 起有 `ImageDecoder`（本 App 的 minSdk 就是 28），它能按目标尺寸
+     * API 28 起有 `ImageDecoder`（本 App minSdk 26，所以下面要判断版本），它能按目标尺寸
      * 直接解码 —— 不需要「先整张读进内存再缩」。少数 ROM 上它偶发失败
      * （HEIF、色彩空间怪异的图），所以留一条 BitmapFactory 的退路：
      * 那条路上没有 EXIF 旋转，但至少能用。

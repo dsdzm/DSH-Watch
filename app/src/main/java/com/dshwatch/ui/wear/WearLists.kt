@@ -2,6 +2,10 @@ package com.dshwatch.ui.wear
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -198,6 +202,72 @@ fun WearList(
     ) {
         WearListScope(this, spec).content()
     }
+}
+
+/**
+ * 不带鱼眼效果的列表。
+ *
+ * ## 为什么需要它
+ *
+ * [WearList] 的缩放 / 淡出是给**圆屏**用的：越靠边可用宽度越小，靠逐项收窄
+ * 把内容收进圆里。但这条逻辑有两个前提，缺一个就不成立：
+ *
+ * 1. 屏幕是圆的（手机上不是，收窄纯属无端加戏）；
+ * 2. 列表是「一行一张卡」的浏览形态（教程、模型列表、文件列表都属于
+ *    「一屏要看清好几条」的形态，变换把首尾两条压成半透明，等于让用户
+ *    多滚一次才看得见）。
+ *
+ * 用户连着指了三次：教程、工作空间、模型列表都有这个效果，而且手机上也有 ——
+ * 手机上没有圆屏，纯属跟着手表一起继承过来的。
+ *
+ * ## 与 [WearList] 的差别
+ *
+ * 只差「不变换」这一件事：滚动、表冠、内边距、间距全都一样。所以调用点的
+ * 改动只有一行，不需要重排任何布局。
+ */
+@Composable
+fun FlatList(
+    modifier: Modifier = Modifier,
+    state: LazyListState = rememberLazyListState(),
+    contentPadding: PaddingValues? = null,
+    verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
+    /**
+     * 要不要接表冠。
+     *
+     * 手表上必须接 —— 转表冠是 Wear 的主要手势之一，不接等于少了半个操作方式。
+     * 手机上留着也无害（没有旋钮就永远不会触发），所以默认开。
+     */
+    rotary: Boolean = true,
+    content: LazyListScope.() -> Unit,
+) {
+    val focus = remember { FocusRequester() }
+    val behavior = RotaryScrollableDefaults.behavior(scrollableState = state)
+    LaunchedEffect(rotary) { if (rotary) runCatching { focus.requestFocus() } }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            /*
+             * 仍然要裁切：列表上方压着固定顶栏，滚上去的卡片会画到标题上。
+             * 这和鱼眼无关，是「列表 + 固定顶栏」这个结构的必然后果。
+             */
+            .clipToBounds()
+            .then(
+                if (rotary) {
+                    Modifier
+                        .rotaryScrollable(behavior, focus)
+                        .focusRequester(focus)
+                        .focusable()
+                } else {
+                    Modifier
+                }
+            ),
+        state = state,
+        contentPadding = contentPadding ?: WearLayout.listPadding(),
+        verticalArrangement = verticalArrangement,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        content = content,
+    )
 }
 
 /**

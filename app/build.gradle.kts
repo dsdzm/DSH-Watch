@@ -96,6 +96,25 @@ fun javaStringLiteral(raw: String): String = raw
 val builtinApiKeyLiteral: String = javaStringLiteral(builtinApiKey)
 val zhipuApiKeyLiteral: String = javaStringLiteral(zhipuApiKey)
 
+/*
+ * 打出来的包有没有内置额度，全看上面这两行读到了什么。
+ *
+ * 这里必须吵一句：漏配的时候构建照样成功、装上也正常，只有用户选中内置模型
+ * 发第一条消息时才会报「鉴权失败：API Key 为空」—— 排查成本从「看一眼构建日志」
+ * 变成「翻到用户反馈」。
+ */
+if (builtinApiKey.isEmpty()) {
+    logger.warn(
+        "⚠️ 未配置 AGNES_API_KEY / agnes.apiKey：内置通道（Agnes）在这个包里不可用，" +
+            "用户只能自己填 Key 或改用其它供应商。",
+    )
+}
+if (zhipuApiKey.isEmpty()) {
+    logger.warn(
+        "⚠️ 未配置 ZHIPU_API_KEY / zhipu.apiKey：内置通道（智谱）在这个包里不可用。",
+    )
+}
+
 
 android {
     namespace = "com.dshwatch"
@@ -103,11 +122,16 @@ android {
 
     defaultConfig {
         applicationId = "com.dshwatch"
-        // Android 9 = API 28，手表端要求
-        minSdk = 28
+        // Android 8.0 = API 26。
+        //
+        // 选 26 而不是更低，是被三件必须依赖的事卡住的：
+        //   · Wear Compose 1.5.6 声明 minSdk 25（再往下得 override，风险自负）
+        //   · java.time 到 26 才有，否则要为它开整套脱糖
+        //   · Rhino 1.9.1 的 module-info.class 让 D8 直接要求 26+
+        minSdk = 26
         targetSdk = 34
-        versionCode = 121
-        versionName = "1.24.1-beta.24"
+        versionCode = 150
+        versionName = "1.24.1"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）
@@ -130,17 +154,12 @@ android {
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
-                // 三种签名方案都声明开启，但**实际产物只带 v3**（用 apksigner verify 实测）。
+                // 三种签名方案都开启。
                 //
-                // 原因：AGP 8.x 会按 minSdk 优化签名方案 —— 本工程 minSdk 28，
-                // 而 v3 正是 API 28 引入的，所有能装上这个 App 的设备都支持 v3，
-                // 于是 v1/v2 被省略。这不是配置没生效，是构建链的合理裁剪。
+                // 实际产物是 v2 + v3：minSdk 26 时 v1（jar 签名）已经不需要了 ——
+                // API 24 起系统就认 v2，AGP 会按 minSdk 自动裁掉 v1。
                 //
-                // 之所以留着这三个 true：万一以后 minSdk 下探到 28 以下，
-                // 或者要出给第三方安装器的包，开关已经在那儿了，不用回头改。
-                //
-                // 实测过的兼容性：v1.13、v1.13-fix、v1.14 三版都是 v3-only，
-                // 证书指纹一致（70437a7f…bf31f94），覆盖安装正常。
+                // 证书没变（70437a7f…bf31f94），所以从旧版覆盖安装不会冲突。
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true

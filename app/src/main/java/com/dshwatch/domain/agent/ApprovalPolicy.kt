@@ -50,7 +50,18 @@ object ApprovalPolicy {
      * `bili_like` 也在这里。它不改任何内容、不消耗任何资源（重复点赞是幂等的），
      * 所以没有「点错」的成本，也就不需要每次点一遍弹窗。
      */
-    val AUTO_ALLOW: Set<String> = setOf("bili_reply", "bili_dm", "bili_dyn", "bili_like")
+    val AUTO_ALLOW: Set<String> = setOf(
+        "bili_reply", "bili_dm", "bili_dyn", "bili_like",
+        /*
+         * 养鱼的「约个时间再来说」。
+         *
+         * 它不碰设备、不改文件，只是往自己的待办里记一条 —— 代价是做错了
+         * 也就是多一条要说的话，用户在养鱼设置里随时能看到并取消。
+         * 而它**必须**免问：主动发言发生在用户不在场的时候（早上七点），
+         * 弹一个审批框只会挂到超时，然后这一轮无声失败。
+         */
+        "schedule_proactive",
+    )
 
     /**
      * 设备操控四件套。

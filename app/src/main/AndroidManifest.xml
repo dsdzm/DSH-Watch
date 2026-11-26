@@ -177,6 +177,23 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          养鱼的主动发言：到点后让她说一轮。
+
+          和 B站那个接收器一样兼管开机重排：AlarmManager 的排队不跨重启，
+          不补这一下，用户重启一次表就再也收不到她主动发来的消息。
+        -->
+        <receiver
+            android:name=".service.ProactiveReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="com.dshwatch.action.FISH_PROACTIVE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- 每日定时刷 B站：到点起一轮，并在开机后重排（AlarmManager 的闹钟不跨重启） -->
         <receiver
             android:name=".service.BiliDailyReceiver"

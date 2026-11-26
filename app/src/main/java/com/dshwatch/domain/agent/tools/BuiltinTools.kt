@@ -56,8 +56,12 @@ object BuiltinTools {
         UsageTool,
         HttpFetchTool,
         SetAlarmTool,
+        ScheduleProactiveTool,
     ) + WorkspaceTools.all() + SystemTools.all() + TodoTools.all() + DeviceIntegrationTools.all() +
-        DeviceControlTools.all() + AdbShellTool + ScriptTools.all() + CloudTools.all() + BiliTools.all()
+        DeviceControlTools.all() + AttachTools.all() + AdbShellTool + ScriptTools.all() +
+        CloudTools.all() + BiliTools.all() +
+        // 只在养鱼页可用（onlyInScene = FISH），别的场景会被引擎按会话场景筛掉
+        listOf(FishSkinTool)
 
     // ------------------------------------------------------------------
     // 1. 时间
@@ -435,5 +439,122 @@ object BuiltinTools {
 
         override fun summarize(args: JsonObject) =
             "${args.strOf("time")} ${args.strOf("label").orEmpty()}".trim()
+    }
+
+    // ------------------------------------------------------------------
+    // 11. 养鱼：约一次主动消息
+    // ------------------------------------------------------------------
+
+    /**
+     * 让她自己定一个「待会儿来找你」的时刻。
+     *
+     * ## 为什么不直接在这轮把话说完
+     *
+     * 模型没有时钟，也不该假装有。它能做的是"约个时间"，到点由系统把它叫醒、
+     * 把对话现状重新交给它 —— 那时说的才是"此刻想说的话"。把文案现在就写死，
+     * 两个小时以后发出来，就是在念旧稿子。
+     *
+     * ## 只在养鱼场景出现
+     *
+     * 编程场景里给她一个「约时间撒娇」的工具，模型会把它当日程管理用，
+     * 于是用户的编程助手开始惦记"该问问他吃饭没"。这既不相关也很吓人。
+     */
+    object ScheduleProactiveTool : AgentTool {
+        override val name = "schedule_proactive"
+
+        override val description =
+            "约一个时间，到点让自己主动给对方发消息。适合「过一会儿我想问问他面试怎么样」" +
+                "「晚点提醒他吃药」这类情况 —— 你只需要登记时间和一句话，不需要现在就把话说完。" +
+                "到点后系统会把对话现状交给你，你再说当时想说的。"
+
+        override val safety = ToolSafety.WRITE
+
+        /*
+         * 只在养鱼场景出现，而且不算「能力开关」。
+         *
+         * 以前这里写的是 `enabled = { Scenes.of(it.useScene) == FISH }` ——
+         * useScene 是全局模式，从记录页打开一条养鱼会话时它可能还是编程，
+         * 于是这个工具在请求里根本不存在，模型当然"没法自己决定"。
+         * 场景改由 ChatEngine 按会话判定（见 [onlyInScene]）。
+         */
+        override val onlyInScene = com.dshwatch.domain.roleplay.Scenes.FISH
+
+        override val enabled: (com.dshwatch.domain.model.AppSettings) -> Boolean = { true }
+
+        override val parameters = Schema.obj(
+            properties = mapOf(
+                "after_minutes" to Schema.int(
+                    "多少分钟之后。和 at 二选一；短一点更自然（10~180）",
+                    min = com.dshwatch.domain.fish.FishProactive.MIN_DELAY_MINUTES,
+                    max = com.dshwatch.domain.fish.FishProactive.MAX_DELAY_MINUTES,
+                ),
+                "at" to Schema.str(
+                    "具体的钟点，24 小时制 HH:mm。今天已过则算明天。和 after_minutes 二选一",
+                ),
+                "note" to Schema.str(
+                    "到点时要提醒自己的一句话，例如「问他面试结果怎么样」。写成你对自己说的话",
+                ),
+            ),
+            required = listOf("note"),
+        )
+
+        override suspend fun execute(args: JsonObject, ctx: ToolContext): ToolResult =
+            withContext(Dispatchers.IO) {
+                val note = args.strOf("note").orEmpty().trim()
+                if (note.isEmpty()) return@withContext ToolResult.fail("缺少 note：写一句到点要跟自己说的话")
+
+                val now = System.currentTimeMillis()
+                val after = args.intOf("after_minutes")
+                val at = args.strOf("at")
+
+                val triggerAt = when {
+                    after != null -> now + after.toLong() * 60_000L
+                    !at.isNullOrBlank() -> com.dshwatch.domain.fish.FishProactive.nextAt(now, at)
+                        ?: return@withContext ToolResult.fail("时间格式应为 HH:mm，收到「$at」")
+
+                    else -> return@withContext ToolResult.fail("要给 after_minutes 或 at 其中一个")
+                }
+
+                val lead = triggerAt - now
+                if (lead < com.dshwatch.domain.fish.FishProactive.MIN_DELAY_MINUTES * 60_000L) {
+                    return@withContext ToolResult.fail(
+                        "太近了：至少 ${com.dshwatch.domain.fish.FishProactive.MIN_DELAY_MINUTES} 分钟后。" +
+                            "这会儿想说什么，直接在这条回复里说。",
+                    )
+                }
+                if (lead > com.dshwatch.domain.fish.FishProactive.MAX_DELAY_MINUTES * 60_000L) {
+                    return@withContext ToolResult.fail("太远了：最长只能约一天之后")
+                }
+
+                val store = ctx.proactive
+                    ?: return@withContext ToolResult.fail("当前环境没有主动消息存储")
+
+                val plan = com.dshwatch.data.store.ProactivePlan(
+                    id = (note + triggerAt).hashCode(),
+                    triggerAt = triggerAt,
+                    note = note,
+                )
+                store.add(plan)
+                val times = runCatching { store.pending().map { it.triggerAt } }
+                    .getOrDefault(listOf(triggerAt))
+
+                // 重排闹钟。失败不影响登记 —— 下次 App 启动/改设置时会再对齐一次
+                runCatching {
+                    com.dshwatch.domain.fish.FishProactiveSchedule.sync(
+                        ctx.requireContext(),
+                        ctx.settings(),
+                        times,
+                    )
+                }
+
+                val minutes = ((lead) / 60_000.0).roundToInt()
+                ToolResult.ok(
+                    "已记下：${Fmt.clock(triggerAt)}（约 $minutes 分钟后）提醒你主动找她。" +
+                        "到点会收到系统提示，那时再说当时想说的话 —— 不用现在就把话写死。",
+                )
+            }
+
+        override fun summarize(args: JsonObject) =
+            args.strOf("note").orEmpty().take(40)
     }
 }

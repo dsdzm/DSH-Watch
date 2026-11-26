@@ -910,7 +910,7 @@ object Zh : AppStrings {
     override val entryWorkspaceDesc = "AI 生成的文件与构建产物"
     override val entryDiagnosticsDesc = "连不上时先跑这个，能看到每一步的原始报错"
     override val entryAboutDesc = "版本、更新日志与作者"
-    override val entryAgentStepsDesc = "不再按轮数限制，停滞时自动停下"
+    override val entryAgentStepsDesc = "不限轮数，停滞时自动停止"
     override val entryStorageDesc = "会话、工作空间与缓存合计"
     override val storageUsed = "本地占用"
 
@@ -1062,7 +1062,7 @@ object Zh : AppStrings {
     override val agentMode = "工具调用策略"
     override val agentMaxSteps = "步数限制"
     override val agentTools = "可用工具"
-    override val agentToolsHint = "模型可以自主调用这些工具"
+    override val agentToolsHint = ""
     override val agentClearApprovals = "清除「总是允许」记录"
     override val toolCall = "工具调用"
     override val toolStatusPending = "待执行"
@@ -1161,7 +1161,7 @@ object Zh : AppStrings {
 
     // ---------------- 执行与云端编译 ----------------
     override val execSectionTitle = "执行与编译"
-    override val execSectionDesc = "在设备上真的跑代码，或交给云端编译"
+    override val execSectionDesc = "本地执行与云端编译均已关闭"
     override val execScreenTitle = "执行与编译"
     override val execEnable = "启用本地执行"
     override val execEnableDesc = "允许 AI 在本机运行 shell / JS 脚本"
@@ -1288,6 +1288,10 @@ object Zh : AppStrings {
         "device_act" -> "操作屏幕"
         "device_open" -> "打开应用"
         "device_handoff" -> "交给用户"
+        "attach_file" -> "递入文件"
+        "fish_skin" -> "换样子"
+        "device_screenshot" -> "截屏"
+        "schedule_proactive" -> "约好时间"
         else -> tool
     }
 }
@@ -1831,7 +1835,7 @@ object En : AppStrings {
 
     // ---------------- Execution & cloud build ----------------
     override val execSectionTitle = "Run & build"
-    override val execSectionDesc = "Run code on the device, or compile it in the cloud"
+    override val execSectionDesc = "Local execution and cloud build off"
     override val execScreenTitle = "Run & build"
     override val execEnable = "Enable on-device execution"
     override val execEnableDesc = "Let the AI run shell / JS scripts on this device"
@@ -1958,6 +1962,10 @@ object En : AppStrings {
         "device_act" -> "Act on screen"
         "device_open" -> "Open app"
         "device_handoff" -> "Hand off"
+        "attach_file" -> "Attach file"
+        "fish_skin" -> "Restyle"
+        "device_screenshot" -> "Screenshot"
+        "schedule_proactive" -> "Set a time"
         else -> tool
     }
 }

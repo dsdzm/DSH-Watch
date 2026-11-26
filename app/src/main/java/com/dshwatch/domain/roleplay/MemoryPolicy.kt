@@ -46,14 +46,29 @@ object MemoryPolicy {
     /** 条数兜底：极短的来回（"嗯""哦"）凑不满 token，但条数会堆 */
     const val MESSAGE_CAP = 40
 
+    /*
+     * 养鱼用另一套更低的门槛。
+     *
+     * 这套 6000 / 40 是按"编程、酒馆"标定的：那里一轮几百上千 token，
+     * 几千 token 才十几轮。养鱼一条只有四五个字 —— 一天聊十句也才 120 字，
+     * 40 条要攒一周多。用户的原话是「记忆好像没工作」：不是压缩坏了，
+     * 是**一次都没轮到**，记忆文档始终是空的。
+     *
+     * 12 条 / 1200 token 大致对应一到两天的聊天。多花的那次摘要请求是值得的：
+     * 陪伴型角色全部价值都在"她记得"。
+     */
+    const val FISH_TOKEN_CAP = 1_200
+    const val FISH_MESSAGE_CAP = 12
+
     /** 少于这么多条时不压：摘要请求本身也是一次成本，2 条消息压完什么也不剩 */
     const val MIN_MESSAGES = 4
 
     /** 当前窗口下的实际 token 阈值 */
-    fun threshold(contextWindow: Int): Int {
-        if (contextWindow <= 0) return ABSOLUTE_TOKEN_CAP
+    fun threshold(contextWindow: Int, fish: Boolean = false): Int {
+        val cap = if (fish) FISH_TOKEN_CAP else ABSOLUTE_TOKEN_CAP
+        if (contextWindow <= 0) return cap
         val byRatio = (contextWindow * TRIGGER_RATIO).toInt()
-        return minOf(byRatio, ABSOLUTE_TOKEN_CAP).coerceAtLeast(1)
+        return minOf(byRatio, cap).coerceAtLeast(1)
     }
 
     /**
@@ -62,12 +77,18 @@ object MemoryPolicy {
      * @param tailTokens 未压缩部分的估算 token 数
      * @param tailCount 未压缩部分的消息条数
      * @param contextWindow 模型窗口；<=0 表示未知，此时只按条数判断
+     * @param fish 养鱼场景：门槛低得多，见 [FISH_MESSAGE_CAP]
      */
-    fun shouldCompress(tailTokens: Int, tailCount: Int, contextWindow: Int): Boolean {
+    fun shouldCompress(
+        tailTokens: Int,
+        tailCount: Int,
+        contextWindow: Int,
+        fish: Boolean = false,
+    ): Boolean {
         if (tailCount < MIN_MESSAGES) return false
-        if (tailCount >= MESSAGE_CAP) return true
+        if (tailCount >= (if (fish) FISH_MESSAGE_CAP else MESSAGE_CAP)) return true
         if (contextWindow <= 0) return false
-        return tailTokens >= threshold(contextWindow)
+        return tailTokens >= threshold(contextWindow, fish)
     }
 
     /** 给界面/帮助用的一句话说明 */

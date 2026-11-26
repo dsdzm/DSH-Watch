@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -30,12 +31,14 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Pets
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.BottomSheetDefaults
@@ -94,8 +97,26 @@ internal fun PhoneChatHeader(
     remote: Boolean,
     modelLabel: String,
     onMenu: () -> Unit,
-    onNewChat: () -> Unit,
+    onNewChat: (() -> Unit)?,
     onModel: () -> Unit,
+    /**
+     * 传了就把左边那颗 ☰ 换成返回箭头。
+     *
+     * 对话页是**压栈进来**的二级页（从列表点进来、从记录点进来），那里没有底部导航，
+     * 左上角必须是「回上一层」而不是「拉开历史」—— 用户在会话里想退出，
+     * 第一个会看的位置就是这里。
+     */
+    onBack: (() -> Unit)? = null,
+    /** 右侧追加的动作（例如对话页的 ⋮ 菜单）。排在模型药丸之后 */
+    trailing: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
+    /**
+     * 标题左边的一颗头像。
+     *
+     * 只有养鱼页传 —— 那里"对面是谁"是一个具体的人（有脸、有名字），
+     * 头像属于这一页的外观，属于用户能自定义的那部分。编程 / 酒馆 / 写作
+     * 传 null，顶栏保持三段式不变。
+     */
+    avatar: (@Composable () -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Row(
@@ -108,7 +129,7 @@ internal fun PhoneChatHeader(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Surface(
-            onClick = onMenu,
+            onClick = onBack ?: onMenu,
             shape = CircleShape,
             color = scheme.surfaceContainerLowest,
             shadowElevation = 2.dp,
@@ -116,8 +137,12 @@ internal fun PhoneChatHeader(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Filled.Menu,
-                    contentDescription = "菜单",
+                    imageVector = if (onBack != null) {
+                        Icons.AutoMirrored.Filled.ArrowBack
+                    } else {
+                        Icons.Filled.Menu
+                    },
+                    contentDescription = if (onBack != null) "返回" else "菜单",
                     tint = scheme.onSurface,
                     modifier = Modifier.size(20.dp),
                 )
@@ -127,17 +152,27 @@ internal fun PhoneChatHeader(
         // 中间这颗：标题 + 「本机 / 远程」。
         // 点它新建会话 —— 聊天应用里「点标题回新对话」是通用手势，
         // 也让右上角的 ＋ 可以省掉，给模型药丸腾出位置。
+        //
+        // 酒馆 / 写作这两个列表页传 null：那里点标题新建一张角色卡并不符合直觉
+        // （卡片列表上一眼就能看到「新建」），所以它只作为标题块存在，不可点。
         Surface(
-            onClick = onNewChat,
+            onClick = onNewChat ?: {},
+            enabled = onNewChat != null,
             shape = RoundedCornerShape(22.dp),
             color = scheme.surfaceContainerLowest,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1f),
         ) {
-            Column(
+            Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalAlignment = Alignment.Start,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (avatar != null) {
+                    avatar()
+                    Spacer(Modifier.width(8.dp))
+                }
+            // 没有头像时这一行的宽度仍然是"刚好包住文字"，行为和以前一致
+            Column(horizontalAlignment = Alignment.Start) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
@@ -165,6 +200,7 @@ internal fun PhoneChatHeader(
                         maxLines = 1,
                     )
                 }
+            }
             }
         }
 
@@ -194,6 +230,8 @@ internal fun PhoneChatHeader(
                 )
             }
         }
+
+        trailing?.invoke(this)
     }
 }
 
@@ -438,6 +476,25 @@ internal fun PhoneComposer(
     onAttach: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
+    /**
+     * 直接拍照。为 null 时不显示相机键（只有「＋」那一层入口）。
+     *
+     * 拍照本来藏在「＋ → 拍照」里，但那个面板要等一次底部弹窗动画。
+     * 用户的原话是「在添加文件的旁边加上相机」—— 想拍的时候，
+     * 少点一层就是少一次「怎么没反应」的怀疑。
+     */
+    onCamera: (() -> Unit)? = null,
+    /** 养鱼页没有附件入口：那颗 ＋ 点开是一整套拍照/相册/文件，和「跟她说话」无关 */
+    showAttach: Boolean = true,
+    /**
+     * 生成中是否允许直接发。
+     *
+     * 编程页：生成中的那颗键是「停止」—— 半截的答案通常没用，先停再问。
+     * 养鱼页：她话没说完时用户插一句是完全正常的对话行为，那颗键应该是「发送」，
+     * 按下去由页面去停下当前这轮、再改口。两者语义不同，所以开关放在这里，
+     * 而不是让养鱼页自己再画一条输入栏。
+     */
+    streamingSend: Boolean = false,
 ) {
     val s = LocalStrings.current
     val scheme = MaterialTheme.colorScheme
@@ -492,17 +549,35 @@ internal fun PhoneComposer(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
-                    IconButton(
-                        onClick = onAttach,
-                        enabled = !busy,
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Add,
-                            contentDescription = "添加文件",
-                            tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp),
-                        )
+                    if (showAttach && onCamera != null) {
+                        IconButton(
+                            onClick = onCamera,
+                            enabled = !busy,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Icon(
+                                Icons.Outlined.PhotoCamera,
+                                contentDescription = "拍照",
+                                tint = scheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                    if (showAttach) {
+                        IconButton(
+                            onClick = onAttach,
+                            enabled = !busy,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = "添加文件",
+                                tint = scheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.width(6.dp))
                     }
                     TextField(
                         value = input,
@@ -528,14 +603,16 @@ internal fun PhoneComposer(
                         ),
                     )
                     val canSend = input.isNotBlank() || attachments.isNotEmpty()
+                    // 只有「生成中且不允许插话」或「生成中但一个字都没打」才显示停止
+                    val showStop = streaming && !(streamingSend && canSend)
                     FilledIconButton(
-                        onClick = { if (streaming) onStop() else onSend() },
-                        enabled = streaming || canSend,
+                        onClick = { if (showStop) onStop() else onSend() },
+                        enabled = showStop || canSend,
                         modifier = Modifier.padding(end = 6.dp, bottom = 6.dp).size(40.dp),
                     ) {
                         Icon(
-                            imageVector = if (streaming) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
-                            contentDescription = if (streaming) s.stop else s.send,
+                            imageVector = if (showStop) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
+                            contentDescription = if (showStop) s.stop else s.send,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -666,6 +743,7 @@ internal fun PhoneSceneSheet(
                     icon = when (id) {
                         Scenes.TAVERN -> Icons.Outlined.ChatBubbleOutline
                         Scenes.WRITING -> Icons.Outlined.AutoAwesome
+                        Scenes.FISH -> Icons.Outlined.Pets
                         else -> Icons.Outlined.TableChart
                     },
                     title = Scenes.label(id),

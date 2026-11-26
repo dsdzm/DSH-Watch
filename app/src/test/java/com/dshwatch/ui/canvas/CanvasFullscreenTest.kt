@@ -59,8 +59,9 @@ class CanvasFullscreenTest {
         assertThat(round).contains("maxHeight = d * 0.40f")
         val math = File("src/main/java/com/dshwatch/ui/canvas/MathView.kt").readText()
         // 只有宽度缩放的话，多行公式会竖向冲出圆外
-        assertThat(math).contains("byHeight")
-        assertThat(math).contains("minOf(byWidth, byHeight)")
+        assertThat(math).contains("capPx")
+        // 缩放比例必须同时受宽度与高度约束，取小的那个
+        assertThat(math).contains("minOf(byWidth, scale)")
     }
 
     private fun roundBranch(): String {

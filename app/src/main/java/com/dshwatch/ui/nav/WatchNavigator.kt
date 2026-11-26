@@ -83,6 +83,28 @@ sealed interface Screen {
     data class MemoryDoc(val cardId: String) : Screen
 
     /**
+     * 养鱼设置：人设、主动发言时间、记忆、后台、默认 API。
+     *
+     * 单独一页而不是塞进全局设置：这里每一项都只对养鱼有意义，
+     * 混进「设置 → 模型」里用户改完人设还得回头找。
+     */
+    data object FishSettings : Screen
+
+    /**
+     * 她的动态：每天一条，她自己写的碎碎念。
+     *
+     * 和「记忆」分开：记忆是给模型看的第三人称事件，动态是给人看的第一人称。
+     */
+    data object FishMoments : Screen
+
+    /**
+     * 「她的样子」：这一页的名字 / 头像 / 背景 / 颜色。
+     *
+     * 和全局设置分开：用户改的是"养鱼这一页"，不是整个 App 的主题。
+     */
+    data object FishSkin : Screen
+
+    /**
      * 自定义界面（HTML + CSS）的全屏预览。
      *
      * 内容可能几十 KB，所以**不进导航存档**（见 encode 里的 UNRESTORABLE）：
@@ -198,6 +220,9 @@ class WatchNavigator internal constructor(
             is Screen.CardEdit -> "$CARD_EDIT$SEP${screen.kind}$SEP${screen.cardId}"
             // 记忆文档是只读预览，恢复到根屏没有损失，也不必重建上下文
             is Screen.MemoryDoc -> UNRESTORABLE
+            Screen.FishSettings -> UNRESTORABLE
+            Screen.FishMoments -> UNRESTORABLE
+            Screen.FishSkin -> UNRESTORABLE
             is Screen.HtmlView -> UNRESTORABLE
         }
 

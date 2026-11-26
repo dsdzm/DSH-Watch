@@ -96,4 +96,23 @@ class DeepSeekPricingTest {
         assertThat(DeepSeekPricing.isDeepSeek("", "", "我的 DeepSeek")).isTrue()
         assertThat(DeepSeekPricing.isDeepSeek("https://api.openai.com/v1", "gpt-4o")).isFalse()
     }
+
+    @Test
+    fun `title extension is not sent to reasoning-only models`() {
+        /*
+         * 官方对 pro / reasoner 明确不支持这个扩展，带了就整单 400：
+         * "The server-side tool calls (...) and the title generation feature are
+         *  unavailable for model deepseek-v4-pro. Please use deepseek-flash instead."
+         *
+         * 而 isDeepSeek 只看名字里有没有 deepseek —— pro 也被判成 DeepSeek，
+         * 于是每个新会话的第一轮都带 title 字段，直接被拒。
+         */
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-v4-pro")).isFalse()
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-reasoner")).isFalse()
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-r1-thinking")).isFalse()
+        // 对话模型继续用：它给的短标题比截前 18 字好得多
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-chat")).isTrue()
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-flash")).isTrue()
+        assertThat(DeepSeekPricing.supportsTitleExtension("deepseek-v4")).isTrue()
+    }
 }

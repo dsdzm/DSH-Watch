@@ -29,6 +29,7 @@ class LatexParseTest {
         is MathNode.Sqrt -> glyphs(node.body)
         is MathNode.Big -> node.glyph
         is MathNode.Delim -> node.open + glyphs(node.body) + node.close
+        is MathNode.Accent -> glyphs(node.body)
     }
 
     /** 用户截图里的原公式 */
@@ -104,5 +105,105 @@ class LatexParseTest {
     fun `unknown command is shown as written`() {
         // 宁可显示原文，也不要静默消失
         assertThat(parse("""\foobar""")).contains("\\foobar")
+    }
+
+    /**
+     * 重音命令。
+     *
+     * 用户截图里的 `\barv=\frac{v_t+v}{2}` 直接显示成了 `\barv` ——
+     * `\bar` 没有实现，落到「不认识的命令」分支原样吐源码。
+     * 物理书里平均速度、均值、矢量全靠这几个命令。
+     */
+    @Test
+    fun `bar is an accent instead of literal text`() {
+        val node = Latex.parse("""\bar v""")
+        assertThat(node).isInstanceOf(MathNode.Accent::class.java)
+        assertThat((node as MathNode.Accent).kind).isEqualTo(AccentKind.BAR)
+        assertThat(glyphs(node)).isEqualTo("v")
+        assertThat(parse("""\bar v""")).doesNotContain("\\bar")
+    }
+
+    @Test
+    fun `overline underline hat vec tilde dot ddot all parse`() {
+        val cases = listOf(
+            """\overline{AB}""" to AccentKind.OVERLINE,
+            """\underline{x}""" to AccentKind.UNDERLINE,
+            """\hat{y}""" to AccentKind.HAT,
+            """\vec{F}""" to AccentKind.VEC,
+            """\tilde{x}""" to AccentKind.TILDE,
+            """\dot{x}""" to AccentKind.DOT,
+            """\ddot{x}""" to AccentKind.DDOT,
+        )
+        for ((src, kind) in cases) {
+            val node = Latex.parse(src)
+            assertThat(node).isInstanceOf(MathNode.Accent::class.java)
+            assertThat((node as MathNode.Accent).kind).isEqualTo(kind)
+            // 命令本身不能留在输出里
+            assertThat(parse(src)).doesNotContain("\\")
+        }
+    }
+
+    /** 用户的整条式子：重音 + 分式 + 下标都要在，一个反斜杠命令都不能剩 */
+    @Test
+    fun `mean speed formula keeps structure`() {
+        val node = Latex.parse("""\barv=\frac{v_t+v}{2}""")
+        val text = node.toString()
+        assertThat(text).doesNotContain("\\bar")
+        assertThat(text).contains("Frac")
+        // 分子里必须有下标（v_t），不能被重音吃掉
+        assertThat(text).contains("Script")
+        assertThat(glyphs(node)).isEqualTo("v=vt+v2")
+    }
+
+    /**
+     * 字体切换。
+     *
+     * `{\rm I}` 是物理书里的罗马数字序号；`\rm` 以前也当未知命令原样输出。
+     */
+    @Test
+    fun `rm and mathrm turn letters upright`() {
+        val a = Latex.parse("""\rm I""")
+        assertThat(a).isInstanceOf(MathNode.Sym::class.java)
+        assertThat((a as MathNode.Sym).italic).isFalse()
+
+        val b = Latex.parse("""\mathrm{d}""")
+        assertThat(b).isInstanceOf(MathNode.Sym::class.java)
+        assertThat((b as MathNode.Sym).italic).isFalse()
+    }
+
+    /** 分组形式的 `{\rm I}`：花括号里一层，外层再取出来 */
+    @Test
+    fun `rm inside a group is upright`() {
+        val node = Latex.parse("""X_{\rm I}""")
+        assertThat(node).isInstanceOf(MathNode.Script::class.java)
+        val sub = (node as MathNode.Script).sub
+        assertThat(sub).isInstanceOf(MathNode.Sym::class.java)
+        assertThat((sub as MathNode.Sym).text).isEqualTo("I")
+        assertThat(sub.italic).isFalse()
+    }
+
+    /** `\mathrm` 里带命令和上下标时不能拍平成字符串 */
+    @Test
+    fun `mathrm keeps inner structure`() {
+        val node = Latex.parse("""\mathrm{kg\cdot m/s^2}""")
+        assertThat(node.toString()).contains("Script")
+        // 点乘要被翻译成真正的 ·，而不是留在源码里的 \cdot
+        assertThat(parse("""\mathrm{kg\cdot m/s^2}""")).doesNotContain("\\cdot")
+    }
+
+    /** 声明式命令本身不占位 */
+    @Test
+    fun `style declarations do not leak`() {
+        assertThat(parse("""\displaystyle \frac{a}{b}""")).doesNotContain("\\displaystyle")
+        assertThat(parse("""\sum\limits_{i} a_i""")).doesNotContain("limits")
+    }
+
+    /** 图 1 的整套公式：冒号分隔的罗马数字序号 */
+    @Test
+    fun `ratio formula from screenshot has no leftover commands`() {
+        val src = """X_{\rm I}:X_{\rm II}:X_{\rm III}:\cdots=1:3:5:\cdots"""
+        val out = parse(src)
+        assertThat(out).doesNotContain("\\")
+        assertThat(glyphs(Latex.parse(src))).isEqualTo("XI:XII:XIII:⋯=1:3:5:⋯")
     }
 }

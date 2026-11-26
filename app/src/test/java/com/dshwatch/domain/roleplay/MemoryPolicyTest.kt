@@ -62,4 +62,30 @@ class MemoryPolicyTest {
         assertThat(MemoryPolicy.threshold(1)).isAtLeast(1)
         assertThat(MemoryPolicy.threshold(-5)).isAtLeast(1)
     }
+
+    /*
+     * 养鱼的门槛。
+     *
+     * 6000 / 40 那套是按"一轮几百 token"的编程与酒馆标定的。养鱼一条只有四五个字，
+     * 40 条要攒一周多 —— 用户看到的现象就是"记忆好像没工作"：
+     * 压缩没坏，只是一次都没轮到。
+     */
+    @Test
+    fun `养鱼的门槛远低于其他场景`() {
+        assertThat(MemoryPolicy.threshold(64_000, fish = true))
+            .isEqualTo(MemoryPolicy.FISH_TOKEN_CAP)
+        assertThat(MemoryPolicy.FISH_TOKEN_CAP).isLessThan(MemoryPolicy.ABSOLUTE_TOKEN_CAP)
+        assertThat(MemoryPolicy.FISH_MESSAGE_CAP).isLessThan(MemoryPolicy.MESSAGE_CAP)
+    }
+
+    @Test
+    fun `养鱼聊到十来条就整理`() {
+        assertThat(MemoryPolicy.shouldCompress(300, MemoryPolicy.FISH_MESSAGE_CAP, 64_000, fish = true))
+            .isTrue()
+        // 同样的条数在别的场景还远远不够
+        assertThat(MemoryPolicy.shouldCompress(300, MemoryPolicy.FISH_MESSAGE_CAP, 64_000))
+            .isFalse()
+        // 但也不能三条就开始压
+        assertThat(MemoryPolicy.shouldCompress(10, 3, 64_000, fish = true)).isFalse()
+    }
 }

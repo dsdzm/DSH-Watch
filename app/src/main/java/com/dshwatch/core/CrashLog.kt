@@ -166,7 +166,22 @@ object CrashLog {
             appendLine("环境：${EnvironmentWarning.summary()}")
             appendLine("ABI：${Build.SUPPORTED_ABIS.joinToString(",")}")
             appendLine("ROM：${Build.DISPLAY.orEmpty()} / 厂商补丁 ${Build.VERSION.INCREMENTAL.orEmpty()}")
-            appendLine("启动耗时：${if (launchMark > 0) (System.currentTimeMillis() - launchMark).toString() + "ms（崩在启动阶段）" else "已完成启动"}")
+            /*
+             * 以前这里只要 launchMark 有值就印「崩在启动阶段」，于是跑了两小时的
+             * 进程崩掉也这么写。beta.35 的用户报告正是这样：崩溃发生在第 21 分钟、
+             * 界面重建之后，报告第一行却说「崩在启动阶段」，把排查带偏了一整轮。
+             *
+             * 真正的判据是**有没有画出过第一帧**：画过就说明启动早就完成了。
+             */
+            appendLine(
+                "进程已运行：" + (System.currentTimeMillis() - (processStartAt.takeIf { it > 0 } ?: launchMark))
+                    .coerceAtLeast(0) + "ms" +
+                    if (firstFrameAt > 0) {
+                        "（首帧 ${firstFrameAt}ms，启动已完成，不是启动阶段）"
+                    } else {
+                        "（还没画出第一帧，崩在启动阶段）"
+                    },
+            )
             appendLine("异常：${error.javaClass.name}: ${error.message.orEmpty()}")
             appendLine()
             appendLine(sw.toString())

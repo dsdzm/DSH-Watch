@@ -100,7 +100,31 @@ class AppContainer(private val app: Context) {
         workspaceRoot = { workspaceStore.rootDir() },
     )
 
+    /**
+     * 「上次整理记忆走到哪一步」。
+     *
+     * 和记忆文档同目录（`memory/_health.json`）。存在的唯一理由是
+     * 让「她怎么什么都不记得」变成一句能看懂的话：没到门槛、请求失败、
+     * 还是摘要为空 —— 以前这四种情况在界面上完全一样。
+     */
+    val memoryHealth = com.dshwatch.data.store.MemoryHealthStore(
+        workspaceRoot = { workspaceStore.rootDir() },
+        json = json,
+    )
+
     val usageRepo = UsageRepository(File(app.filesDir, "usage"), json)
+
+    /**
+     * 养鱼页的外观（名字 / 头像 / 背景 / 气泡色）。
+     *
+     * 单独一份，不碰全局主题：用户要的是「只在养鱼页生效」。
+     * 图片放 `fish/`，配置放 `fish/skin.json` —— 都在工作空间里，
+     * 用户插上电脑就能换掉。
+     */
+    val fishSkin = com.dshwatch.data.store.FishSkinStore(
+        workspaceRoot = { workspaceStore.rootDir() },
+        json = json,
+    )
 
     /**
      * 当前连着的那台电脑。
@@ -161,6 +185,29 @@ class AppContainer(private val app: Context) {
     /** agent 设过的闹钟（AlarmManager 查不到自己的闹钟，只能自己记账） */
     val alarmStore = com.dshwatch.data.store.AlarmStore(File(app.filesDir, "alarms"), json)
 
+    /**
+     * 她自己约的「待会儿跟你说句话」。
+     *
+     * 和闹钟分开存：闹钟是给用户用的工具，这是角色行为的一部分，
+     * 取消/清空时不该互相牵连（比如用户清闹钟，不该把她约的消息一起清掉）。
+     */
+    val proactiveStore = com.dshwatch.data.store.ProactiveStore(
+        File(app.filesDir, "fish-proactive"),
+        json,
+    )
+
+    /**
+     * 她的动态（每天一条的碎碎念）。
+     *
+     * 放 filesDir 而不是工作空间：这是"她自己的东西"，
+     * 混进工作空间会和用户的文件、会话目录挤在一起，
+     * 用户翻文件时看到一堆 `fish-moments.json` 只会困惑。
+     */
+    val momentStore = com.dshwatch.data.store.MomentStore(
+        File(app.filesDir, "fish-moments"),
+        json,
+    )
+
     /** ask_user 的通道：工具集先构造、引擎后构造，靠它在两者之间搭桥 */
     val promptChannel = com.dshwatch.domain.agent.UserPromptChannel()
 
@@ -198,7 +245,9 @@ class AppContainer(private val app: Context) {
         workspaceRoot = { workspaceStore.rootPath() },
         prompter = promptChannel,
         alarms = alarmStore,
+        proactive = proactiveStore,
         todos = todoBoard,
+        fishSkin = fishSkin,
         uiActions = uiActions,
         settings = { settings.value },
         cloudRuns = cloudRunStore,
@@ -239,7 +288,7 @@ class AppContainer(private val app: Context) {
         workspaceRoot = { workspaceStore.rootPath() },
         promptChannel = promptChannel,
         roleCard = { id -> roleCardStore.load(id) },
-        memoryReader = { id -> memoryStore.read(id) },
+        memoryReader = { id -> memoryStore.render(id) },
         json = json,
         mediaApi = mediaApi,
         mediaRoot = { mediaRoot },
@@ -272,9 +321,22 @@ class AppContainer(private val app: Context) {
         perfProvider = { _perf.value },
         toolRegistry = { _toolRegistry.value },
         workspaceRoot = { workspaceStore.rootPath() },
-        promptChannel = promptChannel,
+        /*
+         * 刻意**不**传 promptChannel。
+         *
+         * 那个通道是"全局唯一、最后注册者生效"的：工具集在 AppContainer 里
+         * 构造时拿的是 [promptChannel] 这**一个**实例，`ask_user` 调用它之后，
+         * 由注册在它上面的引擎把问题塞进自己的 `_question` 让界面弹窗。
+         *
+         * 这里以前传了同一个实例，而它构造在主引擎之后 —— 于是 handler 被
+         * 覆盖成 QQ 引擎的：主引擎调 ask_user 时，问题进了 QQ 引擎的状态流，
+         * 用户眼前的界面永远等不到弹窗，五分钟后工具返回"用户没有回答"。
+         * 表现就是「ask_user 没有选择页面」。
+         *
+         * QQ 引擎本来 `forceAgentOff = true`，一个工具都不会下发，不需要这条通道。
+         */
         roleCard = { id -> roleCardStore.load(id) },
-        memoryReader = { id -> memoryStore.read(id) },
+        memoryReader = { id -> memoryStore.render(id) },
         json = json,
         mediaApi = mediaApi,
         mediaRoot = { mediaRoot },
@@ -332,9 +394,13 @@ class AppContainer(private val app: Context) {
         engine = engine,
         memory = memoryStore,
         loadCard = { id -> roleCardStore.load(id) },
+        health = memoryHealth,
     )
 
     init {
+        // 外观读一次即可：之后所有写入都通过 flow 推给页面，不必再读盘
+        appScope.launch { runCatching { fishSkin.load() } }
+
         /*
          * 有登录态就在后台把昵称与余额拉回来。
          *
@@ -398,8 +464,8 @@ class AppContainer(private val app: Context) {
         appScope.launch { usageRepo.ensureLoaded() }
 
         appScope.launch {
-            // 首次启动铺一批内置角色卡：让用户点开「酒馆」就有东西能试，
-            // 而不是面对一张空列表先自己想一个人设。用户删光了就不再补（见 ensureBuiltins）。
+            // 铺内置角色卡：让用户点开「酒馆」就有东西能试，而不是面对空列表先自己想人设。
+            // 按 id 补齐（见 ensureBuiltins）—— 版本升级新增的卡，老用户也能拿到。
             runCatching {
                 roleCardStore.ensureBuiltins(com.dshwatch.domain.roleplay.BuiltinCards.all())
             }

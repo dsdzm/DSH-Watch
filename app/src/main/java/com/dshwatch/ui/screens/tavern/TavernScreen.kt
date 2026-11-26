@@ -171,7 +171,8 @@ fun TavernScreen(
                 }
                 when (id) {
                     Scenes.WRITING -> { nav.popToRoot(); nav.push(Screen.WritingHome) }
-                    Scenes.CODING -> nav.popToRoot()
+                    // 养鱼是根页面，由 ScreenHost / PhoneRoot 按 useScene 重新分发
+                    Scenes.CODING, Scenes.FISH -> nav.popToRoot()
                     else -> Unit
                 }
             },

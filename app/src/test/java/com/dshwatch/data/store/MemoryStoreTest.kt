@@ -70,15 +70,17 @@ class MemoryStoreTest {
     @Test
     fun `overflow keeps the newest sections and the header`() = runTest {
         val s = store()
-        // 每段 1000 字，塞 12 段一定超 8000 的预算
-        repeat(12) { i ->
-            s.append("big", "第${i}段" + "字".repeat(1000), "t$i")
+        // 每段 1000 字，40 段一定超 3 万字的上限
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        val base = System.currentTimeMillis() - 40L * 86_400_000L
+        repeat(40) { i ->
+            s.append("big", "第${i}段" + "字".repeat(1000), fmt.format(java.util.Date(base + i * 86_400_000L)))
         }
         val text = s.read("big")
-        assertThat(text.length).isAtMost(MemoryStore.BUDGET_CHARS + 200)
+        assertThat(text.length).isAtMost(MemoryStore.FILE_BUDGET_CHARS + 400)
         assertThat(text).contains("# 长期记忆")
         // 留下的应该是最近的，最早的被丢掉
-        assertThat(text).contains("第11段")
+        assertThat(text).contains("第39段")
         assertThat(text).doesNotContain("第0段" + "字".repeat(1000))
     }
 

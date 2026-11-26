@@ -5,12 +5,17 @@ import kotlinx.serialization.Serializable
 /**
  * 使用场景。
  *
- * 三个场景共用同一个 [com.dshwatch.domain.ChatEngine]，差别只在**发给模型什么**：
+ * 四个场景共用同一个 [com.dshwatch.domain.ChatEngine]，差别只在**发给模型什么**：
  *  - [CODING]：完整 Agent（工具、思维链、多步循环）；
- *  - [TAVERN] / [WRITING]：纯对话（`tools` 为空、`agentMode=OFF`），
+ *  - [TAVERN] / [WRITING] / [FISH]：纯对话（`tools` 为空、`agentMode=OFF`），
  *    系统提示由角色卡或写作设定拼出来，且**不显示**思维链与工具卡片。
  *
- * 之所以不做三套引擎：Agent 循环里踩过的坑（tool_calls 配对、取消传递、
+ * [FISH]（养鱼）是 [TAVERN] 的特化：只有一个角色、一套 QQ 式的聊天界面、
+ * 一套专门压制"鱼八股"的文风规则。单独列成场景而不是给酒馆加开关，
+ * 是因为它要占据对话 tab 的整屏（没有角色列表、没有卡片详情），
+ * 塞进酒馆会让那一页多出两条互斥的布局分支。
+ *
+ * 之所以不做多套引擎：Agent 循环里踩过的坑（tool_calls 配对、取消传递、
  * 流式节流）全都一样，复制一份就等于把那些坑再踩一遍。场景只影响
  * 「提示词」和「界面」，不影响「传输与循环」。
  */
@@ -19,25 +24,31 @@ object Scenes {
     const val CODING = "coding"
     const val TAVERN = "tavern"
     const val WRITING = "writing"
+    const val FISH = "fish"
 
-    val all = listOf(CODING, TAVERN, WRITING)
+    val all = listOf(CODING, TAVERN, WRITING, FISH)
 
     fun of(id: String?): String = if (id in all) id!! else CODING
 
     fun label(id: String): String = when (of(id)) {
         TAVERN -> "酒馆"
         WRITING -> "写作"
+        FISH -> "养鱼"
         else -> "编程"
     }
 
     fun desc(id: String): String = when (of(id)) {
         TAVERN -> "和角色聊天、扮演剧情"
         WRITING -> "设定世界与人物，让模型续写"
+        FISH -> "和一条住在屏幕里的鱼聊天"
         else -> "写代码、跑脚本、做任务"
     }
 
     /** 这个场景是否需要工具与思维链 */
     fun usesAgent(id: String): Boolean = of(id) == CODING
+
+    /** 是否走角色卡（而非写作卡）。养鱼用的是固定角色，但同样靠卡面重建提示 */
+    fun usesCard(id: String): Boolean = !usesAgent(id)
 }
 
 /**

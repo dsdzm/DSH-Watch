@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +46,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
 
         val container = AppContainer.of(this)
+        handleFishIntent(intent, container)
         // 判定设备类型只用得到 resources 与 packageManager，持 applicationContext
         // 比在每次重组里读 Activity 干净
         val appContext = applicationContext
@@ -176,6 +179,36 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * 点「她来找你」的通知进来时，落到养鱼对话。
+     *
+     * 只改 `useScene` 这一个默认落点，不直接改导航栈：栈是界面层的事，
+     * Activity 拿不到它，硬塞一个"打开某某页"的指令就得给整个路由加一层
+     * 一次性事件。而养鱼页本身会接着最近一条会话，落点对了页面自然对。
+     */
+    private fun handleFishIntent(intent: android.content.Intent?, container: AppContainer) {
+        if (intent?.getBooleanExtra(
+                com.dshwatch.service.FishNotifications.EXTRA_OPEN_FISH,
+                false,
+            ) != true
+        ) {
+            return
+        }
+        // 同一个 intent 被复用（singleTask）时不要重复触发
+        intent.removeExtra(com.dshwatch.service.FishNotifications.EXTRA_OPEN_FISH)
+        lifecycleScope.launch {
+            container.settingsRepo.update {
+                it.copy(useScene = com.dshwatch.domain.roleplay.Scenes.FISH)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleFishIntent(intent, AppContainer.of(this))
+    }
+
+    /**
      * 启动完成的判定点。
      *
      * 为什么放在「能画出内容」这一层，而不是 AppRoot 的第一帧：AppRoot 开头有一段
@@ -212,6 +245,14 @@ class MainActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        /*
+         * 「人正看着屏幕」。
+         *
+         * 只有一个用途：主动消息到点时如果用户就在这一页，气泡会自己长出来，
+         * 不必再震一下。用 Activity 的生命周期而不是进程全局的，是因为
+         * 这个 App 只有一个界面 —— 多引一个 lifecycle-process 只为一行布尔值不划算。
+         */
+        com.dshwatch.service.AppVisibility.visible = true
         runCatching { StreamingService.resumePending(this) }
         /*
          * QQ 桥接同理，但它多一个坑：服务是 START_STICKY，
@@ -222,6 +263,11 @@ class MainActivity : ComponentActivity() {
         runCatching {
             if (AppContainer.of(this).settings.value.qq.enabled) QqService.start(this)
         }
+    }
+
+    override fun onPause() {
+        com.dshwatch.service.AppVisibility.visible = false
+        super.onPause()
     }
 
     /**

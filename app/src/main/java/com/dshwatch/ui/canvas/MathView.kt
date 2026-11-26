@@ -2,7 +2,7 @@ package com.dshwatch.ui.canvas
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -13,13 +13,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -68,6 +68,25 @@ fun MathView(
      * 多行公式（矩阵、多行推导）在手表上本来也读不清，缩进圆里至少完整。
      */
     maxHeight: Dp? = null,
+    /**
+     * 正文里的公式：不铺卡片底、不留大边距。
+     *
+     * 一段话里夹着三行推导时，每行都套一张带圆角的卡片，读起来像三张截图；
+     * 这里只画公式本身，靠留白把它和正文分开。
+     */
+    plain: Boolean = false,
+    /**
+     * 宽度有富余时自动放大。
+     *
+     * 全屏看公式时，一条两三个字符的式子（`v=v_0+at`）如果按 24sp 画，
+     * 只占圆屏中间一小块 —— 用户点开「全屏」就是为了看清，结果字还是那么小。
+     * 传一个大于 1 的上限，公式会撑到刚好占满可用宽度。
+     *
+     * 正文里不要开：那里公式应当和正文同字号，忽大忽小反而跳。
+     */
+    autoFit: Boolean = false,
+    /** [autoFit] 的放大上限。放太大时细笔画会糊，也不像正文的一部分 */
+    maxAutoScale: Float = 2.0f,
 ) {
     val measurer = rememberTextMeasurer(cacheSize = 64)
     /*
@@ -79,7 +98,15 @@ fun MathView(
      */
     val palette = rememberCanvasPalette()
     val resolved = if (color == Color.Unspecified) palette.ink else color
-    val sized = if (compact) fontSize * 0.86f else fontSize
+    /*
+     * 不再对 compact 打折。
+     *
+     * 以前消息流里按 0.86 缩，理由是"卡片态只是让你认出这是什么"。
+     * 但正文公式（plain = true）也走这条路，13sp × 0.86 ≈ 11sp，
+     * 分数一压就成了一团墨点 —— 用户的原话是「正文部分的公式太小了，看不清」。
+     * 卡片该让位的是**高度**，不是字号。
+     */
+    val sized = fontSize
     val box = remember(latex, sized, resolved) {
         // 解析在组合期跑（Choreographer 帧回调），异常会直接杀进程；公式再怪也只该显示原文
         val node = runCatching { Latex.parse(latex) }
@@ -87,38 +114,58 @@ fun MathView(
             .getOrNull() ?: MathNode.Text(latex)
         buildMathBox(node, sized, measurer, resolved)
     }
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(palette.cardWash)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .then(
+                if (plain) {
+                    Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(palette.cardWash)
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                },
+            ),
     ) {
-        // 高度跟着盒子走：固定高度会把多行公式裁掉，自适应又需要密度换算
-        val natural = with(LocalDensity.current) { (box.height + 6f).toDp() }
-        val heightDp = if (maxHeight != null && natural > maxHeight) maxHeight else natural
+        val density = LocalDensity.current
+        /*
+         * 宽高分开算，都从「内容实际占多少」出发：
+         *
+         * - 放不下（宽或高超出）→ 整体等比缩，这是原来就有的行为；
+         * - 放得下且允许 autoFit → 放大到刚好占满，上限 maxAutoScale；
+         * - 否则 1:1。
+         *
+         * 缩放用画布变换而不是重新排版：字号变了要重新测量整棵树，
+         * 流式刷新时每帧都做一遍会卡；变换是纯绘制，结果一致。
+         */
+        val availW = with(density) { constraints.maxWidth.toFloat() }
+        val fit = if (box.width > 1f && availW > 1f) (availW - 2f) / box.width else 1f
+        val capPx = maxHeight?.let { with(density) { it.toPx() } }
+        var scale = when {
+            fit < 1f -> fit.coerceAtLeast(0.35f)
+            autoFit -> fit.coerceAtMost(maxAutoScale)
+            else -> 1f
+        }
+        // 高度上限优先：多行推导宁可整体缩，也不能冲出圆屏四角
+        if (capPx != null && box.height > 0f && box.height * scale > capPx) {
+            scale = (capPx / box.height).coerceAtLeast(0.35f)
+        }
+        val heightPx = (box.height + 6f) * scale
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(heightDp),
+                .height(with(density) { heightPx.toDp() }),
         ) {
-            // 宽和高各算一个比例，取小的那个：哪个方向放不下就按哪个缩，
-            // 两向都放得下时是 1
-            val byWidth = if (box.width > size.width - 2f && box.width > 0f) {
+            // 宽度方向再兜一次：maxWidth 可能因为父级测量顺序比可用宽度略大
+            val byWidth = if (box.width > 1f && box.width * scale > size.width - 2f) {
                 (size.width - 2f) / box.width
             } else {
-                1f
+                scale
             }
-            val byHeight = if (box.height > size.height - 2f && box.height > 0f) {
-                (size.height - 2f) / box.height
-            } else {
-                1f
-            }
-            val scale = minOf(byWidth, byHeight)
-            // 超宽公式整体缩到可视宽度内：等宽换行做不到（公式没有合法的断点），
-            // 缩放在 200dp 的屏幕上反而是可读性最好的选择
-            withTransform({ scale(scale, scale, pivot = Offset.Zero) }) {
-                box.draw(this, 0f, box.ascent + 2f / scale)
+            val s = minOf(byWidth, scale)
+            withTransform({ scale(s, s, pivot = Offset.Zero) }) {
+                box.draw(this, 1f, box.ascent + 2f)
             }
         }
     }
@@ -151,6 +198,24 @@ sealed interface MathNode {
     data class Big(val glyph: String, val sup: MathNode? = null, val sub: MathNode? = null) : MathNode
     data class Delim(val open: String, val body: MathNode, val close: String) : MathNode
     data class Text(val raw: String) : MathNode
+
+    /**
+     * 重音 / 上划线。
+     *
+     * 物理和统计里到处都是 `\bar v`（平均速度）、`\bar x`（均值）、`\vec v`、
+     * `\hat y`。这些命令以前没有实现，落到「不认识的命令」分支，原样吐出
+     * `\barv` —— 一条本来能看懂的式子立刻变成源码。
+     */
+    data class Accent(val body: MathNode, val kind: AccentKind) : MathNode
+}
+
+/** 重音种类。画法分两类：横线（bar / underline）与居中符号（其余） */
+enum class AccentKind {
+    /** `\bar v`：短横线，只覆盖一个字母，可以压平进句子 */
+    BAR,
+    /** `\overline{AB}`：覆盖整个组，可能好几位字符 —— 压平会把线只画在最后一个字母上 */
+    OVERLINE,
+    UNDERLINE, HAT, VEC, TILDE, DOT, DDOT,
 }
 
 /** 每个节点的排版结果 */
@@ -190,21 +255,37 @@ private fun buildMathBox(
     is MathNode.Text -> textBox(node.raw, size, m, color, italic = false, bold = false, upright = true)
 
     is MathNode.Frac -> {
-        val num = buildMathBox(node.num, size * 0.92f, m, color)
-        val den = buildMathBox(node.den, size * 0.92f, m, color)
-        val gap = size * 0.12f
-        val barW = max(num.width, den.width) + size * 0.24f
-        val barThick = max(1f, size * 0.05f)
-        val ascent = num.height + gap + barThick / 2
-        val descent = den.height + gap
+        val num = buildMathBox(node.num, size * 0.96f, m, color)
+        val den = buildMathBox(node.den, size * 0.96f, m, color)
+        val gap = size * 0.14f
+        /*
+         * 分数线坐在「数学轴」上，不是蹲在基线上。
+         *
+         * LaTeX 把分数线放在基线上方约 0.25em —— 那是 `=`、`+`、`−` 横画的
+         * 高度。以前分数线压在基线上，`x_0=\frac{…}{2}` 里的等号和分数线
+         * 一高一低，整个等式看起来是歪的（用户说的「分式不太好看」）。
+         */
+        val axis = size * 0.25f
+        val barW = max(num.width, den.width) + size * 0.30f
+        val barThick = max(1f, size * 0.045f)
+        val ascent = num.height + gap + barThick / 2 + axis
+        val descent = den.height + gap + barThick / 2 - axis
         MathBox(
             width = barW,
             ascent = ascent,
             descent = descent,
             draw = { x, base ->
-                val barY = base - barThick / 2
+                val barY = base - axis
                 val cx = x + (barW - num.width) / 2
-                num.draw(this, cx, barY - gap)
+                /*
+                 * 分子要按**框底**贴线，不是按基线。
+                 *
+                 * 分子的基线在框底上方 descent 处（`v_0^2` 这种带下标的，
+                 * descent 差不多是半个字高）。原来直接把基线放在 `barY - gap`，
+                 * 框底就多出一个 descent 的缝 —— 分子被整体抬高，
+                 * 分数线下面却紧贴着分母，整条分式看起来是错位的。
+                 */
+                num.draw(this, cx, barY - gap - num.descent)
                 drawLine(
                     color = color,
                     start = Offset(x + size * 0.06f, barY),
@@ -219,29 +300,105 @@ private fun buildMathBox(
 
     is MathNode.Script -> {
         val baseBox = buildMathBox(node.base, size, m, color)
-        val scriptSize = size * 0.62f
+        val scriptSize = size * 0.66f
         val sup = node.sup?.let { buildMathBox(it, scriptSize, m, color) }
         val sub = node.sub?.let { buildMathBox(it, scriptSize, m, color) }
-        val supRise = size * 0.42f
-        val subDrop = size * 0.16f
-        val ascent = max(baseBox.ascent, (sup?.height ?: 0f) - supRise + baseBox.ascent)
-        val descent = max(baseBox.descent, (sub?.height ?: 0f) - subDrop + (baseBox.descent * 0.2f))
+        /*
+         * 上下标：位移就是「子盒基线相对主基线的偏移」，只有这一个量。
+         *
+         * 这里踩过两次坑，都是把「位移」和「让开字形」混成了一个数：
+         *
+         *  1. 旧版 ascent 写 `sup.height - supRise`，高度里减位移、框却不跟着变高；
+         *  2. 上一版把下标画在 `base + subSink + sub.ascent` —— 第二个参数是
+         *     **基线**，再叠一个 ascent 等于把下标又压低了整整一个字高。
+         *     而 subSink 自身还用 `0.08 + sub.ascent` 让位，两笔加起来
+         *     下标被推到基线下 0.7em 开外。19sp 时这就是用户看到的
+         *     「v 在上、0 掉到分数线附近」—— 字号越大越明显。
+         *
+         * LaTeX 的实际取值：上标 0.4em、下标 0.2em（以主字号为 em）。
+         * 盒子高度必须由「位移 + 子盒自身的 ascent/descent」算，
+         * 用 descent 而不是 height —— height 里含 ascent，会把盒子撑高一整行。
+         */
+        val supShift = size * 0.40f
+        val subShift = size * 0.20f
+        // 斜体字母的右下有笔画，下标要留一点横向缝，否则「x₀」会挤在一起
+        val kern = if (baseBox.width > 0f) size * 0.03f else 0f
         val scriptW = max(sup?.width ?: 0f, sub?.width ?: 0f)
+        val ascent = max(baseBox.ascent, supShift + (sup?.ascent ?: 0f))
+        val descent = max(baseBox.descent, subShift + (sub?.descent ?: 0f))
         MathBox(
-            width = baseBox.width + scriptW,
+            width = baseBox.width + kern + scriptW,
             ascent = ascent,
             descent = descent,
             draw = { x, base ->
                 baseBox.draw(this, x, base)
-                sup?.let { s ->
-                    // 上标底部贴着 base 的基线往上抬
-                    s.draw(this, x + baseBox.width, base - supRise)
-                }
-                sub?.let { s ->
-                    s.draw(this, x + baseBox.width, base + subDrop + s.ascent)
-                }
+                sup?.let { s -> s.draw(this, x + baseBox.width + kern, base - supShift) }
+                sub?.let { s -> s.draw(this, x + baseBox.width + kern, base + subShift) }
             },
         )
+    }
+
+    /*
+     * 重音：\bar \overline \hat \vec \tilde \dot \ddot \underline
+     *
+     * 之前这些命令全部落到「不认识的命令」分支，原样吐出 `\barv` ——
+     * 用户看到的是一串 LaTeX 源码混在算好的式子里（截图里 `\barv=\frac{…}`）。
+     * 横线类直接画线（能精确对齐宽度），帽子类画一个居中的符号。
+     */
+    is MathNode.Accent -> {
+        val body = buildMathBox(node.body, size, m, color)
+        val thick = max(1f, size * 0.05f)
+        when (node.kind) {
+            AccentKind.BAR, AccentKind.OVERLINE, AccentKind.UNDERLINE -> {
+                val gap = size * 0.12f
+                val above = node.kind != AccentKind.UNDERLINE
+                MathBox(
+                    width = body.width,
+                    ascent = body.ascent + if (above) gap + thick else 0f,
+                    descent = body.descent + if (above) 0f else gap + thick,
+                    draw = { x, base ->
+                        body.draw(this, x, base)
+                        val y = if (above) {
+                            base - body.ascent - gap - thick / 2
+                        } else {
+                            base + body.descent + gap + thick / 2
+                        }
+                        drawLine(
+                            color = color,
+                            start = Offset(x, y),
+                            end = Offset(x + body.width, y),
+                            strokeWidth = thick,
+                        )
+                    },
+                )
+            }
+
+            else -> {
+                val mark = when (node.kind) {
+                    AccentKind.HAT -> "ˆ"
+                    AccentKind.VEC -> "→"
+                    AccentKind.TILDE -> "˜"
+                    AccentKind.DOT -> "·"
+                    AccentKind.DDOT -> "··"
+                    else -> ""
+                }
+                val markBox = textBox(mark, size * 0.9f, m, color, italic = false, upright = true)
+                val gap = size * 0.02f
+                MathBox(
+                    width = body.width,
+                    ascent = body.ascent + gap + markBox.height,
+                    descent = body.descent,
+                    draw = { x, base ->
+                        body.draw(this, x, base)
+                        markBox.draw(
+                            this,
+                            x + (body.width - markBox.width) / 2,
+                            base - body.ascent - gap,
+                        )
+                    },
+                )
+            }
+        }
     }
 
     is MathNode.Sqrt -> {
@@ -334,6 +491,17 @@ private fun textBox(
         fontSize = size.sp,
         fontStyle = if (italic && !upright) FontStyle.Italic else FontStyle.Normal,
         fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        /*
+         * 去掉 Android 默认的字体留白。
+         *
+         * 原来这里靠「行高 × 0.78」猜基线，而 Android 的行高里含着 ascent 之上
+         * 的额外留白（约 0.1em）和 descent 之下的留白，整行约 1.15em。
+         * 猜出来的基线偏低、盒子偏矮，分式里的分子分母就整体贴着分数线，
+         * 下标还会穿过横线 —— 那正是用户截图里「带角标的分式错位」。
+         * 关掉留白后行高就等于字体自身的 ascent + descent，配合下面的
+         * firstBaseline，盒子边界才和字形对得上。
+         */
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
     )
     val result = m.measure(
         text = text,
@@ -342,12 +510,18 @@ private fun textBox(
     )
     val w = result.size.width.toFloat()
     val h = result.size.height.toFloat()
-    // 文本没有基线信息可用，按经验取 0.78 作为基线位置（绝大多数无衬线字体的 cap height 比例）
-    val ascent = h * 0.78f
+    /*
+     * 基线取排版结果的真实值，不再按比例猜。
+     *
+     * `firstBaseline` 是这一行基线相对文本顶部的距离，字体、字号、粗细变了都
+     * 自动跟着变；猜的 0.78 只对某几个字体成立。
+     */
+    val baseline = result.firstBaseline
+    val ascent = if (baseline.isFinite() && baseline > 0f) baseline else h * 0.78f
     return MathBox(
         width = w,
         ascent = ascent,
-        descent = h - ascent,
+        descent = (h - ascent).coerceAtLeast(0f),
         draw = { x, base ->
             drawText(
                 textLayoutResult = result,
@@ -444,6 +618,35 @@ object Latex {
 
     private const val MAX_DEPTH = 24
 
+    /** 重音命令 → 画法 */
+    private val ACCENTS = mapOf(
+        "bar" to AccentKind.BAR,
+        "overline" to AccentKind.OVERLINE,
+        "underline" to AccentKind.UNDERLINE,
+        "hat" to AccentKind.HAT,
+        "widehat" to AccentKind.HAT,
+        "vec" to AccentKind.VEC,
+        "overrightarrow" to AccentKind.VEC,
+        "tilde" to AccentKind.TILDE,
+        "widetilde" to AccentKind.TILDE,
+        "dot" to AccentKind.DOT,
+        "ddot" to AccentKind.DDOT,
+    )
+
+    /** 正体：数学里 `d`、`e`、单位、`{\rm I}` 都该直立 */
+    private val UPRIGHT_CMDS = setOf(
+        "mathrm", "mathit", "mathsf", "mathtt", "mathcal", "operatorname",
+        "rm", "it", "sf", "tt", "cal",
+    )
+
+    private val BOLD_CMDS = setOf("mathbf", "boldsymbol", "bm", "bf")
+
+    /** 声明式命令：作用于排版环境，本身不出字形 */
+    private val STYLE_CMDS = setOf(
+        "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle",
+        "limits", "nolimits", "nonumber", "notag", "left.", "right.",
+    )
+
     fun parse(src: String): MathNode {
         val clean = src.trim().removePrefix("$$").removeSuffix("$$")
             .trim().removePrefix("\\[").removeSuffix("\\]")
@@ -487,6 +690,46 @@ object Latex {
             }
         }
         return out
+    }
+
+    /** 把一段字母变成符号节点：整体是希腊字母名时按一个符号处理（`\bartheta`） */
+    private fun symbolsOf(rest: String): MathNode {
+        GREEK[rest]?.let { return MathNode.Sym(it, italic = false) }
+        val chars = rest.map { MathNode.Sym(it.toString()) }
+        return when (chars.size) {
+            0 -> MathNode.Text("")
+            1 -> chars[0]
+            else -> MathNode.Seq(chars)
+        }
+    }
+
+    /**
+     * 把一棵子树里的字母改成直立（`\mathrm` / `\rm`）。
+     *
+     * 不直接取原文：`\mathrm{kg\cdot m/s^2}` 里含命令和上下标，按字符串读会
+     * 丢掉结构（`^2` 变成两个字面字符）。走节点树就只改变字形，结构保留。
+     */
+    private fun uprightOf(node: MathNode, bold: Boolean = false): MathNode = when (node) {
+        is MathNode.Sym -> node.copy(italic = false, bold = node.bold || bold)
+        is MathNode.Seq -> MathNode.Seq(node.items.map { uprightOf(it, bold) })
+        is MathNode.Script -> MathNode.Script(
+            base = uprightOf(node.base, bold),
+            sup = node.sup?.let { uprightOf(it, bold) },
+            sub = node.sub?.let { uprightOf(it, bold) },
+        )
+        is MathNode.Frac -> MathNode.Frac(uprightOf(node.num, bold), uprightOf(node.den, bold))
+        is MathNode.Sqrt -> MathNode.Sqrt(
+            body = uprightOf(node.body, bold),
+            index = node.index?.let { uprightOf(it, bold) },
+        )
+        is MathNode.Big -> MathNode.Big(
+            glyph = node.glyph,
+            sup = node.sup?.let { uprightOf(it, bold) },
+            sub = node.sub?.let { uprightOf(it, bold) },
+        )
+        is MathNode.Delim -> MathNode.Delim(node.open, uprightOf(node.body, bold), node.close)
+        is MathNode.Accent -> MathNode.Accent(uprightOf(node.body, bold), node.kind)
+        is MathNode.Text -> node
     }
 
     private class Parser(private val toks: List<Tok>) {
@@ -565,6 +808,45 @@ object Latex {
         }
 
         private fun parseCommand(name: String, depth: Int): MathNode {
+            /*
+             * 重音命令。放在最前面：`\bar v`、`\bar{v}`、`\overline{AB}` 都要吃
+             * 紧随其后的一个组或一个原子，晚于下面的通用分支处理就会被当成未知命令。
+             */
+            ACCENTS[name]?.let { kind ->
+                return MathNode.Accent(parseGroup(depth + 1), kind)
+            }
+            /*
+             * `\barv` —— 命令名和后面的字母粘在一起。
+             *
+             * 模型写 `\bar v` 时经常漏掉空格或花括号，直接输出 `\barv`。
+             * 严格按命令名解析就会得到「未知命令 barv」，屏幕上是一串源码 ——
+             * 用户截图里正是 `\barv=\frac{v_t+v}{2}`。
+             * 拆前缀比要求模型每次写对更实际。
+             */
+            ACCENTS.entries
+                .filter { name.length > it.key.length && name.startsWith(it.key) }
+                .maxByOrNull { it.key.length }
+                ?.let { (prefix, kind) ->
+                    return MathNode.Accent(symbolsOf(name.substring(prefix.length)), kind)
+                }
+            /*
+             * 字体切换。
+             *
+             * `{\rm I}`、`\mathrm{d}`、`\bf v` 在物理书里到处都是。`\rm` 是声明式
+             * 命令（作用于后面的内容），这里按「吃一个参数」处理 —— 它后面通常
+             * 紧跟 `{...}` 或一个字母，两种写法都能对上。
+             */
+            if (name in UPRIGHT_CMDS || name in BOLD_CMDS) {
+                val body = parseGroup(depth + 1)
+                return uprightOf(body, bold = name in BOLD_CMDS)
+            }
+            /*
+             * 无参数的样式声明与间距命令：本身不占位，吃掉即可。
+             *
+             * 以前它们会落到兜底分支原样显示 —— `\displaystyle` 就这么占了小半行。
+             */
+            if (name in STYLE_CMDS) return MathNode.Text("")
+
             // \frac{}{} —— 两个必选参数
             if (name == "frac" || name == "dfrac" || name == "tfrac") {
                 val num = parseGroup(depth + 1)
@@ -589,7 +871,7 @@ object Latex {
                 }
                 return MathNode.Sqrt(parseGroup(depth + 1), index)
             }
-            if (name == "text" || name == "mathrm" || name == "textbf" || name == "operatorname") {
+            if (name == "text" || name == "textbf" || name == "mbox" || name == "textnormal") {
                 return MathNode.Text(readBraceRaw())
             }
             /*

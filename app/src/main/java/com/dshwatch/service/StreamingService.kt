@@ -80,6 +80,15 @@ class StreamingService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        /*
+         * 留一条痕。
+         *
+         * 崩溃报告里最难受的一种情况是「什么都看不到」：onCreate 里没有成功日志，
+         * 崩溃现场只有一行 ActivityThread$H。1.24.1-beta.35 就是靠「只有看门狗
+         * 的警告、没有任何 startForeground 失败日志」反推出来 onCreate 压根没跑。
+         * 用 remember 而不是 w：它只进崩溃报告的环形缓冲，不进 logcat、不刷屏。
+         */
+        Logx.remember("I/$TAG onCreate")
         enterForegroundQuietly()
     }
 
@@ -211,6 +220,10 @@ class StreamingService : Service() {
             return false
         }
         foregroundedAt = at
+        // 成功路径也留痕：下一次再出「没进前台」的崩溃，就能立刻分清是 onCreate 没跑，
+        // 还是跑了但系统不认 —— 这两者的修法完全不同
+        val spent = if (requestedAt > 0L) at - requestedAt else -1L
+        Logx.remember("I/$TAG 已进前台" + if (spent >= 0) "（请求后 ${spent}ms）" else "")
         return true
     }
 
@@ -456,6 +469,16 @@ class StreamingService : Service() {
         private var startSeq: Int = 0
 
         /**
+         * 发 `startForegroundService()` 用的主线程调度器。
+         *
+         * 必须是主线程：[issueStart] 的注释里写了为什么（系统的死线计时器
+         * 跟应用主线程的忙碌程度无关，只在主线程发请求才能保证服务创建
+         * 紧跟在请求后面）。这里用 `getMainLooper()` 而不是 `Looper.myLooper()`
+         * 的 Handler，是因为调用方大多在后台线程上。
+         */
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        /**
          * 被「后台不许起前台服务」挡掉的那次请求。
          *
          * 「发完消息立刻息屏」在手表上是常态：那一刻 App 已经不算前台，
@@ -544,13 +567,69 @@ class StreamingService : Service() {
             holds.add(reason)
             if (running) return
             running = true
-            val startedAt = SystemClock.elapsedRealtime()
-            requestedAt = startedAt
+            requestedAt = SystemClock.elapsedRealtime()
             val seq = ++startSeq
+
+            /*
+             * 请求**不在这里发**，一律交给主线程的 [issueStart]。
+             *
+             * 这里是全项目最容易踩死的一条边：`start()` 的两个调用来源
+             * （`onStreamingChanged` 走 appScope 的 Dispatchers.Default、
+             * `DeviceControlHub` 的状态收集同样在后台）都不在主线程上。
+             * 从后台线程发出去，系统的计时器当场就开始跑了，而被它要求
+             * 「创建服务」的那条消息却排在主线程队列里 —— 主线程这时可能
+             * 正在跑一整轮 Compose 全量重组。1.24.1-beta.35 的崩溃就是这么来的。
+             *
+             * 排到主线程之后，最坏情况只是「保活晚几秒」，不会再有进程级的崩溃。
+             */
+            val app = context.applicationContext
+            val request = Runnable { issueStart(app, reason, seq) }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                request.run()
+            } else {
+                mainHandler.post(request)
+            }
+        }
+
+        /**
+         * 真正发出 `startForegroundService()`，只允许在主线程执行。
+         *
+         * ## 为什么必须回主线程
+         *
+         * 系统收到 `startForegroundService()` 的那一刻做两件事：
+         * 建 ServiceRecord、起一条 5 秒（API 31 起 10 秒）的计时器；
+         * 同时把「创建服务」的消息投给应用主线程。**计时器跑在 system_server 里，
+         * 跟应用主线程忙不忙毫无关系**，而 onCreate 必须等主线程空出来。
+         *
+         * 界面被系统回收重建时，主线程要跑一整轮 Compose 全量组合（手表上实测几秒）。
+         * 于是：请求已登记 → onCreate 排不上 → 到点 startForeground 当然没调过 →
+         * 主线程收到 `RemoteServiceException`，进程整个没。
+         *
+         * 实测里那条 3 秒看门狗确实醒了两次、也确实按下了 stopService，
+         * 但那时 ServiceRecord 还没 create 出来，stopService 只是把 startRequested
+         * 抹掉，system_server 里那条计时器并没有跟着取消。所以「事后撤销」
+         * 这条路在 API 28 的 ROM 上根本靠不住 —— 唯一稳的办法是**别在错的时机发**。
+         *
+         * 先排主线程就换了个顺序：主线程忙的时候请求还没发出去，系统那边
+         * 连计时器都还没有；等主线程空出来，请求与服务创建这两条消息紧挨着，
+         * 正常都是几十毫秒内进前台（见 [enterForegroundQuietly] 的留痕）。
+         */
+        private fun issueStart(app: Context, reason: String, seq: Int) {
+            // 期间又起了一次新的，或者已经被 release 掉了
+            if (seq != startSeq) return
+            if (!running || holds.isEmpty()) return
+
+            val waited = SystemClock.elapsedRealtime() - requestedAt
+            if (waited > 800L) {
+                // 没有崩溃风险（此时还没发出去），但说明主线程被堵过 —— 值得记一笔
+                Logx.w(TAG, "启动请求在主线程排了 ${waited}ms 才发出")
+            }
+
+            val issuedAt = SystemClock.elapsedRealtime()
             runCatching {
                 ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, StreamingService::class.java).setAction(ACTION_START),
+                    app,
+                    Intent(app, StreamingService::class.java).setAction(ACTION_START),
                 )
             }.onFailure {
                 /*
@@ -569,18 +648,22 @@ class StreamingService : Service() {
                 Logx.w(TAG, "启动失败（$reason）：${it.javaClass.simpleName}: ${it.message}")
             }.onSuccess {
                 // 起来了才需要看门狗；异常已经同步抛出，那种情况系统没登记
-                watchForegroundDeadline(context.applicationContext, seq, startedAt)
+                watchForegroundDeadline(app, seq, issuedAt)
             }
         }
 
         /**
-         * 死线看门狗：3 秒内没进前台，就**主动撤销这次启动**。
+         * 死线看门狗：请求发出后 3 秒还没进前台，就**主动撤销这次启动**。
          *
-         * 系统那头有一条计时器（Android 12 起 10 秒；更早是 5 秒），
-         * 触发时往主线程抛 `ForegroundServiceDidNotStartInTimeException`，
-         * 进程整个没。我们没法延长它，但可以抢在它前面把事情做掉：
-         * `stopService()` 会让 framework 在 `bringDownServiceLocked` 里
-         * `removeMessages(SERVICE_FOREGROUND_TIMEOUT_MSG)`，计时器随之取消。
+         * 这是**兜底**，不是主防线。主防线是 [issueStart] 只在主线程发请求 ——
+         * 只要 onCreate 能跑，几十毫秒就进前台了。会走到这里只剩两种可能：
+         * 通知服务被 ROM 卡住、或者 onCreate 执行完但 `startForeground()` 判失败。
+         *
+         * 撤销的办法是 `stopService()`：framework 在 `bringDownServiceLocked` 里
+         * 会 `removeMessages(SERVICE_FOREGROUND_TIMEOUT_MSG)`，计时器随之取消。
+         * 注意它在 API 28 这类 ROM 上**并不总灵**（ServiceRecord 尚未 create 时，
+         * stopService 只抹掉 startRequested，计时器照走）—— 所以这里同时把
+         * `pendingStart` 立起来，等界面回到前台由 `MainActivity.onResume` 补一次。
          *
          * 代价是这一次没有前台保护，生成退回普通后台进程 —— 但生成本身
          * 跑在 Application 作用域里，不会因为这个停；而进程崩掉是全都完蛋。
@@ -588,22 +671,24 @@ class StreamingService : Service() {
          * 用裸线程而不是 Handler：看门狗要防的正是「主线程不转」，
          * 把它的执行也放在主线程上，等于在堵住的那条路上再排一个队。
          */
-        private fun watchForegroundDeadline(app: Context, seq: Int, startedAt: Long) {
+        private fun watchForegroundDeadline(app: Context, seq: Int, issuedAt: Long) {
             runCatching {
                 Thread {
                     runCatching { Thread.sleep(DEADLINE_GUARD_MS) }
                     // 期间又起了一次新的，这条已经过期，让新的那条去管
                     if (seq != startSeq) return@Thread
-                    if (foregroundedAt >= startedAt) return@Thread
+                    if (foregroundedAt >= issuedAt) return@Thread
                     Logx.w(
                         TAG,
-                        "3 秒未进前台，主动撤销这次启动" +
+                        "请求发出 3 秒仍未进前台，主动撤销这次启动" +
                             "（避免系统的 5/10 秒死线把整个进程带走）",
                     )
                     runCatching {
                         app.stopService(Intent(app, StreamingService::class.java))
                     }
                     running = false
+                    // 还有人在等这次保活：等界面回来再补，撤销不等于放弃
+                    if (holds.isNotEmpty()) pendingStart = true
                 }.apply {
                     isDaemon = true
                     name = "dsh-fgs-deadline"

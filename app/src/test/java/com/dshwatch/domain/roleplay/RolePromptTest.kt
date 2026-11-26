@@ -145,4 +145,29 @@ class RolePromptTest {
         // 不传 opening 时不该凭空多出一段
         assertThat(TavernPrompt.buildWriting(card)).doesNotContain("已经写好的开头")
     }
+
+    /**
+     * 记忆超预算时必须留**最新**的一段。
+     *
+     * 记忆文档是追加写的，最新内容在文件末尾。以前提示词用 `take()` 取开头，
+     * 文档一超预算，最近的摘要就根本进不了上下文 —— 用户反馈的
+     * 「聊着聊着突然翻出很早以前的话」正是它。
+     */
+    @Test
+    fun `超预算的记忆保留最近的一段而不是最早的`() {
+        val memory = buildString {
+            append("# 长期记忆\n\n")
+            repeat(40) { i ->
+                append("## 2026-11-22 10:").append(i.toString().padStart(2, '0')).append('\n')
+                append("第 ").append(i).append(" 段记忆").append("旧".repeat(200)).append("\n\n")
+            }
+            append("## 2026-11-22 12:20\n刚刚聊到要去看海。\n")
+        }
+        val p = TavernPrompt.build(sampleCard(), memory = memory)
+
+        // 最新那段必须在
+        assertThat(p).contains("刚刚聊到要去看海")
+        // 最早的那段应当被裁掉
+        assertThat(p).doesNotContain("第 0 段记忆")
+    }
 }
