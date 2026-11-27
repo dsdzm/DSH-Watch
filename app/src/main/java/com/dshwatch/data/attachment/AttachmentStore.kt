@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.dshwatch.core.Ids
 import com.dshwatch.domain.attachment.PdfText
+import com.dshwatch.domain.files.UriStreams
 import com.dshwatch.domain.model.Attachment
 import com.dshwatch.domain.model.AttachmentKinds
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +68,7 @@ object AttachmentStore {
             val dir = File(root(appFilesDir), id).apply { mkdirs() }
             val raw = File(dir, safeName(name))
             val bytes = runCatching {
-                context.contentResolver.openInputStream(uri)?.use { input ->
+                UriStreams.open(context, uri)?.use { input ->
                     val out = ByteArrayOutputStream()
                     input.copyTo(out)
                     out.toByteArray()
@@ -261,6 +262,10 @@ object AttachmentStore {
     private fun queryMeta(context: Context, uri: Uri): Pair<String, Long> {
         var name = uri.lastPathSegment?.substringAfterLast('/').orEmpty()
         var size = -1L
+        // 内置浏览器给的是 file://，没有 ContentProvider 可查 —— 走统一工具
+        if (uri.scheme == "file") {
+            return UriStreams.displayName(context, uri).orEmpty().ifBlank { "file" } to size
+        }
         runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { c ->
                 if (c.moveToFirst()) {

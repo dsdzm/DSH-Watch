@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,13 +30,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -52,7 +60,10 @@ import com.dshwatch.ui.components.WatchGhostButton
 import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.components.glassSurface
 import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.theme.LocalDarkTheme
+import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.media.MediaLoader
 import com.dshwatch.ui.wear.WearList
 import com.dshwatch.util.Fmt
 import kotlinx.coroutines.Dispatchers
@@ -84,15 +95,12 @@ import java.io.File
  *
  * @param workspace 应用工作空间目录，永远可读，是没授权时的保底起点
  * @param onPick 选中一个文件。调用方负责读它（[com.dshwatch.data.attachment.AttachmentStore]）
- * @param onSystemPicker 非空时在列表末尾给一个「用系统选择器」的出口 ——
- *   内置读不到的目录（Android 11+ 没授权时很常见）还能走 SAF 碰碰运气，反之亦然
  */
 @Composable
 fun FileBrowserPanel(
     workspace: File?,
     onClose: () -> Unit,
     onPick: (File) -> Unit,
-    onSystemPicker: (() -> Unit)? = null,
     /**
      * 只留下满足条件的文件（目录永远保留）。
      *
@@ -173,22 +181,47 @@ fun FileBrowserPanel(
     }
 
     /*
-     * 面板自己铺一层不透明底。
+     * 面板的底：一整块磨砂玻璃，而不是一张贴纸。
      *
      * 玻璃主题里 `colorScheme.background` 是 **Transparent** —— 各页面的根
-     * `background()` 等于「让位」，真正的不透明底由 DshWatchTheme 在最下面
-     * 连同两团色晕一起画。这在导航页上没问题（底下就是那层底），但面板是
-     * **盖在输入页上**的：让位的结果是输入框、快捷指令、发送按钮全透上来，
-     * 看起来像两个界面叠在一起。所以这里自己铺实底 ——
-     * 玻璃主题用 surface（近黑 / 浅灰），其它主题沿用原背景色。
+     * `background()` 等于「让位」，不透明底由 DshWatchTheme 在最下面连同色晕一起画。
+     * 面板盖在别的页面之上，让位的结果是输入框、发送按钮全透上来。所以它得自己铺底。
+     *
+     * 以前铺的是 `scheme.surface`（近黑 / 浅灰）—— 一整块实色，观感上像把
+     * 屏幕切掉一块再糊上一张纸，和满屏玻璃完全不搭。现在换成同一套材质：
+     *
+     *  1. `glassSurface` 按整屏尺寸采一块**壁纸的糊影**画上来（玻璃主题下有效），
+     *     面板因此也是「毛」的，滚动时糊影还会跟着走；
+     *  2. 上面压一层 scrim —— 深色 0.42 黑 / 浅色 0.58 白。**这层不能省**：
+     *     玻璃是半透明的，底下的页面正文会透上来，两层字叠在一起就是脏的。
+     *     scrim 让壁纸的明暗仍然看得见，底下的字读不出来。
+     *
+     * 非玻璃主题没有这套材质（`glassSurface` 此时直接铺不透明的
+     * surfaceContainerHigh），所以 scrim 给透明，免得叠成两层底、颜色发死。
      */
     val scheme = MaterialTheme.colorScheme
     val solid = if (scheme.background.alpha < 0.05f) scheme.surface else scheme.background
+    val glass = LocalGlass.current
+    val scrim = when {
+        !glass -> Color.Transparent
+        LocalDarkTheme.current -> Color.Black.copy(alpha = 0.42f)
+        else -> scheme.surface.copy(alpha = 0.58f)
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(solid)
+            .then(
+                if (glass) {
+                    Modifier.glassSurface(
+                        shape = RectangleShape,
+                        cornerRadius = 0.dp,
+                    )
+                } else {
+                    Modifier.background(solid)
+                },
+            )
+            .background(scrim)
             /*
              * 把空白处的点击吃掉。
              *
@@ -292,7 +325,12 @@ fun FileBrowserPanel(
                                     }
                                     items(shown.size, key = { shown[it].file.absolutePath }) { i ->
                                         val node = shown[i]
-                                        FileRow(node = node, zh = zh) {
+                                        FileRow(
+                                            node = node,
+                                            zh = zh,
+                                            /* 挑图片时给缩略图 —— 只有文件名的话，「选头像」等于盲选 */
+                                            preview = fileFilter != null,
+                                        ) {
                                             if (node.isDir) {
                                                 stack.add(node.file)
                                             } else if (!DeviceFiles.canOpen(node.file)) {
@@ -324,16 +362,6 @@ fun FileBrowserPanel(
                             }
                         }
 
-                        if (onSystemPicker != null) {
-                            item(key = "__system__") {
-                                WatchGhostButton(
-                                    text = if (zh) "用系统文件选择器" else "System file picker",
-                                    modifier = Modifier.padding(top = 2.dp),
-                                    onClick = onSystemPicker,
-                                )
-                            }
-                        }
-
                         item(key = "__hint__") {
                             HintText(
                                 if (fileFilter != null) {
@@ -359,7 +387,13 @@ fun FileBrowserPanel(
 }
 
 @Composable
-private fun FileRow(node: FileNode, zh: Boolean, onClick: () -> Unit) {
+private fun FileRow(
+    node: FileNode,
+    zh: Boolean,
+    /** 挑图片时画缩略图。选头像 / 背景靠文件名是盲选 */
+    preview: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -371,11 +405,15 @@ private fun FileRow(node: FileNode, zh: Boolean, onClick: () -> Unit) {
             .padding(start = 10.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = iconOf(node),
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.width(20.dp),
-        )
+        if (preview && !node.isDir && isImageFile(node.name)) {
+            FileThumb(file = node.file)
+        } else {
+            Text(
+                text = iconOf(node),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.width(20.dp),
+            )
+        }
         Spacer(Modifier.width(6.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -582,3 +620,62 @@ private fun iconOf(node: FileNode): String {
         else -> "📄"
     }
 }
+
+/** 缩略图边长。行高约 50dp，留一圈边距刚好不顶到圆角 */
+private val THUMB_SIZE = 36.dp
+
+/** 解码尺寸（px）。手表密度约 2x，36dp ≈ 72px，取 96 让高分屏也不糊 */
+private const val THUMB_PX = 96
+
+/**
+ * 一个图片文件的缩略图。
+ *
+ * ## 为什么要它
+ *
+ * 「选头像」「选背景」这类操作，靠 `IMG_20241127_184312.jpg` 是选不出来的 ——
+ * 用户脑子里装的是画面，不是文件名。系统相册之所以好用，就是因为它给预览。
+ *
+ * ## 尺寸与缓存
+ *
+ * 解码交给 [MediaLoader]（它自己带 LRU 与按目标尺寸降采样）：36dp 的图
+ * 解到 96px 只有几十 KB，滚动时丢缓存重解也只是一次几十微秒的读。
+ * 不自己再搞一层缓存，是因为那层缓存会跟着列表一起活下去 ——
+ * 一个文件浏览器打开一次就常驻几百 KB，不值。
+ *
+ * 解码中给同尺寸的占位块：不给的话行高会从「一行字」跳到「一行字 + 图」，
+ * 滚动时整列都在抖。
+ */
+@Composable
+private fun FileThumb(file: File) {
+    val bitmap by produceState<ImageBitmap?>(null, file.absolutePath) {
+        value = runCatching { MediaLoader.load(file.absolutePath, THUMB_PX) }.getOrNull()
+    }
+    val shape = RoundedCornerShape(9.dp)
+    val img = bitmap
+    if (img == null) {
+        Box(
+            modifier = Modifier
+                .size(THUMB_SIZE)
+                .glassSurface(shape = shape, cornerRadius = 9.dp)
+                .padding(0.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = "🖼", style = MaterialTheme.typography.labelSmall)
+        }
+    } else {
+        Image(
+            bitmap = img,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(THUMB_SIZE)
+                .clip(shape),
+        )
+    }
+}
+
+/** 只看扩展名。读魔数要开文件，列表里几十行一起读会让滚动变成幻灯片 */
+private fun isImageFile(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase() in setOf(
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif",
+    )

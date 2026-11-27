@@ -1,8 +1,6 @@
 package com.dshwatch.ui.screens.settings
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,7 +16,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.dshwatch.core.Logx
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.ui.components.GlassDialog
 import com.dshwatch.ui.components.GlassDialogButton
@@ -27,10 +24,16 @@ import com.dshwatch.ui.components.SwitchRow
 import com.dshwatch.ui.components.WatchSlider
 import com.dshwatch.ui.theme.CustomBackground
 import kotlinx.coroutines.launch
-import java.io.File
 
 /**
  * 自定义背景的入口。
+ *
+ * ## 只有一个「选择图片」
+ *
+ * 曾经给过两个入口（系统相册 / 内置浏览器）。那是上一版的临时办法 ——
+ * 为了让华为手表不闪退，多加了一条路，结果同一件事有两个按钮，用户还得
+ * 自己判断点哪个。现在选哪条路由设置里的「用内置文件浏览器」统一决定
+ * （见 [com.dshwatch.ui.screens.files.rememberFilePicking]），这里只需要一个按钮。
  *
  * ## 为什么选完图不立刻关掉弹窗
  *
@@ -40,41 +43,25 @@ import java.io.File
  * ## 处理期间禁止关闭
  *
  * 解码一张照片在手表上要几百毫秒到一秒。这段时间里如果用户点了外面，
- * 协程还在跑、设置还在改，而用户以为「没选成功又点了一次」—— 最后两张图
- * 都写进磁盘，设置指向后一张。所以 busy 时把 dismiss 挡掉，只留一句「正在处理」。
+ * 协程还在跑、设置还在改，而用户以为「没选成功又点了一次」——
+ * 最后两张图都写进磁盘，设置指向后一张。所以 busy 时把 dismiss 挡掉。
  *
- * ## 两条选图通路，**都必须有**
+ * ## 为什么浏览器由调用方打开
  *
- * | 入口 | 走什么 |
- * |---|---|
- * | 从相册选 | `ACTION_OPEN_DOCUMENT`，能直接翻系统相册 / 文件管理器 |
- * | 从文件里挑 | 应用内置的 [com.dshwatch.ui.screens.files.FileBrowserPanel] |
- *
- * 第二条不是锦上添花：一部分手表 ROM（华为手表是典型）**把文件管理器整个裁掉**，
- * 没有任何 Activity 响应 `ACTION_OPEN_DOCUMENT`。`ActivityResultLauncher.launch()`
- * 此时抛 `ActivityNotFoundException`，而 Compose 的 launcher 不会替你接住 ——
- * 用户点「选择图片」，App 直接闪退。附件与插件导入早就为这个坑做了兜底
- * （见 `DeviceFiles` 的注释），只有这里漏了，所以出现「点了就崩」。
- *
- * 现在 `launch()` 包在 `runCatching` 里：失败时**不是**弹一句「不支持」，
- * 而是直接切到内置浏览器 —— 用户的目标是选一张图，不是知道哪条路不通。
- *
- * ## 为什么内置浏览器画在外层
- *
- * 它是整屏面板（`WatchScaffold` + 不透明底），而本弹窗是一个独立 Window 的
- * `Dialog`。塞进 Dialog 的内容区只会被 `maxContentHeight` 裁成一条；即使不裁，
- * Dialog 的窗口也在面板之上，面板会被整个挡住。所以由调用方在页面层托管：
- * 打开面板前先收起弹窗，选完再把文件递回来（[picked]）。
+ * 本弹窗是一个独立 Window 的 `Dialog`，层级高于 Activity 的内容。内置浏览器
+ * 挂在 Activity 内容里（见 [com.dshwatch.ui.screens.files.FileBrowserHost]）——
+ * 它会被弹窗整块挡住。所以顺序必须是「先收起弹窗，再开浏览器，选完把文件
+ * 递回来重新打开弹窗」（[picked] / [onPickedConsumed]）。
  */
 @Composable
 internal fun BackgroundDialog(
     settings: AppSettings,
     update: Update,
     onDismiss: () -> Unit,
-    /** 内置浏览器选中的文件。本弹窗消费完会调 [onPickedConsumed] 清空 */
-    picked: File? = null,
+    /** 挑中的图。本弹窗消费完会调 [onPickedConsumed] 清空 */
+    picked: Uri? = null,
     onPickedConsumed: () -> Unit = {},
-    /** 收起弹窗、打开内置浏览器。由调用方实现（见文件头最后一段） */
+    /** 收起弹窗并唤出选择器。由调用方实现（见文件头最后一段） */
     onOpenBrowser: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -86,8 +73,10 @@ internal fun BackgroundDialog(
     val has = settings.customBackground.isNotBlank()
 
     /**
-     * 把一张图导入进来。系统选择器给 URI，内置浏览器给 File ——
-     * 两条都收敛到这一个函数，后面的「写盘 / 换设置 / 删旧图」只有一份。
+     * 把一张图导入进来。
+     *
+     * 系统选择器给 `content://`，内置浏览器给 `file://` —— 两条都收敛到这一个
+     * 函数，后面的「写盘 / 换设置 / 删旧图」只有一份。
      */
     fun importFrom(uri: Uri) {
         if (busy) return
@@ -116,14 +105,10 @@ internal fun BackgroundDialog(
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importFrom(uri)
-    }
-
-    // 内置浏览器选完把文件递回来：弹窗会重新出现，这里直接把导入跑起来
+    // 选完把文件递回来：弹窗重新出现，这里直接把导入跑起来
     LaunchedEffect(picked) {
         if (picked != null) {
-            importFrom(Uri.fromFile(picked))
+            importFrom(picked)
             onPickedConsumed()
         }
     }
@@ -146,22 +131,11 @@ internal fun BackgroundDialog(
 
             GlassDialogRow(
                 title = if (has) "更换图片" else "选择图片",
-                subtitle = "调用系统相册 / 文件管理器",
-                onClick = {
-                    /*
-                     * **必须接住**：没有 App 响应 ACTION_OPEN_DOCUMENT 时
-                     * `launch()` 抛 ActivityNotFoundException，未捕获就是闪退。
-                     * 失败不解释、直接给内置浏览器 —— 用户要的是选到图。
-                     */
-                    val ok = runCatching { picker.launch(arrayOf("image/*")) }
-                        .onFailure { Logx.w("Background", "无系统选择器：${it.message}") }
-                        .isSuccess
-                    if (!ok) onOpenBrowser()
+                subtitle = if (settings.builtinFilePicker) {
+                    "在应用内列出图片，不需要系统文件管理器"
+                } else {
+                    "打开系统相册 / 文件管理器"
                 },
-            )
-            GlassDialogRow(
-                title = "从文件里挑",
-                subtitle = "内置浏览器，系统没有相册也能用",
                 onClick = onOpenBrowser,
             )
             if (has) {

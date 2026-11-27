@@ -2,9 +2,6 @@ package com.dshwatch.ui.screens.fish
 
 import android.content.Context
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,6 +40,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.files.UriStreams
+import com.dshwatch.ui.screens.files.rememberFilePicking
+import com.dshwatch.ui.theme.CustomBackground
 import com.dshwatch.domain.fish.FishSkin
 import com.dshwatch.ui.components.HintText
 import com.dshwatch.ui.components.SectionHeader
@@ -119,12 +119,12 @@ fun FishSkinScreen(
         }
     }
 
-    val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) importFrom(uri, "avatar")
-    }
-    val pickBackground = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) importFrom(uri, "background")
-    }
+    /*
+     * 选图走 rememberFilePicking：设置里开着「用内置文件浏览器」就在应用内挑，
+     * 关着才开系统相册 / 文件管理器。以前这里写死 PickVisualMedia，
+     * 于是「导入文件」的路径又多了一个不受那个开关管的例外。
+     */
+    val picking = rememberFilePicking()
 
     WatchScaffold(title = "她的样子", subtitle = "只改这一页", onBack = { nav.pop() }) {
         Column(
@@ -211,11 +211,10 @@ fun FishSkinScreen(
                             text = "选一张",
                             enabled = !busy,
                             onClick = {
-                                runCatching {
-                                    pickAvatar.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                    )
-                                }
+                                picking.pick(
+                                    mime = "image/*",
+                                    filter = { CustomBackground.looksLikeImage(it) },
+                                ) { uri -> importFrom(uri, "avatar") }
                             },
                         )
                         if (stored.avatar.isNotBlank()) {
@@ -242,11 +241,10 @@ fun FishSkinScreen(
                     text = if (stored.background.isBlank()) "选一张背景" else "换一张背景",
                     enabled = !busy,
                     onClick = {
-                        runCatching {
-                            pickBackground.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                            )
-                        }
+                        picking.pick(
+                            mime = "image/*",
+                            filter = { CustomBackground.looksLikeImage(it) },
+                        ) { uri -> importFrom(uri, "background") }
                     },
                 )
                 if (stored.background.isNotBlank()) {
@@ -417,7 +415,7 @@ private fun ColorRow(current: Color?, onPick: (Long) -> Unit) {
 private fun copyToCache(context: Context, uri: Uri): File? = runCatching {
     val dir = File(context.cacheDir, "fish-pick").apply { mkdirs() }
     val out = File(dir, "pick-${System.currentTimeMillis()}")
-    context.contentResolver.openInputStream(uri)?.use { input ->
+    UriStreams.open(context, uri)?.use { input ->
         out.outputStream().use { output -> input.copyTo(output, 64 * 1024) }
     } ?: return@runCatching null
     // 扩展名丢不了：store 按扩展名判断"能不能当图"
@@ -430,9 +428,6 @@ private fun copyToCache(context: Context, uri: Uri): File? = runCatching {
     out
 }.getOrNull()
 
-private fun queryDisplayName(context: Context, uri: Uri): String = runCatching {
-    context.contentResolver.query(uri, null, null, null, null)?.use { c ->
-        val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-        if (idx >= 0 && c.moveToFirst()) c.getString(idx).orEmpty() else ""
-    }.orEmpty()
-}.getOrDefault("")
+/* file:// 走 UriStreams —— 内置浏览器给的是真实路径，查 ContentProvider 是白查 */
+private fun queryDisplayName(context: Context, uri: Uri): String =
+    UriStreams.displayName(context, uri).orEmpty()

@@ -70,9 +70,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
@@ -87,6 +84,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.dshwatch.core.AppContainer
+import com.dshwatch.ui.screens.files.rememberFilePicking
+import com.dshwatch.ui.theme.CustomBackground
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.model.ChatMessage
 import com.dshwatch.domain.model.MessageStatus
@@ -389,12 +388,13 @@ fun FishPhoneScreen(
         }
     }
 
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) addUri(uri)
-    }
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) addUri(uri)
-    }
+    /*
+     * 附件：两条入口（相册 / 文件）都走 rememberFilePicking。
+     *
+     * 设置里开着「用内置文件浏览器」时，连「相册」也是应用内挑图 ——
+     * 这台设备上未必有能响应图片选择的 Activity，而内置那条一定能用。
+     */
+    val picking = rememberFilePicking()
 
     /*
      * 拍照：和编程页、手表输入页共用 [rememberCameraShot]。
@@ -786,13 +786,15 @@ fun FishPhoneScreen(
             onCamera = { showAttach = false; shoot() },
             onGallery = {
                 showAttach = false
-                runCatching {
-                    pickImage.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                }
+                picking.pick(
+                    mime = "image/*",
+                    filter = { CustomBackground.looksLikeImage(it) },
+                ) { uri -> addUri(uri) }
             },
-            onFile = { showAttach = false; runCatching { pickFile.launch(arrayOf("*/*")) } },
+            onFile = {
+                showAttach = false
+                picking.pick(mime = "*/*") { uri -> addUri(uri) }
+            },
             onDismiss = { showAttach = false },
         )
     }

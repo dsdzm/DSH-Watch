@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.files.UriStreams
+import com.dshwatch.ui.screens.files.rememberFilePicking
 import com.dshwatch.data.history.ArchiveException
 import com.dshwatch.data.history.DeepSeekExporter
 import com.dshwatch.data.history.DeepSeekImporter
@@ -62,7 +64,8 @@ internal fun ColumnScope.DataGroup(container: AppContainer, s: AppStrings) {
             note = ""
             val outcome = runCatching {
                 withContext(Dispatchers.IO) {
-                    val input = context.contentResolver.openInputStream(uri)
+                    // 内置浏览器给的是 file://，直接开流比经 ContentResolver 稳
+                    val input = UriStreams.open(context, uri)
                         ?: throw ArchiveException(ArchiveException.Code.NOT_ARCHIVE, "打不开这个文件")
                     input.use { DeepSeekImporter(context.filesDir, container.conversationStore).import(it) }
                 }
@@ -109,11 +112,17 @@ internal fun ColumnScope.DataGroup(container: AppContainer, s: AppStrings) {
         }
     }
 
-    // 导入：不限 mime。手表与部分 ROM 的文件管理器不认 zip 的类型，
-    // 限死 "application/zip" 会让列表变空，用户以为文件不在那儿
-    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { pendingImport = it }
-    }
+    /*
+     * 导入：走 rememberFilePicking（设置里的「用内置文件浏览器」决定哪条路）。
+     *
+     * mime 给「任意类型」：手表与部分 ROM 的文件管理器不认 zip 的类型，
+     * 限死 `application/zip` 会让列表变空，用户以为文件不在那儿。
+     * 内置那条路才用 filter 收窄 —— 那里我们说了算，只列 .zip 不会误伤。
+     *
+     * 导出必须留在系统 SAF（CreateDocument）：内置浏览器是只读的，
+     * 它没法替你选一个「写到哪里」。
+     */
+    val picking = rememberFilePicking()
     val exportPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -132,8 +141,10 @@ internal fun ColumnScope.DataGroup(container: AppContainer, s: AppStrings) {
             showDivider = true,
             onClick = {
                 if (busy.isEmpty()) {
-                    runCatching { importPicker.launch(arrayOf("*/*")) }
-                        .onFailure { note = "这台设备没有文件选择器" }
+                    picking.pick(
+                        mime = "*/*",
+                        filter = { it.name.endsWith(".zip", ignoreCase = true) },
+                    ) { uri -> pendingImport = uri }
                 }
             },
         )

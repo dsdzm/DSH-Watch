@@ -23,31 +23,68 @@ class BackgroundPickerFallbackTest {
 
     @Test
     fun `系统选择器启动必须捕获 ActivityNotFoundException`() {
-        val body = code("ui/screens/settings/BackgroundDialog.kt")
-        // launch() 会抛异常：不包一层就是闪退，不是「没反应」
-        assertThat(body).contains("runCatching { picker.launch(arrayOf(\"image/*\")) }")
-        // 失败要真的切到内置浏览器 —— 用户的目标是选到图，不是知道哪条路不通
-        assertThat(body).contains("if (!ok) onOpenBrowser()")
+        val body = code("ui/screens/files/FileBrowsing.kt")
+        /*
+         * `launch()` 会**同步**抛异常：华为手表这类 ROM 把文件管理器整个裁掉，
+         * 没有任何 Activity 响应 ACTION_OPEN_DOCUMENT。Compose 的 launcher
+         * 不会替你接住 —— 用户点一下，App 直接崩。
+         *
+         * 上一版把这个坑在「自定义背景」里单独兜了一次，结果是九个入口
+         * 各写一遍、漏了哪一处就崩哪一处。现在只有分派器这一处兜。
+         */
+        assertThat(body).contains("runCatching { launcher.launch(arrayOf(mime)) }")
+        // 兜住之后不能只弹一句「不支持」：用户要的是选到文件
+        assertThat(body).contains("if (!launched)")
+        assertThat(body).contains("FileBrowsing.open(filter)")
     }
 
     @Test
-    fun `弹窗给出内置浏览器入口，面板由页面层托管`() {
+    fun `所有导入入口统一走分派器，不再各自持有系统 launcher`() {
+        /*
+         * 这条是本轮的核心约束：**一个开关管全部**。
+         * 只要有一处又写了 `ActivityResultContracts.OpenDocument()`，
+         * 那个入口就不受设置控制，而且很容易又忘掉 runCatching。
+         */
+        val offenders = listOf(
+            "ui/screens/input/InputScreen.kt",
+            "ui/screens/sessions/SessionsScreen.kt",
+            "ui/screens/settings/DataGroup.kt",
+            "ui/screens/settings/PluginImportDialog.kt",
+            "ui/screens/settings/BackgroundDialog.kt",
+            "ui/screens/fish/FishSkinScreen.kt",
+            "ui/screens/fish/FishPhoneScreen.kt",
+            "ui/phone/PhoneChatScreen.kt",
+        )
+        offenders.forEach { path ->
+            val body = code(path)
+            assertThat(body).doesNotContain("ActivityResultContracts.OpenDocument()")
+            assertThat(body).doesNotContain("ActivityResultContracts.PickVisualMedia()")
+            assertThat(body).doesNotContain("ActivityResultContracts.GetContent()")
+        }
+    }
+
+    @Test
+    fun `面板宿主挂在导航树外，一屏只有一份`() {
+        val root = code("ui/AppRoot.kt")
+        // 挂在页面里的话，面板会跟着转场淡出，而且每个页面都要复制一份调用代码
+        assertThat(root).contains("FileBrowserHost(")
+        assertThat(root).contains("container.workspaceStore.rootDir()")
+
+        // 手机版是另一棵树，同样要挂 —— 不然那边开「内置浏览器」点了没反应
+        val phone = code("ui/phone/PhoneRoot.kt")
+        assertThat(phone).contains("FileBrowserHost(")
+    }
+
+    @Test
+    fun `背景弹窗只有一个选图入口，走开关分派`() {
         val dialog = code("ui/screens/settings/BackgroundDialog.kt")
-        assertThat(dialog).contains("从文件里挑")
+        // 曾经有两个按钮（系统相册 / 内置浏览器），同一件事两个按钮只会让人犹豫
+        assertThat(dialog).doesNotContain("从文件里挑")
         assertThat(dialog).contains("onOpenBrowser")
 
         val screen = code("ui/screens/settings/SettingsGroupScreen.kt")
-        /*
-         * 面板必须在页面层。它是整屏的 WatchScaffold，而弹窗是独立 Window 的
-         * Dialog：塞进内容区会被 maxContentHeight 裁成一条，不裁也会被
-         * Dialog 的窗口整个盖住。
-         */
-        assertThat(screen).contains("FileBrowserPanel(")
-        assertThat(screen).contains("workspace = container.workspaceStore.rootDir()")
-        // 只列目录与图片：让用户在 .txt 里翻、选中才报「不是图片」是最差的体验
-        assertThat(screen).contains("fileFilter = { CustomBackground.looksLikeImage(it) }")
-        // 选完把文件递回弹窗，遮罩滑块还在手边
-        assertThat(screen).contains("picked = backgroundPick")
+        assertThat(screen).contains("picking.pick(")
+        assertThat(screen).contains("filter = { CustomBackground.looksLikeImage(it) }")
     }
 
     @Test

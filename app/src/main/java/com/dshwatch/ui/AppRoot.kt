@@ -258,6 +258,22 @@ fun AppRoot(
                 }
             }
         }
+
+        /*
+         * 内置文件浏览器：屏幕级的浮层，必须挂在**导航树之外**。
+         *
+         * 以前挂在各页面里，于是同一个面板被复制了七八份 —— 其中一处忘了接住
+         * `ActivityNotFoundException`，就是「点自定义背景直接闪退」。现在只有这一份。
+         *
+         * 放在转场外面还解决另一件事：面板不会跟着页面淡入淡出。
+         * 挂页面里的话，用户在面板上点返回会先触发导航动画，面板被一起淡掉。
+         *
+         * 由 [com.dshwatch.ui.screens.files.FileBrowsing] 这个全局状态驱动，
+         * 任何页面（包括 M3E 那一套、包括手机版）只要调 `FilePicking.pick` 就能唤出。
+         */
+        com.dshwatch.ui.screens.files.FileBrowserHost(
+            workspace = remember(container) { container.workspaceStore.rootDir() },
+        )
     }
 }
 

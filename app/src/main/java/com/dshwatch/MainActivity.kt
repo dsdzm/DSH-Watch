@@ -143,6 +143,7 @@ class MainActivity : ComponentActivity() {
                 customBackgroundDim = settings.customBackgroundDim,
                 customBackgroundFrost = settings.customBackgroundFrost,
                 glassBlur = settings.glassBlur,
+                builtinFilePicker = settings.builtinFilePicker,
                 backgroundBlur = settings.backgroundBlur,
                 blurStrength = settings.blurStrength,
                 glassBlurStrength = settings.glassBlurStrength,

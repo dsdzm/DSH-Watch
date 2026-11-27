@@ -1,8 +1,6 @@
 package com.dshwatch.ui.screens.input
 
 import androidx.compose.foundation.background
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,7 +50,7 @@ import com.dshwatch.ui.components.WatchScaffold
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.components.rememberCameraShot
 import com.dshwatch.ui.nav.WatchNavigator
-import com.dshwatch.ui.screens.files.FileBrowserPanel
+import com.dshwatch.ui.screens.files.rememberFilePicking
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.graphics.Color
@@ -95,13 +93,11 @@ fun InputScreen(
     /*
      * 附件。
      *
-     * 两条通路，默认走内置浏览器（见 FileBrowserPanel 的注释：一部分手表 ROM
-     * 根本没有文件管理器，OpenDocument 会静默失败，用户看到的是「点了没反应」）。
-     * 关掉「内置文件浏览器」这个开关就退回系统选择器 —— 有正常文件管理器的设备
-     * 上，系统那套能翻到更远的地方。
+     * 选哪条路由设置里的「用内置文件浏览器」决定（[rememberFilePicking]）：
+     * 开着就在应用内列目录 —— 一部分手表 ROM 根本没有文件管理器，
+     * `OpenDocument` 会静默失败，用户看到的是「点了没反应」；关着就走系统那套，
+     * 有正常文件管理器的设备上能翻到网盘、第三方存储等更多地方。
      *
-     * 用 OpenDocument 而不是 GetContent：前者拿到的 uri 在页面重建后仍然有效
-     * （附件要跟着消息走，用户可能退出输入页再回来），后者只是一次性授权。
      * mime 传「任意类型」：手表上的文件管理器往往不认更细的类别，限死只会让可选文件为空。
      */
     val context = LocalContext.current
@@ -111,7 +107,6 @@ fun InputScreen(
     val attachments = remember { mutableStateListOf<Attachment>() }
     var attachBusy by remember { mutableStateOf(false) }
     var attachNote by remember { mutableStateOf("") }
-    var showBrowser by remember { mutableStateOf(false) }
 
     /** 把一个 uri（系统选择器给的，或内置浏览器给的 file://）读成附件 */
     fun absorb(uri: Uri) {
@@ -131,9 +126,12 @@ fun InputScreen(
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { absorb(it) }
-    }
+    /*
+     * 挑附件：由「用内置文件浏览器」这个开关决定走内置面板还是系统选择器。
+     * 系统那条路不可用时（手表 ROM 把文件管理器裁掉了）会自动退回内置，
+     * 不会再出现「点了没反应」或者闪退。
+     */
+    val picking = rememberFilePicking()
 
     /*
      * 手表上拍照比传文件常见得多（抬手就拍，文件管理器反而难翻）。
@@ -315,17 +313,10 @@ fun InputScreen(
                     },
                     onClick = {
                         if (attachBusy) return@Chip
-                        if (settings.builtinFilePicker) {
-                            // 键盘会盖掉半块表盘，面板要全屏，先收起来
-                            runCatching { keyboard?.hide() }
-                            focusManager.clearFocus()
-                            showBrowser = true
-                        } else {
-                            val launched = runCatching { picker.launch(arrayOf("*/*")) }.isSuccess
-                            if (!launched) {
-                                attachNote = "系统文件选择器不可用，可在设置 → 文件里改用内置浏览器"
-                            }
-                        }
+                        // 键盘会盖掉半块表盘：内置面板要全屏，系统那张列表也只露一条
+                        runCatching { keyboard?.hide() }
+                        focusManager.clearFocus()
+                        picking.pick(mime = "*/*") { uri -> absorb(uri) }
                     },
                 )
                 attachments.forEach { att ->
@@ -386,30 +377,6 @@ fun InputScreen(
          * remember，一 push 就没了。用户挑完文件回来发现自己打的半句话不见了，
          * 这比「没有文件管理器」还难受。面板留在同一棵组合里，什么都不丢。
          */
-        if (showBrowser) {
-            FileBrowserPanel(
-                workspace = container.workspaceStore.rootDir(),
-                onClose = { showBrowser = false },
-                onPick = { file ->
-                    showBrowser = false
-                    absorb(Uri.fromFile(file))
-                },
-                /*
-                 * 系统选择器的出口。
-                 *
-                 * `launch()` 在没有任何 App 响应 ACTION_OPEN_DOCUMENT 时会抛
-                 * ActivityNotFoundException —— 这正是本功能要兜的那个场景，
-                 * 所以必须接住：否则用户点了「用系统选择器」，App 直接崩。
-                 */
-                onSystemPicker = {
-                    val launched = runCatching { picker.launch(arrayOf("*/*")) }.isSuccess
-                    showBrowser = false
-                    if (!launched) {
-                        attachNote = "这台设备没有可用的系统文件选择器，用内置浏览器选就行"
-                    }
-                },
-            )
-        }
     }
 }
 

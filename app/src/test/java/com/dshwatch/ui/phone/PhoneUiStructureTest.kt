@@ -162,8 +162,14 @@ class PhoneUiStructureTest {
         // 拍照实现搬进了公共组件（手表输入页也用同一份），
         // 这里改断言调用点，具体 contract 由 CameraShot 自己保证
         assertThat(chat).contains("rememberCameraShot(")
-        assertThat(chat).contains("PickVisualMedia")
-        assertThat(chat).contains("ActivityResultContracts.OpenDocument()")
+        /*
+         * 相册与文件都走 rememberFilePicking，不再各自持有 ActivityResultLauncher：
+         * 走哪条路由设置里的「用内置文件浏览器」决定，而系统那条路唤不起来时
+         * 分派器会退回内置面板 —— 这两件事各写一遍就会各错一遍。
+         */
+        assertThat(chat).contains("rememberFilePicking()")
+        assertThat(chat).contains("picking.pick(")
+        assertThat(chat).doesNotContain("ActivityResultContracts.OpenDocument()")
         assertThat(chrome).contains("fun PhoneAttachSheet(")
         assertThat(chrome).contains("拍照")
         assertThat(chrome).contains("相册")

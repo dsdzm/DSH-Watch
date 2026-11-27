@@ -592,6 +592,16 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.15",
+            date = "2026-11-27",
+            highlights = listOf(
+                "「用内置文件浏览器」变成全 App 的总开关：附件、背景、插件、归档、皮肤、配图都跟它走",
+                "内置文件浏览器界面接入玻璃材质，透出模糊的背景，不再是盖上去的一块实色",
+                "选图片时给缩略图，选头像 / 背景不用再靠文件名盲猜",
+                "关掉开关若系统里没有文件管理器，会自动退回内置，不会闪退也不会「点了没反应」",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.14",
             date = "2026-11-27",
             highlights = listOf(

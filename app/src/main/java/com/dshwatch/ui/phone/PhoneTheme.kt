@@ -141,6 +141,8 @@ fun PhoneTheme(
         // 手机版不提供「玻璃」与「M3E」：这两项是手表界面的材质与组件体系，
         // 手机上它们只会在少数共用组件里生效，让界面半玻璃半纯色，比不做更糟
         LocalGlass provides false,
+        // 挑文件的开关与材质无关，手机版照常提供
+        com.dshwatch.ui.theme.LocalBuiltinFilePicker provides settings.builtinFilePicker,
         LocalDarkTheme provides dark,
         LocalUiStyle provides UiStyles.CLASSIC,
         LocalPhoneUi provides true,

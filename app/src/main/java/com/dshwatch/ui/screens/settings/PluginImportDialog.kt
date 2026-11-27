@@ -4,8 +4,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dshwatch.data.workspace.WorkspaceStore
+import com.dshwatch.domain.files.UriStreams
 import com.dshwatch.domain.plugin.PluginArchive
 import com.dshwatch.domain.plugin.PluginImporter
 import com.dshwatch.domain.plugin.PluginLoader
@@ -75,6 +74,17 @@ fun PluginImportDialog(
     workspace: WorkspaceStore,
     onDismiss: () -> Unit,
     onImported: (PluginManifest) -> Unit,
+    /**
+     * 浏览器挑回来的包。
+     *
+     * 本弹窗是独立 Window 的 Dialog，会把挂在 Activity 内容里的内置浏览器整块
+     * 挡住 —— 所以点「选择文件」时必须先关弹窗。选完由调用方把 uri 递回来，
+     * 弹窗重新出现并直接开始解析（见 [onPickedConsumed]）。
+     */
+    picked: Uri? = null,
+    onPickedConsumed: () -> Unit = {},
+    /** 收起弹窗并唤出选择器。由调用方实现（同 [picked] 的说明） */
+    onBrowse: () -> Unit = {},
 ) {
     var mode by remember { mutableStateOf(Mode.MENU) }
     var url by remember { mutableStateOf("") }
@@ -135,19 +145,15 @@ fun PluginImportDialog(
         }
     }
 
-    /*
-     * 系统文件选择器。
-     *
-     * mime 给「任意类型」：`.tgz` 在不同 ROM 上被标成 application/gzip、
-     * application/x-compressed-tar、application/octet-stream 的都有，
-     * 限死任何一个类别都会让文件变灰选不中。真正的过滤在解析阶段做。
-     */
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { u ->
+
+    // 浏览器选完把文件递回来：弹窗重新出现，这里直接开始解析
+    LaunchedEffect(picked) {
+        if (picked != null) {
             absorb(
-                open = { context.contentResolver.openInputStream(u) },
-                name = displayName(context, u) ?: "选中的文件",
+                open = { UriStreams.open(context, picked) },
+                name = UriStreams.displayName(context, picked) ?: "选中的文件",
             )
+            onPickedConsumed()
         }
     }
 
@@ -218,9 +224,7 @@ fun PluginImportDialog(
                         enabled = !busy,
                         onClick = {
                             error = null
-                            runCatching { picker.launch(arrayOf("*/*")) }.onFailure {
-                                error = "这台手表没有可用的文件管理器，改用「工作空间」。"
-                            }
+                            onBrowse()
                         },
                     )
                     GlassDialogRow(
@@ -414,7 +418,7 @@ fun PluginRemoveDialog(
 private enum class Mode { MENU, URL, WORKSPACE }
 
 /** 工作空间列表里只显示可能是插件的文件 */
-private fun isPluginFile(path: String): Boolean {
+internal fun isPluginFile(path: String): Boolean {
     val p = path.lowercase()
     return p.endsWith(".json") || p.endsWith(".tgz") || p.endsWith(".tar.gz")
 }
@@ -424,12 +428,6 @@ private fun humanSize(bytes: Long): String = when {
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"
     else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
 }
-
-/** SAF 给的文件名，只用于报错时指名道姓 */
-private fun displayName(context: Context, uri: Uri): String? = runCatching {
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-}.getOrNull()
 
 /**
  * 读剪贴板。

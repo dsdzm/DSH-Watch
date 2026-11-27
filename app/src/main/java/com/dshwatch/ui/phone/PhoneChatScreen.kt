@@ -1,9 +1,6 @@
 package com.dshwatch.ui.phone
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.ui.screens.files.rememberFilePicking
+import com.dshwatch.ui.theme.CustomBackground
 import com.dshwatch.data.attachment.AttachmentStore
 import com.dshwatch.ui.components.rememberCameraShot
 import com.dshwatch.domain.Choices
@@ -261,20 +260,14 @@ fun PhoneChatScreen(
         }
     }
 
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) addUri(uri)
-    }
-
     /*
-     * 相册走系统照片选择器（Android 13 起是进程外的那一个）。
+     * 附件：两条入口（相册 / 文件）都走 rememberFilePicking。
      *
-     * 好处是**不申请读存储权限**：用户选哪张，我们只拿到那一张的 uri。
-     * 老系统上这个 contract 会自动退化成 `ACTION_OPEN_DOCUMENT`，
-     * 所以低版本也能用，不需要 `if (SDK >= 33)` 分支。
+     * 设置里开着「用内置文件浏览器」时连「相册」也走应用内挑图 ——
+     * 那台设备上未必有能响应图片选择的 Activity，而内置那条一定能用。
+     * 关着时仍然是系统那套（照片选择器 / 文档选择器），一次只授权一张图。
      */
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) addUri(uri)
-    }
+    val picking = rememberFilePicking()
 
     /*
      * 拍照：直接拉起系统相机，回来就是一张原图。
@@ -481,11 +474,15 @@ fun PhoneChatScreen(
             onCamera = { showAttach = false; shoot() },
             onGallery = {
                 showAttach = false
-                runCatching {
-                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
+                picking.pick(
+                    mime = "image/*",
+                    filter = { CustomBackground.looksLikeImage(it) },
+                ) { uri -> addUri(uri) }
             },
-            onFile = { showAttach = false; runCatching { pickFile.launch(arrayOf("*/*")) } },
+            onFile = {
+                showAttach = false
+                picking.pick(mime = "*/*") { uri -> addUri(uri) }
+            },
             onDismiss = { showAttach = false },
         )
     }

@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
+import com.dshwatch.domain.files.UriStreams
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -192,15 +193,15 @@ object BiliImages {
      * 还会被 B站 的图床压缩得比我们自己压的还糊。
      */
     fun saveLocal(context: Context, uri: Uri): Boolean = runCatching {
-        val resolver = context.contentResolver
+        // 内置浏览器给的是 file://，经 ContentResolver 在部分 ROM 上打不开
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        UriStreams.open(context, uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0) return false
 
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight, 1440)
         }
-        val src = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+        val src = UriStreams.open(context, uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
             ?: return false
         val scaled = if (src.width > 1440) {
             val h = (src.height * 1440f / src.width).toInt().coerceAtLeast(1)

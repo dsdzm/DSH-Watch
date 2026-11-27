@@ -124,6 +124,19 @@ val LocalBackdropSize = staticCompositionLocalOf { IntSize.Zero }
 val LocalBackdropDim = staticCompositionLocalOf { 0f }
 
 /**
+ * 设置里的「用内置文件浏览器」。
+ *
+ * 挑文件的入口有九处（附件、背景、插件、归档、皮肤、配图……），它们分散在
+ * 各种层级的 Composable 里，有的连 settings 都拿不到。把这个开关放进
+ * CompositionLocal，`rememberFilePicking()` 就能就地读，不必给每层函数
+ * 加一个透传参数 —— 那种改法只要漏一层就编不过，加新入口时又要再改一遍。
+ *
+ * 默认 true：`ACTION_OPEN_DOCUMENT` 依赖设备上真的有文件管理器，
+ * 一部分手表 ROM 把它裁掉了，出厂默认走内置更不容易「点了没反应」。
+ */
+val LocalBuiltinFilePicker = staticCompositionLocalOf { true }
+
+/**
  * 背景模糊的读取宽度。
  *
  * 384 ≈ 屏宽的 0.93 倍，铺满时几乎 1:1，糊多少像素在屏幕上就是多少像素 ——
@@ -336,6 +349,13 @@ fun DshWatchTheme(
      * （见 [LocalFrostPhoto]）。所以「壁纸清晰、玻璃发毛」是成立的。
      */
     glassBlur: Boolean = false,
+    /**
+     * 设置里的「用内置文件浏览器」。
+     *
+     * 只做一件事：通过 [LocalBuiltinFilePicker] 告诉 [com.dshwatch.ui.screens.files.rememberFilePicking]
+     * 该走哪条路。不影响任何绘制。
+     */
+    builtinFilePicker: Boolean = true,
     /**
      * 背景模糊强度，0~1，0.5 = 标准。
      *
@@ -627,6 +647,7 @@ fun DshWatchTheme(
         LocalGlassBlur provides glassFrost,
         LocalGlassDim provides dim,
         LocalFrostPhoto provides frostPhoto,
+        LocalBuiltinFilePicker provides builtinFilePicker,
         LocalBackdropDim provides customBackgroundDim.coerceIn(0f, MAX_BACKDROP_DIM),
         LocalBackdropSize provides remember(scaledProfile) {
             IntSize(scaledProfile.screenWidthPx, scaledProfile.screenHeightPx)

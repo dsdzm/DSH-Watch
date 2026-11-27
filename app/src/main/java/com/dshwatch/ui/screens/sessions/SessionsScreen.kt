@@ -1,7 +1,6 @@
 package com.dshwatch.ui.screens.sessions
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import android.widget.Toast
 import com.dshwatch.core.AppContainer
+import com.dshwatch.domain.files.UriStreams
+import com.dshwatch.ui.screens.files.rememberFilePicking
 import com.dshwatch.domain.ChatTranscript
 import com.dshwatch.domain.TranscriptFile
 import com.dshwatch.domain.model.Conversation
@@ -914,15 +915,25 @@ internal fun ImportDialog(
         }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    /*
+     * 挑 txt。
+     *
+     * 走 rememberFilePicking：设置里开着「用内置文件浏览器」就在应用内挑，
+     * 关着才唤起系统那套（唤起失败会自动退回内置，不会崩）。
+     * 读文件统一走 UriStreams —— 内置给的是 file://，直接开流比经
+     * ContentResolver 稳。
+     */
+    val picking = rememberFilePicking()
+
+    fun loadFrom(uri: Uri) {
         scope.launch {
             busy = true
             val loaded = withContext(Dispatchers.IO) {
                 val raw = runCatching {
-                    context.contentResolver.openInputStream(uri)?.let { TranscriptFile.read(it) }
+                    UriStreams.open(context, uri)?.let { TranscriptFile.read(it) }
                 }.getOrNull()
-                if (raw == null) null else displayNameOf(context, uri) to raw
+                if (raw == null) null else
+                    (UriStreams.displayName(context, uri) ?: "选中的文件") to raw
             }
             busy = false
             if (loaded == null) {
@@ -952,7 +963,7 @@ internal fun ImportDialog(
                 GlassDialogRow(
                     title = if (busy) "正在读取…" else "选择 TXT 文件",
                     subtitle = "从系统文件里挑",
-                    onClick = { if (!busy) picker.launchSafely { notice = it } },
+                    onClick = { if (!busy) picking.pick(mime = "*/*") { loadFrom(it) } },
                 )
 
                 if (files.isNotEmpty()) {
@@ -1049,40 +1060,6 @@ internal fun ImportDialog(
             }
         },
     )
-}
-
-/**
- * 唤起系统文件选择器。
- *
- * 把 `launch` 单独包起来是因为它**同步抛异常**：Wear OS 上不少机型根本没有
- * DocumentsUI，`ActivityNotFoundException` 会直接穿透到 Compose 的事件循环，
- * 表现为「点了没反应，日志里一堆红」。这里改成给一句人话提示，
- * 指向下面那份工作空间列表 —— 那才是手表的常规路径。
- */
-private fun androidx.activity.result.ActivityResultLauncher<Array<String>>.launchSafely(
-    onFail: (String) -> Unit,
-) {
-    runCatching { launch(arrayOf("*/*")) }.onFailure {
-        com.dshwatch.core.Logx.e("Import", "文件选择器不可用", it)
-        onFail("这台设备没有文件选择器，把 txt 放进工作空间后从下面选")
-    }
-}
-
-/** 系统选择器给的 Uri 没有文件名，得反查一次 */
-private fun displayNameOf(context: android.content.Context, uri: android.net.Uri): String {
-    runCatching {
-        context.contentResolver.query(
-            uri,
-            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-            null, null, null,
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) c.getString(idx)?.takeIf { it.isNotBlank() }?.let { return it }
-            }
-        }
-    }
-    return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "导入的对话.txt"
 }
 
 /** 文件大小，一行内说清楚就够 */

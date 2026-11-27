@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -207,6 +208,17 @@ fun PhoneRoot(
         if (!nav.canGoBack && !imeVisible) {
             PhoneBottomBar(nav)
         }
+
+        /*
+         * 内置文件浏览器：和手表版同一个宿主，挂在最外层。
+         *
+         * 手机版也有一堆导入入口（附件、背景、插件、归档），它们走的是
+         * 同一套 `rememberFilePicking` —— 没有这个宿主，开了「用内置文件浏览器」
+         * 之后点选择文件会「什么都不发生」。
+         */
+        com.dshwatch.ui.screens.files.FileBrowserHost(
+            workspace = remember(container) { container.workspaceStore.rootDir() },
+        )
     }
 }
 

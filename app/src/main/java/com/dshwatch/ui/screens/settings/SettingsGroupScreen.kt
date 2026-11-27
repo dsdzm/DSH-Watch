@@ -1,7 +1,6 @@
 package com.dshwatch.ui.screens.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -76,7 +75,7 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
-import com.dshwatch.ui.screens.files.FileBrowserPanel
+import com.dshwatch.ui.screens.files.rememberFilePicking
 import com.dshwatch.ui.theme.Accents
 import com.dshwatch.ui.theme.CustomBackground
 import com.dshwatch.ui.theme.LocalDarkTheme
@@ -413,14 +412,14 @@ private fun AppearanceGroup(
     var editingLayout by remember { mutableStateOf(false) }
     var editingBackground by remember { mutableStateOf(false) }
     /*
-     * 内置文件浏览器挂在**这一层**，不挂在弹窗里。
+     * 选图：走内置浏览器还是系统选择器，由「用内置文件浏览器」这个开关决定
+     * （见 rememberFilePicking）。这一层只负责「关弹窗 → 挑 → 把文件递回去」。
      *
-     * 它是整屏面板，而弹窗是独立 Window 的 Dialog —— 塞进 Dialog 只会被裁一条，
-     * 或者被 Dialog 的窗口整个盖住。所以流程是：关弹窗 → 开面板 → 选完把文件
-     * 递回去、弹窗重现（见 [BackgroundDialog] 的 picked 参数）。
+     * 为什么必须先关弹窗：弹窗是独立 Window 的 Dialog，层级高于 Activity 内容，
+     * 而内置浏览器挂在 Activity 内容里 —— 不关就会被整块挡住。
      */
-    var backgroundBrowser by remember { mutableStateOf(false) }
-    var backgroundPick by remember { mutableStateOf<File?>(null) }
+    val picking = rememberFilePicking()
+    var backgroundPick by remember { mutableStateOf<Uri?>(null) }
     val dark = when (settings.themeMode) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
@@ -998,30 +997,14 @@ private fun AppearanceGroup(
             onPickedConsumed = { backgroundPick = null },
             onOpenBrowser = {
                 editingBackground = false
-                backgroundBrowser = true
-            },
-        )
-    }
-
-    /*
-     * 内置浏览器：只列目录与图片。
-     *
-     * 系统选择器不可用（华为手表没有文件管理器）时由 [BackgroundDialog] 自动切到
-     * 这里；用户也可以主动点「从文件里挑」。返回 / 关掉都回到弹窗，让遮罩滑块
-     * 还在手边。
-     */
-    if (backgroundBrowser) {
-        FileBrowserPanel(
-            workspace = container.workspaceStore.rootDir(),
-            fileFilter = { CustomBackground.looksLikeImage(it) },
-            onClose = {
-                backgroundBrowser = false
-                editingBackground = true
-            },
-            onPick = { file ->
-                backgroundBrowser = false
-                backgroundPick = file
-                editingBackground = true
+                picking.pick(
+                    mime = "image/*",
+                    filter = { CustomBackground.looksLikeImage(it) },
+                ) { uri ->
+                    // 选完（或从浏览器返回）都回到弹窗：遮罩滑块还在手边
+                    backgroundPick = uri
+                    editingBackground = true
+                }
             },
         )
     }
@@ -1173,15 +1156,20 @@ private fun FilesGroup(
          * 内置文件浏览器开关。
          *
          * 默认开：`ACTION_OPEN_DOCUMENT` 依赖设备上存在文件管理器，一部分手表 ROM
-         * 把它删了，点「＋文件」会静默失败。关掉就退回系统选择器 ——
+         * 把它删了，点「＋文件」会静默失败、甚至让 App 崩在 `launch()` 上。
+         *
+         * **这是全 App 的总开关**：附件、自定义背景、插件包、历史归档、养鱼皮肤、
+         * B站配图，一律按它分派（见 rememberFilePicking）。关掉就全部退回系统选择器 ——
          * 有文件管理器的设备上，系统那套能翻到网盘、第三方存储等更多地方。
+         * 关掉时若系统那套唤不起来（ROM 砍了 DocumentsUI），会自动退回内置，
+         * 不会崩，也不会「点了没反应」。
          */
         SwitchRow(
             title = if (s.isChinese) "用内置文件浏览器" else "Built-in file browser",
             subtitle = if (s.isChinese) {
-                "选附件时不依赖系统文件管理器，直接列表浏览；关掉则用系统选择器"
+                "所有选文件的地方（附件、背景、插件、皮肤…）都在应用内浏览；关掉改用系统选择器"
             } else {
-                "List files in-app instead of relying on a system file manager"
+                "Every file picker (attachments, background, plugins, skins) lists files in-app"
             },
             checked = settings.builtinFilePicker,
             onCheckedChange = { on -> update { it.copy(builtinFilePicker = on) } },
@@ -1440,9 +1428,28 @@ private fun PluginsGroup(
         }
     }
 
+    /*
+     * 插件包：选文件要先关掉弹窗 —— 内置浏览器挂在 Activity 内容里，
+     * 而弹窗是独立 Window，不关就整块挡住。选完把 uri 递回去重新打开。
+     */
+    var pluginPick by remember { mutableStateOf<Uri?>(null) }
+    val pluginPicking = rememberFilePicking()
+
     if (importing) {
         PluginImportDialog(
             workspace = container.workspaceStore,
+            picked = pluginPick,
+            onPickedConsumed = { pluginPick = null },
+            onBrowse = {
+                importing = false
+                pluginPicking.pick(
+                    mime = "*/*",
+                    filter = { isPluginFile(it.name) },
+                ) { uri ->
+                    pluginPick = uri
+                    importing = true
+                }
+            },
             onDismiss = { importing = false },
             onImported = { m ->
                 if (settings.importedPlugins.size >= PluginRegistry.MAX_MANIFESTS &&
@@ -1652,10 +1659,16 @@ private fun BiliGroup(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // 选相册图：GetContent 比 PhotoPicker 兼容性更好 —— Wear 上不一定有 PhotoPicker，
-    // 但几乎都有 DocumentsUI，实在没有会回 null，我们提示一句就好。
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
+    /*
+     * 选配图。
+     *
+     * 以前用 `GetContent` 单独开一条系统相册通路，于是「导入文件」在这一个
+     * 开关上又成了一个例外。现在统一走 rememberFilePicking：
+     * 设置里开着内置浏览器就应用内挑，关着才开系统那套。
+     */
+    val picking = rememberFilePicking()
+
+    fun saveBiliImage(uri: Uri) {
         scope.launch {
             val ok = withContext(Dispatchers.IO) { BiliImages.saveLocal(context, uri) }
             imageNote = if (ok) "" else s.biliImagePickFailed
@@ -2061,14 +2074,16 @@ private fun BiliGroup(
                                     // 打上「用户主动选过」标记，升级迁移就不会再覆盖这个选择
                                     update { it.copy(biliImage = id, biliImageTouched = true) }
                                     editingImage = false
-                                    // 有些手表 ROM 没装 DocumentsUI，launch 会直接抛异常；
-                                    // 那种情况下退回「摸鱼卡」，而不是让设置页崩掉
+                                    /*
+                                     * 必须**先关弹窗**再挑：弹窗是独立 Window，会把挂在
+                                     * Activity 内容里的内置浏览器整块挡住。
+                                     * 系统那条路不可用时 rememberFilePicking 自己会退回内置，不用管。
+                                     */
                                     if (id == "local") {
-                                        runCatching { picker.launch("image/*") }
-                                            .onFailure {
-                                                update { st -> st.copy(biliImage = "card") }
-                                                imageNote = s.biliImagePickFailed
-                                            }
+                                        picking.pick(
+                                            mime = "image/*",
+                                            filter = { CustomBackground.looksLikeImage(it) },
+                                        ) { uri -> saveBiliImage(uri) }
                                     }
                                 }
                                 .padding(vertical = 6.dp),
