@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.9",
+            date = "2026-11-27",
+            highlights = listOf(
+                "玻璃卡片与按钮新增高光描边：上沿受光，两侧渐隐，下沿收暗",
+                "开启高斯模糊后，玻璃表面叠加顶面光泽与磨砂颗粒",
+                "浅色主题的磨砂卡片补一层奶白，与背景区分更清楚",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.8",
             date = "2026-11-27",
             highlights = listOf(

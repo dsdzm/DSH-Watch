@@ -56,8 +56,22 @@ import com.dshwatch.ui.theme.LocalPerf
  * | 本体 | 均匀半透明白，内部亮度从顶到底只差 2/255 | 提亮一档，保留背景的明暗 |
  * | 边 | 边缘 1px 内完成 103→154 的跳变，没有第二条亮线 | 让玻璃「有边」 |
  *
- * 所以这里也只画两层：一层均匀的白（或主题染色），一圈 0.6dp 的细边。
+ * 所以这里也只画两层：一层均匀的白（或主题染色），一圈细边。
  * 玻璃的高级感来自**底下有什么**，不来自玻璃自己画了多少东西。
+ *
+ * ## 后面补的两笔：高光描边与磨砂颗粒
+ *
+ * 上表是「清玻璃」的模型。磨砂玻璃多两样东西，都是用户直接提出来的：
+ *
+ * | 层 | 参数 | 为什么 |
+ * |---|---|---|
+ * | 边 | 1dp，上沿 0.78~0.86 → 两侧 0.26 → 下沿 0.10 | 光打在上沿；整圈一样亮就是描边色块 |
+ * | 顶面光泽 | 上沿 26% 内 0.10→0 | 光打在玻璃上表面，被边缘收住 |
+ * | 颗粒 | 64×64 噪点平铺，单像素 ≤ 4.7% | 人判断「磨砂」靠的是面上的不均匀，不是模糊本身 |
+ *
+ * 三笔都不改本体的均匀性 —— 本体一旦做渐变，就又回到「渐变卡片」那条老路。
+ * 它们只在 [LocalGlassBlur] 为 true（用户开了模糊）时加满；清玻璃下
+ * 光泽减半、颗粒不画。
  *
  * ## 背景是前提
  *
@@ -74,7 +88,8 @@ import com.dshwatch.ui.theme.LocalPerf
  *
  * ## 性能分层
  *
- * - 省电 / 低端档：只画两层，不装 pointer、不跑动画，和普通卡片同开销
+ * - 省电 / 低端档：不装 pointer、不跑动画，静态那几笔照画（都是一次填充，
+ *   和普通卡片同一量级；真正贵的是每帧重绘与 blur）
  * - 中端档：加跟手光斑与弹簧形变
  * - 高端档：外边再多一道 1dp 的收边，抵消 OLED 边缘的锯齿
  *
@@ -212,37 +227,77 @@ fun Modifier.glassSurface(
     // 渐变 Brush 在 draw 阶段每帧构造会每帧新建一个 Shader 对象，
     // 列表滚动时就是几百个短命对象 —— 提到这里按主题缓存。
     // 透明度不写进 stops，改由 drawRoundRect 的 alpha 参数乘，这样缓存键只有 dark。
-    val edgeBrush = remember(dark, elevated) {
+    /*
+     * 描边的亮度分布：上沿最亮、两侧中等、下沿几乎消失。
+     *
+     * 为什么不做对角线渐变（左上最亮、右下最暗）：卡片的长宽比差异太大。
+     * 一条 350×60dp 的设置行几乎是个横条，对角线退化成「左亮右暗」——
+     * 看起来像从左到右打了个渐变，而不是「上沿受光」。竖直渐变在任何
+     * 宽高比下都是「顶边亮、侧边有厚度」，这才是玻璃的形状语言。
+     *
+     * 磨砂时整圈都要提亮（0.78 / 0.26 / 0.10）：面被奶白糊住之后，
+     * 只剩这道边还带着「玻璃」的信息；清玻璃下则保持克制，太亮就成了贴纸边框。
+     */
+    val edgeBrush = remember(dark, elevated, frosted) {
         Brush.verticalGradient(
             0f to Color.White.copy(
                 alpha = when {
+                    frosted && dark -> 0.78f
+                    frosted -> 0.86f
                     // 深色弹窗：本体压暗之后，这条边成了「弹窗从背景里切出来」
-                    // 的唯一信号，必须够亮。0.46 → 0.62
+                    // 的唯一信号，必须够亮
                     dark && elevated -> 0.62f
                     elevated -> 0.50f
-                    dark -> 0.34f
-                    else -> 0.42f
+                    dark -> 0.36f
+                    else -> 0.44f
                 },
             ),
             // 中段不能太亮：整圈都亮就成了描边色块。
             // 深色弹窗的中段略提，让侧边有厚度但不喧宾夺主
             0.34f to Color.White.copy(
                 alpha = when {
-                    // 侧边中段跟着提一点，让整圈有厚度但不至于变成描边色块
+                    frosted && dark -> 0.26f
+                    frosted -> 0.30f
                     dark && elevated -> 0.22f
-                    dark -> 0.10f
+                    dark -> 0.12f
                     else -> 0.24f
                 },
             ),
-            // 下沿：深色弹窗收到 0.02。玻璃越薄，下沿那道暗越像「脏边」
+            // 右下角：深色弹窗收到 0.02。玻璃越薄，下沿那道暗越像「脏边」
             1f to Color.White.copy(
                 alpha = when {
-                    // 深色弹窗下沿收到 0.02：底已经亮了，再留亮边会和背景糊在一起
+                    frosted -> 0.10f
                     dark && elevated -> 0.02f
                     dark -> 0.05f
                     else -> 0.10f
                 },
             ),
+        )
+    }
+    /*
+     * 顶面光泽：从卡片上沿往下 1/4 逐渐消失的一层白。
+     *
+     * 位置只在上沿，不是整卡渐变 —— 整卡渐变会把玻璃画成「渐变色的卡片」，
+     * 那是这个组件第一版的老毛病。这里它只负责「光打在玻璃上表面」。
+     *
+     * 实心按钮给得更重（0.18）：不透明的主色没有背景可透，
+     * 全靠这一层光泽和描边才不像一块纯色贴片。
+     *
+     * 普通玻璃卡只给 0.05：卡片顶上通常就是第一行文字，光泽再重一点
+     * 会把那里的底抬到 95 上下，白字的对比度掉到 2.4:1 —— 亮是亮了，读不动。
+     */
+    val glossBrush = remember(dark, solid, frosted) {
+        Brush.verticalGradient(
+            0f to Color.White.copy(
+                alpha = when {
+                    solid -> 0.18f
+                    frosted -> 0.10f
+                    dark -> 0.05f
+                    else -> 0.05f
+                },
+            ),
+            0.26f to Color.White.copy(alpha = 0f),
+            1f to Color.Transparent,
         )
     }
     val bottomBrush = remember(dark, elevated) {
@@ -354,6 +409,7 @@ fun Modifier.glassSurface(
                 alpha = if (enabled) 1f else 0.45f,
                 bottomBrush = bottomBrush,
                 edgeBrush = edgeBrush,
+                glossBrush = glossBrush,
             )
         }
 
@@ -390,6 +446,8 @@ private fun DrawScope.drawGlassPanel(
     alpha: Float,
     bottomBrush: Brush,
     edgeBrush: Brush,
+    /** 上沿那一层光泽（见 glossBrush 的注释） */
+    glossBrush: Brush,
 ) {
     if (alpha <= 0.01f) return
     val r = CornerRadius(corner.coerceAtLeast(0f), corner.coerceAtLeast(0f))
@@ -525,13 +583,37 @@ private fun DrawScope.drawGlassPanel(
         } else {
             // 普通浅色卡片：仍然只压一点正文色。列表卡片要「贴」在背景上，
             // 做成磨砂白会和背景断开，一整屏变成白色方块
+            //
+            // 磨砂时补一层 0.10 的白：浅色底上「糊」几乎看不出来（白底糊了还是白），
+            // 唯一能表达「这块是磨砂」的就是这点奶白。深色文字压上去反而更清楚，
+            // 所以这一笔不吃对比度。
             drawRoundRect(
                 color = bodyTint,
                 cornerRadius = r,
-                alpha = 0.085f * alpha,
+                alpha = (if (frosted) 0.055f else 0.085f) * alpha,
             )
+            if (frosted) {
+                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.10f * alpha)
+            }
         }
         drawBottomShade(r, shadeBrush, alpha)
+    }
+
+    // ---- 1.5) 顶面光泽 ----
+    //
+    // 位置只在上面四分之一，且画在本体之上、描边之下：
+    // 光落在玻璃的上表面，被边缘那一圈高光「收住」，顺序反了就会盖住描边。
+    drawRoundRect(brush = glossBrush, cornerRadius = r, alpha = alpha)
+
+    // ---- 1.6) 磨砂颗粒 ----
+    //
+    // 只在「底下真的糊了」时才铺。清玻璃是光滑面，铺颗粒等于给镜片打毛，
+    // 和它的通透感自相矛盾。
+    //
+    // alpha 0.9 而不是 1.0：颗粒图里的最亮档是 12/255，再乘 0.9 之后
+    // 单像素差约 4/255 —— 正好落在「看得出是磨砂、看不出是噪点」的区间。
+    if (frosted) {
+        drawRoundRect(brush = GlassGrain.brush, cornerRadius = r, alpha = 0.9f * alpha)
     }
 
     // ---- 2) 边 ----
@@ -591,17 +673,23 @@ private fun DrawScope.drawBottomShade(corner: CornerRadius, brush: Brush, alpha:
 }
 
 /**
- * 一圈等宽的描边，亮度沿竖直方向衰减。
+ * 一圈等宽的描边，亮度沿左上→右下衰减。
  *
- * - 顶端 0.30：玻璃上沿接收直射光，是整块最亮的一笔
- * - 中段 0.12：两侧的厚度感
- * - 底端 0.05：只留一点，全暗会让玻璃「没有下沿」
+ * - 左上 0.34~0.80：玻璃上沿接收直射光，是整块最亮的一笔
+ * - 中段 0.10~0.30：两侧的厚度感
+ * - 右下 0.02~0.10：只留一点，全暗会让玻璃「没有下沿」
  *
  * 面是均匀的、边是渐变的 —— 反过来（面做渐变、边做均匀）就会像一张卡片，
  * 那是上一版的错法。
+ *
+ * ## 1dp 而不是 0.6dp
+ *
+ * 0.6dp 在 1.5x 屏上只有 0.9px，抗锯齿一稀释就只剩半格灰 —— 描边「在但看不见」。
+ * 玻璃靠这道边成形，看不见边就等于没有形状。1dp 在 1.5x 上是 1.5px，
+ * 亮部能实打实亮起来，暗部又刚好被抗锯齿吃掉一半，不会变成硬边框。
  */
 private fun DrawScope.drawEdge(corner: Float, w: Float, h: Float, alpha: Float, brush: Brush) {
-    val width = 0.8.dp.toPx()
+    val width = 1.dp.toPx()
     val inset = width / 2f
     drawRoundRect(
         brush = brush,
