@@ -84,4 +84,33 @@ class WorkStepTest {
         assertThat(steps).hasSize(1)
         assertThat((steps.single() as WorkStep.Thinking).text).isEqualTo("有内容")
     }
+
+    /**
+     * 纯思考轮次（没有工具调用）必须能还原出一段思考。
+     *
+     * 之前调用方只传 `listOf(message)`、不传 live 的那份 reasoning，
+     * 流式中 `message.reasoning` 还是空的 —— 于是卡片在、里面是空白，
+     * 用户看到的就是「没调工具时思维链展不开」。
+     */
+    @Test
+    fun `没有工具时 live 思考也能落成一步`() {
+        val steps = workStepsOf(
+            messages = listOf(message("m1")),
+            liveId = "m1",
+            liveReasoning = "先想一下这句话怎么接",
+        )
+        assertThat(steps).hasSize(1)
+        assertThat((steps.single() as WorkStep.Thinking).text)
+            .isEqualTo("先想一下这句话怎么接")
+    }
+
+    @Test
+    fun `live 思考为 null 时退回已落盘内容，不清空`() {
+        val steps = workStepsOf(
+            messages = listOf(message("m1", reasoning = "已经写下的")),
+            liveId = "m1",
+            liveReasoning = null,
+        )
+        assertThat((steps.single() as WorkStep.Thinking).text).isEqualTo("已经写下的")
+    }
 }

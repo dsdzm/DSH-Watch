@@ -580,4 +580,44 @@ object AppChangelog {
 
     /** 关于页里「当前版本」对应的那一条 */
     val latest: ChangelogEntry? get() = entries.firstOrNull()
+
+    /**
+     * 测试版更新日志。
+     *
+     * 正式版客户端不显示这段，正式版的 [entries] 也不合并 beta 内容 ——
+     * 测试通道的构建号对正式用户没有意义。反过来，beta 客户端要能看到
+     * 自己这一版的改动：装 beta 的人正在验证的就是这些条目。
+     *
+     * 书写约定与 [entries] 相同（见文件头），只多一条：版本号带 `-beta.N`。
+     */
+    val betaEntries: List<ChangelogEntry> = listOf(
+        ChangelogEntry(
+            version = "1.24.2-beta.5",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修复养鱼页在经典界面下仍使用 M3E 顶栏与弹窗的问题，改为跟随当前界面体系",
+                "修复模型仅思考未调用工具时思维链无法展开的问题",
+                "修复工作流卡片在两种界面体系下圆角与底色不一致的问题",
+                "关于页在测试版客户端中显示测试通道日志，正式版仍只列正式版本",
+            ),
+        ),
+        ChangelogEntry(
+            version = "1.24.2-beta.4",
+            date = "2026-11-26",
+            highlights = listOf(
+                "新增 ADB 直连通道：无线调试扫码配对或 USB 授权后，可在 Shizuku 不可用时执行 shell 命令",
+                "修复 shell 命令执行中的长度解析异常与流复用问题，失败时按服务等级自动降级",
+                "修复脚本输出无退出码时被误判为失败",
+            ),
+        ),
+    )
+
+    /**
+     * 当前客户端应该显示的日志。
+     *
+     * `-beta.N` 构建 = 测试版条目 + 正式版历史；其余构建只显示正式版。
+     * 传 `BuildConfig.VERSION_NAME` 即可，不在这里读构建信息（单测要好构造）。
+     */
+    fun visibleFor(versionName: String): List<ChangelogEntry> =
+        if (versionName.contains("-beta", ignoreCase = true)) betaEntries + entries else entries
 }

@@ -217,10 +217,15 @@ fun AboutScreen(
 
             // ---------------- 更新日志 ----------------
             SectionHeader(s.aboutChangelog)
+            /*
+             * beta 客户端显示「测试版条目 + 正式版历史」；正式版客户端只显示
+             * 正式版，测试通道的构建号不会漏到发布版里。见 AppChangelog.visibleFor。
+             */
+            val log = AppChangelog.visibleFor(BuildConfig.VERSION_NAME)
             val shownLog = if (showAllLog) {
-                AppChangelog.entries
+                log
             } else {
-                AppChangelog.entries.take(LOG_PREVIEW)
+                log.take(LOG_PREVIEW)
             }
             shownLog.forEach { entry ->
                 SettingCard {
@@ -250,7 +255,7 @@ fun AboutScreen(
                 }
                 Spacer(Modifier.height(4.dp))
             }
-            if (AppChangelog.entries.size > LOG_PREVIEW) {
+            if (log.size > LOG_PREVIEW) {
                 androidx.compose.foundation.layout.Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
@@ -259,7 +264,7 @@ fun AboutScreen(
                         text = if (showAllLog) {
                             "收起"
                         } else {
-                            "查看全部 ${AppChangelog.entries.size} 个版本"
+                            "查看全部 ${log.size} 个版本"
                         },
                         onClick = { showAllLog = !showAllLog },
                     )

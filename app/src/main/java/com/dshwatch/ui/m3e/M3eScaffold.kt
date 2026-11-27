@@ -36,6 +36,7 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TimeText
 import com.dshwatch.ui.i18n.LocalStrings
+import com.dshwatch.ui.wear.LocalCircle
 
 /**
  * 顶栏顶部的让位高度。
@@ -116,6 +117,29 @@ fun M3eScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val bg = MaterialTheme.colorScheme.background
+    /*
+     * 圆屏的顶栏不能从屏幕顶边起算。
+     *
+     * `AppScaffold` 也不知道这是个圆：它按矩形给出全宽，44dp 的返回键放在
+     * x=8..52，而那一行的圆周只覆盖中间约 90dp 宽 —— 按钮一大半画在圆外，
+     * 用户看到的是「返回键被切掉/被挡住」。
+     *
+     * 所以圆屏上按圆周几何把顶栏整体下移、左右收窄：起点取圆顶下方 0.072d
+     * （和经典骨架 CircleScaffold 同一个位置），横向边距取顶栏中线那一行的
+     * 弦内余量。方屏（LocalCircle == null）保持原样。
+     */
+    val circle = LocalCircle.current
+    val barGap: Dp = if (circle != null) {
+        (circle.top.value + circle.diameter.value * 0.072f).dp
+    } else {
+        M3eTimeTextInset
+    }
+    val barInset: Dp = if (circle != null) {
+        // 顶栏中线：(起点 + 约半行高)。边长按这一行算，按钮才不会越界
+        (circle.insetAt(barGap.value + 22f) + 1f).dp
+    } else {
+        horizontalInset
+    }
 
     AppScaffold(
         modifier = Modifier.fillMaxSize(),
@@ -124,7 +148,8 @@ fun M3eScaffold(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 给浮层的时间文字让位。见 M3eTimeTextInset 的注释。
-            Spacer(Modifier.height(M3eTimeTextInset))
+            // 圆屏上这个距离由圆周几何决定，见上面的 barGap。
+            Spacer(Modifier.height(barGap))
 
             if (stackedBar) {
                 StackedBar(title = title, onBack = onBack, actions = actions)
@@ -134,7 +159,7 @@ fun M3eScaffold(
                     subtitle = subtitle,
                     onBack = onBack,
                     actions = actions,
-                    inset = horizontalInset,
+                    inset = barInset,
                 )
             }
 
@@ -219,17 +244,27 @@ private fun CenteredBar(
     actions: @Composable RowScope.() -> Unit,
     inset: Dp,
 ) {
+    /*
+     * 圆表盘上顶栏再压 6dp：46 → 40。
+     *
+     * 屏幕直径只有 330dp，一屏能放的正文字数是固定的；顶栏每多占 6dp，
+     * 就少半行对话。46 是 Wear 官方在方形/手机上的取值，圆盘上不需要那么多
+     * 上下呼吸 —— 两侧本来就是黑的。
+     */
+    val round = LocalCircle.current != null
+    val barHeight = if (round) 40.dp else 46.dp
+    val titleSide = if (round) 40.dp else 48.dp
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 46.dp)
+            .heightIn(min = barHeight)
             .padding(horizontal = inset),
     ) {
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth()
-                .padding(horizontal = 48.dp),
+                .padding(horizontal = titleSide),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(

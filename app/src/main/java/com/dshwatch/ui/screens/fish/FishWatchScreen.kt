@@ -9,7 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -49,8 +52,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.wear.compose.material3.MaterialTheme as W3
-import androidx.wear.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.LiveDelta
 import com.dshwatch.domain.model.AppSettings
@@ -61,15 +65,18 @@ import com.dshwatch.domain.roleplay.BuiltinCards
 import com.dshwatch.domain.roleplay.FishBubbles
 import com.dshwatch.domain.roleplay.FishRhythm
 import com.dshwatch.domain.roleplay.Scenes
-import com.dshwatch.ui.m3e.M3eDialog
-import com.dshwatch.ui.m3e.M3eDialogRow
+import com.dshwatch.ui.components.CircleScaffold
+import com.dshwatch.ui.components.ConfirmDialog
+import com.dshwatch.ui.components.GlassDialog
+import com.dshwatch.ui.components.GlassDialogButton
+import com.dshwatch.ui.components.GlassDialogRow
+import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.components.tap
+import com.dshwatch.ui.components.withHaptic
 import com.dshwatch.ui.m3e.M3eFab
-import com.dshwatch.ui.m3e.M3eConfirmDialog
-import com.dshwatch.ui.m3e.M3eGhostButton
-import com.dshwatch.ui.m3e.M3eIconTap
 import com.dshwatch.ui.m3e.M3eList
 import com.dshwatch.ui.m3e.M3eScaffold
-import com.dshwatch.ui.m3e.M3eWearTheme
 import com.dshwatch.ui.m3e.rememberM3eListState
 import com.dshwatch.service.FishMomentWriter
 import com.dshwatch.ui.nav.Screen
@@ -107,17 +114,14 @@ fun FishWatchScreen(
     nav: WatchNavigator,
 ) {
     /*
-     * 经典界面下全局没有 Wear 主题层，M3E 组件会拿到一组不属于当前色板的默认色。
-     * 这一页刻意用 M3E 组件（它是唯一能在圆屏上正确排版的骨架），所以补一层。
-     * 只影响这一页，不改用户全局的界面风格。
+     * 界面体系跟随全局，这一页不再强制 M3E。
+     *
+     * 以前这里给经典体系手动套一层 `M3eWearTheme`，等于**把整页钉死在 M3E**：
+     * 用户开着经典玻璃主题，点进养鱼看到的是另一套顶栏、另一套弹窗、另一套颜色。
+     * 现在 M3E 分支由全局主题提供 Wear 色板，经典分支用 CircleScaffold + 玻璃，
+     * 两套都在各自的体系里成立。
      */
-    if (com.dshwatch.ui.theme.isM3eUi) {
-        FishWatchBody(container, settings, nav)
-    } else {
-        M3eWearTheme(androidx.compose.material3.MaterialTheme.colorScheme) {
-            FishWatchBody(container, settings, nav)
-        }
-    }
+    FishWatchBody(container, settings, nav)
 }
 
 @Composable
@@ -129,6 +133,8 @@ private fun FishWatchBody(
     val engine = container.engine
     val scope = rememberCoroutineScope()
     val listState = rememberM3eListState()
+    /** 当前界面体系。整页的骨架、弹窗、按钮都按它分派 */
+    val m3e = com.dshwatch.ui.theme.isM3eUi
     // 动态补写要 Context（取应用级容器）；这一页没有别的地方需要它，就地取
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -145,11 +151,9 @@ private fun FishWatchBody(
      */
     if (!settings.fishEnabled) {
         var gatePicker by remember { mutableStateOf(false) }
-        M3eScaffold(
+        FishFrame(
             title = "养鱼",
             onBack = if (nav.canGoBack) ({ nav.pop() }) else null,
-            stackedBar = false,
-            horizontalInset = 0.dp,
             /*
              * 关闭态也要有出口。
              *
@@ -159,21 +163,17 @@ private fun FishWatchBody(
              * 用户的原话是「顶栏没有任何可以切换模式的地方和退出的地方」。
              */
             actions = {
-                M3eIconTap(
+                IconTap(
                     icon = com.dshwatch.ui.screens.scene.sceneIcon(Scenes.FISH),
                     contentDescription = "切换模式",
                     onClick = { gatePicker = true },
-                    diameter = 38.dp,
-                    iconSize = 22.dp,
                 )
                 // 根页没有返回键，给一个明确的「去会话列表」
                 if (!nav.canGoBack) {
-                    M3eIconTap(
+                    IconTap(
                         icon = Icons.AutoMirrored.Filled.ExitToApp,
                         contentDescription = "退出",
                         onClick = { nav.push(Screen.Sessions) },
-                        diameter = 38.dp,
-                        iconSize = 22.dp,
                     )
                 }
             },
@@ -292,22 +292,11 @@ private fun FishWatchBody(
     }
 
     /*
-     * 底部圆键的抬升量。
-     *
-     * `M3eScaffold` 默认把底栏贴在屏幕底 8dp —— 矩形屏没问题，圆盘上那已经在
-     * 圆周之外了。按几何把圆心放到 0.90d 处：那一行弦宽还有约 190dp，
-     * 一颗 52dp 的按钮稳稳落在圆内，下沿离圆周还有 7dp。
+     * 底部圆键的抬升交给 [FishFrame]：M3E 骨架要把底栏从屏幕底沿抬到圆周内，
+     * 经典骨架（CircleScaffold）自己按圆几何定位。这一层不再关心。
      */
-    val circle = LocalCircle.current
-    val lift = if (circle == null) {
-        0.dp
-    } else {
-        val fabCenterY = circle.top.value + circle.diameter.value * 0.90f
-        val fabBottom = fabCenterY + 26f
-        (circle.height.value - fabBottom - 8f).coerceAtLeast(0f).dp
-    }
 
-    M3eScaffold(
+    FishFrame(
         /*
          * 顶栏和酒馆页保持同一套排布：**返回在左、标题居中、动作在右**。
          *
@@ -323,42 +312,28 @@ private fun FishWatchBody(
             else -> null
         },
         onBack = if (nav.canGoBack) ({ nav.pop() }) else null,
-        stackedBar = false,
-        horizontalInset = 0.dp,
         actions = {
             /*
-             * 圆表盘用 36dp 的命中区，方形表用 44dp。
+             * 设置放顶栏，不再只藏在「更多」里。
              *
-             * 这是全项目 M3E 页的约定（见 `M3eChatScreen`）：这一行的弦宽只有
-             * 150dp 上下，44dp 的三颗会顶到圆周。返回 44 + 两颗 36 = 116dp，
-             * 两侧各剩十几 dp。
+             * 之前这一页只有两颗图标（换模式 / 更多），「养鱼设置」是菜单里的
+             * 第二行 —— 用户以为设置根本不在这页，反馈原话是「找不到养鱼设置」。
+             * 现在齿轮直接进设置，换模式仍在菜单里（那里也有一模一样的入口）。
              */
-            val dense = com.dshwatch.ui.theme.LocalDeviceProfile.current.isRound
-            val diameter = if (dense) 36.dp else 44.dp
-            val iconSize = if (dense) 24.dp else 26.dp
-            // 酒馆顶栏那颗「模式」药丸的位置。这里用同一处的模式图标，
-            // 点开是换模式 —— 和酒馆点「酒馆」药丸是同一个动作。
-            M3eIconTap(
-                icon = com.dshwatch.ui.screens.scene.sceneIcon(Scenes.FISH),
-                contentDescription = "换个模式",
-                onClick = { picker = true },
-                diameter = diameter,
-                iconSize = iconSize,
+            IconTap(
+                icon = Icons.Outlined.Settings,
+                contentDescription = "养鱼设置",
+                onClick = { nav.push(Screen.FishSettings) },
             )
-            M3eIconTap(
+            IconTap(
                 icon = Icons.Outlined.MoreHoriz,
                 contentDescription = "更多",
                 onClick = { menu = true },
-                diameter = diameter,
-                iconSize = iconSize,
             )
         },
-        bottomOverlay = true,
         bottom = {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = lift),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -369,22 +344,21 @@ private fun FishWatchBody(
                  * 可能已经发完了。两颗并列，主键永远是「说话」。
                  */
                 if (streaming) {
-                    M3eFab(
+                    FishRoundButton(
                         icon = Icons.Filled.Stop,
                         contentDescription = "停止",
                         danger = true,
                         onClick = { rhythm.interrupt(); engine.stop() },
                     )
                     Spacer(Modifier.width(10.dp))
-                    M3eIconTap(
+                    FishRoundButton(
                         icon = Icons.Outlined.Keyboard,
                         contentDescription = "说话",
+                        small = true,
                         onClick = { nav.push(Screen.Input()) },
-                        diameter = 40.dp,
-                        iconSize = 22.dp,
                     )
                 } else {
-                    M3eFab(
+                    FishRoundButton(
                         icon = Icons.Outlined.Keyboard,
                         contentDescription = "说话",
                         onClick = { nav.push(Screen.Input()) },
@@ -397,11 +371,11 @@ private fun FishWatchBody(
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = "正在接通…",
-                    style = W3.typography.bodySmall,
-                    color = W3.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            return@M3eScaffold
+            return@FishFrame
         }
 
         M3eList(
@@ -413,10 +387,13 @@ private fun FishWatchBody(
              * 气泡的圆角是 18dp，比列表卡片（12dp 左右）要圆；6dp 时气泡的弧顶
              * 会蹭到圆周，看起来像被削掉一角。纵向仍用官方的 32dp —— 首项要能
              * 完整露出来。
+             *
+             * 经典体系的内容区已经由 CircleScaffold 按弦长内收，再叠 32dp
+             * 上下留白就只剩一条窄缝，所以那边用 4dp。
              */
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = 10.dp,
-                vertical = 32.dp,
+                horizontal = if (m3e) 10.dp else 4.dp,
+                vertical = if (m3e) 32.dp else 4.dp,
             ),
         ) {
             /*
@@ -572,25 +549,17 @@ private fun FishWatchBody(
     }
 
     if (menu) {
-        M3eDialog(
+        GlassDialog(
             onDismissRequest = { menu = false },
             title = card.displayName,
-            buttons = { M3eGhostButton(text = "关闭", onClick = { menu = false }) },
+            buttons = { GlassDialogButton("关闭", onClick = { menu = false }) },
             content = {
-                M3eDialogRow(
+                GlassDialogRow(
                     title = "换个模式",
                     subtitle = Scenes.all.joinToString(" / ") { Scenes.label(it) },
                     onClick = {
                         menu = false
                         picker = true
-                    },
-                )
-                M3eDialogRow(
-                    title = "养鱼设置",
-                    subtitle = "人设、主动发言时间、记忆、默认 API",
-                    onClick = {
-                        menu = false
-                        nav.push(Screen.FishSettings)
                     },
                 )
                 /*
@@ -600,7 +569,7 @@ private fun FishWatchBody(
                  * 得先猜到设置里有个开关；这一页又只有一屏对话，
                  * 看起来就是「没有关的地方」。功能开关应当在自己那一层可达。
                  */
-                M3eDialogRow(
+                GlassDialogRow(
                     title = "关掉养鱼",
                     subtitle = "她不再主动说话，记录都留着",
                     onClick = {
@@ -608,7 +577,7 @@ private fun FishWatchBody(
                         confirmDisable = true
                     },
                 )
-                M3eDialogRow(
+                GlassDialogRow(
                     title = "她的动态",
                     subtitle = "每天一条，她自己写的",
                     onClick = {
@@ -616,7 +585,7 @@ private fun FishWatchBody(
                         nav.push(Screen.FishMoments)
                     },
                 )
-                M3eDialogRow(
+                GlassDialogRow(
                     title = "记忆",
                     subtitle = "她记着的、以及正在忘掉的",
                     onClick = {
@@ -637,7 +606,8 @@ private fun FishWatchBody(
     }
 
     if (confirmDisable) {
-        M3eConfirmDialog(
+        // ConfirmDialog 内部按界面体系分派（M3E / 玻璃），不用这里再判一次
+        ConfirmDialog(
             title = "关掉养鱼？",
             text = "她不再主动找你，也不再写动态，后台不会联网。\n聊过的内容与记忆都留着，随时能再开。",
             confirmText = "关掉",
@@ -653,6 +623,128 @@ private fun FishWatchBody(
 
     viewing?.let { ref ->
         com.dshwatch.ui.media.MediaViewer(ref = ref, onClose = { viewing = null })
+    }
+}
+
+/* ────────────────────────────── 骨架 ────────────────────────────── */
+
+/**
+ * 养鱼页的骨架，按界面体系分派。
+ *
+ * 这一页以前写死 `M3eScaffold` —— 经典玻璃主题的用户点进来，看到的是一套
+ * 别的顶栏：额度更大、返回键更靠上、弹窗是实色卡片。不是"配色不一样"，
+ * 是**整个结构都不一样**，像从主题里跳出去了。
+ *
+ * 现在 M3E 交给 `M3eScaffold`（它已经在圆屏上按弦长收窄），经典交给
+ * `CircleScaffold`（顶栏 33dp、从圆顶 0.108d 起，全项目经典页共用）。
+ * 两边的内容、气泡、节奏完全相同，只有壳不同。
+ */
+@Composable
+private fun FishFrame(
+    title: String,
+    onBack: (() -> Unit)?,
+    subtitle: String? = null,
+    actions: @Composable RowScope.() -> Unit,
+    bottom: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        /*
+         * 圆表盘上 M3E 的底栏贴在屏幕底 8dp —— 那一行已经在圆周之外。
+         * 按几何把圆心放到 0.90d：弦宽约 190dp，一颗 52dp 的按钮稳稳在圆内。
+         */
+        val circle = LocalCircle.current
+        val lift = if (circle == null) {
+            0.dp
+        } else {
+            val fabCenterY = circle.top.value + circle.diameter.value * 0.90f
+            val fabBottom = fabCenterY + 26f
+            (circle.height.value - fabBottom - 8f).coerceAtLeast(0f).dp
+        }
+        // 先落到局部 val：`bottom?.let { ... }` 会把返回的 lambda 推断成普通
+        // `() -> Unit`，丢掉 @Composable 注解，编译器随后报「不能在非 composable 上下文调用」
+        val bar = bottom
+        M3eScaffold(
+            title = title,
+            onBack = onBack,
+            subtitle = subtitle,
+            actions = actions,
+            // 列表自己带左右内边距，骨架不再收一层
+            horizontalInset = 0.dp,
+            bottomOverlay = bar != null,
+            bottom = if (bar == null) {
+                null
+            } else {
+                {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = lift),
+                        contentAlignment = Alignment.Center,
+                    ) { bar() }
+                }
+            },
+            content = content,
+        )
+        return
+    }
+
+    CircleScaffold(
+        title = title,
+        onBack = onBack,
+        subtitle = subtitle,
+        actions = actions,
+        bottom = bottom,
+        bottomOverlay = bottom != null,
+        content = content,
+    )
+}
+
+/**
+ * 底部圆键。
+ *
+ * M3E 用 M3E 的填充按钮，经典用玻璃圆片 —— 后者是经典对话页那颗「说话」键
+ * 的同一套材质（glassSurface，不是实心主色），换页时手感一致。
+ */
+@Composable
+private fun FishRoundButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    danger: Boolean = false,
+    small: Boolean = false,
+) {
+    if (com.dshwatch.ui.theme.isM3eUi) {
+        M3eFab(
+            icon = icon,
+            contentDescription = contentDescription,
+            onClick = onClick,
+            danger = danger,
+        )
+        return
+    }
+    val size = if (small) 40.dp else 46.dp
+    Box(
+        modifier = Modifier
+            .size(size)
+            .then(
+                if (danger) {
+                    Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.error)
+                } else {
+                    Modifier.glassSurface(shape = CircleShape, cornerRadius = size / 2)
+                },
+            )
+            .tap(onClick = withHaptic(onClick)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (danger) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(if (small) 20.dp else 23.dp),
+        )
     }
 }
 
@@ -690,7 +782,7 @@ private fun HerBubble(
     /** 自定义底色（养鱼页可改）。null = 跟随主题 */
     bg: androidx.compose.ui.graphics.Color? = null,
 ) {
-    val scheme = W3.colorScheme
+    val scheme = MaterialTheme.colorScheme
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
@@ -704,7 +796,7 @@ private fun HerBubble(
         ) {
             Text(
                 text = bubbleText(text, time, scheme.onSurfaceVariant),
-                style = W3.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onSurface,
             )
         }
@@ -751,7 +843,7 @@ private fun MyBubble(
     /** 自定义底色（养鱼页可改）。null = 跟随主题 */
     bg: androidx.compose.ui.graphics.Color? = null,
 ) {
-    val scheme = W3.colorScheme
+    val scheme = MaterialTheme.colorScheme
     /*
      * 自定义色可能是浅色，主题的 onPrimaryContainer 在浅底上几乎看不见。
      * 和手机页一样按亮度换字色 —— 表盘更小，看不清就是"坏了"。
@@ -775,7 +867,7 @@ private fun MyBubble(
         ) {
             Text(
                 text = bubbleText(text, time, fg),
-                style = W3.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyMedium,
                 color = fg,
             )
         }
@@ -790,8 +882,8 @@ private fun NoteStamp(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp),
-        style = W3.typography.labelSmall,
-        color = W3.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
     )
 }
@@ -799,7 +891,7 @@ private fun NoteStamp(text: String) {
 /** 「正在想」：三个呼吸的点，装在和她一样的气泡壳里，靠左 */
 @Composable
 private fun ThinkingNote() {
-    val scheme = W3.colorScheme
+    val scheme = MaterialTheme.colorScheme
     val transition = rememberInfiniteTransition(label = "fish-thinking")
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1129,10 +1221,11 @@ internal fun replyText(raw: String): String =
         .trim()
 
 /**
- * 切换模式（M3E 弹窗）。
+ * 切换模式。
  *
- * 用 M3E 的弹窗而不是 `ScenePickerDialog`（那套是经典界面的 GlassDialog）：
- * 养鱼页整个是 M3E 骨架，混一个 Material3 弹窗会在圆屏上露出一圈方角。
+ * 用 `GlassDialog`：它内部按界面体系分派（M3E → M3eDialog，经典 → 玻璃弹窗），
+ * 这一页不再自己选一套。以前写死 M3eDialog，经典主题下会在圆屏上露出一圈
+ * 实色方角，和玻璃顶栏、玻璃气泡都对不上。
  *
  * 关闭态和正常态共用这一份：关掉养鱼之后，这里是唯一的出口。
  */
@@ -1145,19 +1238,19 @@ private fun FishScenePicker(
 ) {
     val scope = rememberCoroutineScope()
     val engine = container.engine
-    M3eDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
         title = "切换模式",
         content = {
             Scenes.all.forEach { id ->
                 val active = Scenes.of(settings.useScene) == id
-                M3eDialogRow(
+                GlassDialogRow(
                     title = Scenes.label(id),
                     subtitle = if (active) "当前" else Scenes.desc(id),
                     selected = active,
                     onClick = {
                         onDismiss()
-                        if (active) return@M3eDialogRow
+                        if (active) return@GlassDialogRow
                         scope.launch {
                             container.settingsRepo.update { it.copy(useScene = id) }
                             /*
@@ -1195,6 +1288,6 @@ private fun FishScenePicker(
                 )
             }
         },
-        buttons = { M3eGhostButton(text = "取消", onClick = onDismiss) },
+        buttons = { GlassDialogButton("取消", onClick = onDismiss) },
     )
 }

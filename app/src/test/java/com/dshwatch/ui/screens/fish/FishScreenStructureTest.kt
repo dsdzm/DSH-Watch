@@ -88,26 +88,31 @@ class FishScreenStructureTest {
     }
 
     @Test
-    fun `手表版全部用 M3E 组件`() {
+    fun `手表版跟随界面体系，不把整页钉死在 M3E`() {
         val body = code("ui/screens/fish/FishWatchScreen.kt")
-        // 骨架：时间浮层让位、顶栏可用普通形态
-        assertThat(body).contains("M3eScaffold(")
         /*
-         * 顶栏不再是 stackedBar（一排居中图标 + 第二行标题），
-         * 改成和酒馆一样的「返回在左 / 标题居中 / 动作在右」。
-         * 状态那半句话挪进了副标题 —— 四个模式顶栏一个样，用户不用重新学。
+         * 这一条钉的是用户实报：「我开着经典玻璃主题，养鱼页却是 M3E 的顶栏和弹窗」。
+         * 以前的实现给经典体系手动套一层 `M3eWearTheme`，等于整页强制 M3E ——
+         * 顶栏额度更大、返回键在圆外、弹窗是实色方角。
+         *
+         * 现在骨架按体系分派：M3E 用 M3eScaffold，经典用 CircleScaffold。
          */
-        assertThat(body).contains("stackedBar = false")
-        assertThat(body).doesNotContain("stackedBar = true")
-        // 列表：贴边项在绘制阶段缩放，天然嵌进圆周
+        assertThat(body).contains("M3eScaffold(")
+        assertThat(body).contains("CircleScaffold(")
+        // 整页套 M3eWearTheme 就是"强制 M3E"，这条不许回来
+        assertThat(body).doesNotContain("M3eWearTheme(")
+        // 列表：贴边项在绘制阶段缩放，天然嵌进圆周（两套骨架共用）
         assertThat(body).contains("M3eList(")
-        // 弹层与按钮也走 M3E，不在 M3E 页里混经典样式
-        assertThat(body).contains("M3eDialog(")
+        // 弹层走 GlassDialog（内部按体系分派），不再直接挑一套
+        assertThat(body).contains("GlassDialog(")
+        assertThat(body).doesNotContain("M3eDialog(")
+        assertThat(body).doesNotContain("M3eConfirmDialog(")
+        // 顶栏动作走 IconTap（M3E 下自动换成 M3eIconTap）
+        assertThat(body).contains("IconTap(")
+        assertThat(body).doesNotContain("M3eIconTap(")
+        // 底部圆键：M3E 用 M3eFab，经典用玻璃圆片
         assertThat(body).contains("M3eFab(")
-        assertThat(body).contains("M3eIconTap(")
-        // 经典那套（GlassDialog / 自绘 TextButton 菜单）不应出现
-        assertThat(body).doesNotContain("ScenePickerDialog(")
-        assertThat(body).doesNotContain("GlassDialog")
+        assertThat(body).contains("FishRoundButton(")
     }
 
     @Test

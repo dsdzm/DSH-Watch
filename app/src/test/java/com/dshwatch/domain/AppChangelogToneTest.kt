@@ -55,4 +55,33 @@ class AppChangelogToneTest {
         val over = entries.filter { it.highlights.size > 4 }.map { it.version }
         assertThat(over).isEmpty()
     }
+
+    /* ---------------- 测试版日志 ---------------- */
+
+    @Test
+    fun `测试版条目同样不使用第二人称与口语`() {
+        val banned = listOf("你", "她", "咱", "一眼", "顺手", "干脆", "说白了", "其实", "之前", "以前", "原来")
+        val hits = AppChangelog.betaEntries.flatMap { e ->
+            e.highlights.filter { h -> banned.any { h.contains(it) } }
+                .map { "${e.version}: $it" }
+        }
+        assertThat(hits).isEmpty()
+    }
+
+    @Test
+    fun `测试版条目每版不超过四条`() {
+        val over = AppChangelog.betaEntries.filter { it.highlights.size > 4 }.map { it.version }
+        assertThat(over).isEmpty()
+    }
+
+    @Test
+    fun `beta 客户端带测试版条目，正式版客户端不带`() {
+        val beta = AppChangelog.visibleFor("1.24.2-beta.4")
+        assertThat(beta.size).isEqualTo(AppChangelog.betaEntries.size + entries.size)
+        assertThat(beta.first().version).contains("beta")
+        // 正式版：只有正式条目，且第一条不是 beta
+        val release = AppChangelog.visibleFor("1.24.2")
+        assertThat(release).isEqualTo(entries)
+        assertThat(release.none { it.version.contains("beta") }).isTrue()
+    }
 }

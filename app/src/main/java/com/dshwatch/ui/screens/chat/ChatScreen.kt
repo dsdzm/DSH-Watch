@@ -1242,7 +1242,16 @@ private fun MessageItem(
         ) {
             AgentWorkBlock(
                 blockKey = message.id,
-                steps = workStepsOf(listOf(message)),
+                /*
+                 * 流式期间思考只存在于 `live.reasoning`，`message.reasoning`
+                 * 要等这一轮落盘才写上。只传 message 会让纯思考的那一段
+                 * `steps` 为空 —— 卡片标题在、点开是空白，看起来像「展开不了」。
+                 */
+                steps = workStepsOf(
+                    listOf(message),
+                    liveId = message.id.takeIf { live != null },
+                    liveReasoning = live?.reasoning,
+                ),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = sizeOf,
@@ -1462,7 +1471,16 @@ private fun AgentTurnItem(
         if (showWork) {
             AgentWorkBlock(
                 blockKey = messages.first().id,
-                steps = workStepsOf(messages, liveId = live?.messageId, liveReasoning = reasoning),
+                /*
+                 * `liveReasoning` 必须是 live 里的值。上一版传的是上面那段
+                 * 「已落盘 reasoning 的拼接」—— 流式中它还是空的，于是纯思考的
+                 * 那一轮拿到空 steps：标题写着「工作流程」，点开什么都没有。
+                 */
+                steps = workStepsOf(
+                    messages,
+                    liveId = live?.messageId,
+                    liveReasoning = live?.reasoning,
+                ),
                 isStreaming = isStreaming,
                 showReasoning = settings.showReasoning,
                 sizeOf = sizeOf,
@@ -1620,7 +1638,8 @@ internal fun workStepsOf(
 ): List<WorkStep> = buildList {
     messages.forEachIndexed { index, message ->
         val text = if (liveId != null && message.id == liveId) {
-            liveReasoning.orEmpty()
+            // live 还没攒出内容时（刚起手）退回已落盘值：传 null 不该等于「清空」
+            liveReasoning ?: message.reasoning
         } else {
             message.reasoning
         }
@@ -1654,6 +1673,31 @@ internal fun AgentWorkBlock(
 ) {
     val s = LocalStrings.current
     val calls = steps.filterIsInstance<WorkStep.Tool>().map { it.call }
+    /*
+     * 没有任何内容就整块不画。
+     *
+     * 会走到这里的情况：流式刚起手（live 里还一个字都没有），或者模型
+     * 这一轮既没思考也没调工具、只回了一句正文。以前这里会渲染一张
+     * 只有标题的玻璃卡，看着像「工具调用记录丢了」—— 现在宁可空着。
+     */
+    if (steps.isEmpty() && !isStreaming) return
+    val m3e = com.dshwatch.ui.theme.isM3eUi
+    val glass = LocalGlass.current
+    /*
+     * 工作块跟随界面体系，和里面的工具卡同一套规则：
+     * M3E 是 20dp 实色卡，经典玻璃是 12dp 的玻璃片，无玻璃主题退回浅色块。
+     * 固定 10dp 玻璃的做法只在一种体系下成立，换过去就是一块「外来卡片」。
+     */
+    val blockShape = RoundedCornerShape(if (m3e) 20.dp else 12.dp)
+    val blockSkin = when {
+        m3e -> Modifier
+            .clip(blockShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        glass -> Modifier.glassSurface(shape = blockShape, cornerRadius = if (m3e) 20.dp else 12.dp)
+        else -> Modifier
+            .clip(blockShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f))
+    }
     /*
      * 展开状态分三种：用户说了开、用户说了关、还没表态。
      *
@@ -1699,7 +1743,7 @@ internal fun AgentWorkBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .glassSurface(shape = RoundedCornerShape(10.dp), cornerRadius = 10.dp)
+            .then(blockSkin)
             .padding(horizontal = 7.dp, vertical = 5.dp),
     ) {
         Row(
@@ -1822,10 +1866,20 @@ private fun ThinkingCard(key: String, text: String, streaming: Boolean) {
         if (!streaming && manual == null) manual = false
     }
     val expanded = manual ?: streaming
+    /*
+     * 思考卡是「工作块里的一行」，不是独立的玻璃卡片。
+     *
+     * 它套在外层工作块（已经是玻璃/实色卡）里面，再用 glassSurface 就是
+     * 两层描边叠在一起：一眼看过去厚度、圆角都和旁边的工具卡对不上，
+     * 之前那一版的观感退化就出在这里。这里改回轻量的 tertiary 色块，
+     * 只保留圆角与工具卡一致（M3E 20dp / 经典 12dp）。
+     */
+    val radius = if (com.dshwatch.ui.theme.isM3eUi) 20.dp else 12.dp
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .glassSurface(shape = RoundedCornerShape(10.dp), cornerRadius = 10.dp)
+            .clip(RoundedCornerShape(radius))
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.32f))
             .padding(horizontal = 7.dp, vertical = 5.dp),
     ) {
         Row(
