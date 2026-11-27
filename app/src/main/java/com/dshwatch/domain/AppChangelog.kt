@@ -592,6 +592,14 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.14",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修好华为手表点「自定义背景」闪退：没有系统文件管理器时改为打开内置浏览器，不再崩",
+                "自定义背景新增「从文件里挑」：内置浏览器只列图片，完全不用系统相册",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.13",
             date = "2026-11-27",
             highlights = listOf(

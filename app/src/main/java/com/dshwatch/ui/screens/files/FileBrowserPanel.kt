@@ -93,6 +93,14 @@ fun FileBrowserPanel(
     onClose: () -> Unit,
     onPick: (File) -> Unit,
     onSystemPicker: (() -> Unit)? = null,
+    /**
+     * 只留下满足条件的文件（目录永远保留）。
+     *
+     * 同一个浏览器既用来挑附件、挑插件包，也用来挑背景图。不滤的话，「自定义背景」
+     * 里会列出整卡车的 `.txt` / `.json`，选了才报「这不是一张图片」——
+     * 让用户先踩一次坑，是这个功能最不该有的体验。
+     */
+    fileFilter: ((File) -> Boolean)? = null,
 ) {
     val context = LocalContext.current
     val zh = LocalStrings.current.isChinese
@@ -261,16 +269,29 @@ fun FileBrowserPanel(
                                 }
 
                                 is Listing.Ok -> {
-                                    if (l.nodes.isEmpty()) {
+                                    val shown = if (fileFilter == null) {
+                                        l.nodes
+                                    } else {
+                                        l.nodes.filter { it.isDir || fileFilter(it.file) }
+                                    }
+                                    if (shown.isEmpty()) {
                                         item(key = "__empty__") {
                                             EmptyState(
-                                                title = if (zh) "空的" else "Empty",
-                                                hint = if (zh) "这个文件夹里没有文件" else null,
+                                                title = if (fileFilter != null) {
+                                                    if (zh) "这里没有图片" else "No images here"
+                                                } else {
+                                                    if (zh) "空的" else "Empty"
+                                                },
+                                                hint = if (fileFilter != null) {
+                                                    if (zh) "换一个文件夹看看" else "Try another folder"
+                                                } else {
+                                                    if (zh) "这个文件夹里没有文件" else null
+                                                },
                                             )
                                         }
                                     }
-                                    items(l.nodes.size, key = { l.nodes[it].file.absolutePath }) { i ->
-                                        val node = l.nodes[i]
+                                    items(shown.size, key = { shown[it].file.absolutePath }) { i ->
+                                        val node = shown[i]
                                         FileRow(node = node, zh = zh) {
                                             if (node.isDir) {
                                                 stack.add(node.file)
@@ -315,7 +336,10 @@ fun FileBrowserPanel(
 
                         item(key = "__hint__") {
                             HintText(
-                                if (current == null) {
+                                if (fileFilter != null) {
+                                    if (zh) "只显示图片。选一个位置进去，点图片即可。" else
+                                        "Images only. Open a location, then tap one."
+                                } else if (current == null) {
                                     if (zh) {
                                         "内置浏览器不依赖任何第三方 App。选一个位置进去，点文件即可添加。"
                                     } else {

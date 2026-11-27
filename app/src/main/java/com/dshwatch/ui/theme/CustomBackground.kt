@@ -65,10 +65,20 @@ object CustomBackground {
     /**
      * 把用户选中的图导入进来。
      *
+     * 接受两种来源：系统选择器给的 `content://`，以及内置浏览器给的 `file://`。
+     * 后者走 [decodeBoundedFile] 直接读磁盘，不经 `ContentResolver` ——
+     * 部分 ROM（华为是典型）对 `file://` 的 `openAssetFileDescriptor` 行为不一致，
+     * 而这条路径已经用 `File.canRead()` 验过，没必要再让 URI 解析插一手。
+     *
      * @return 新文件名（不含目录）。失败时抛异常，由调用方翻成人话。
      */
     suspend fun import(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
-        val bitmap = decodeBounded(context, uri)
+        val bitmap = if (uri.scheme == "file") {
+            val path = uri.path ?: throw IllegalStateException("文件路径为空")
+            decodeBoundedFile(File(path))
+        } else {
+            decodeBounded(context, uri)
+        }
         val target = dir(context).apply { mkdirs() }
         // 文件名带时间戳：换图时是新文件，写成功之后再删旧的 ——
         // 反过来的话「写到一半失败」会让设置指向一个坏文件
@@ -98,18 +108,7 @@ object CustomBackground {
             runCatching {
                 val source = ImageDecoder.createSource(context.contentResolver, uri)
                 return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                    val w = info.size.width
-                    val h = info.size.height
-                    val longSide = max(w, h)
-                    if (longSide > SAVE_MAX) {
-                        val scale = SAVE_MAX.toFloat() / longSide
-                        decoder.setTargetSize(
-                            (w * scale).toInt().coerceAtLeast(1),
-                            (h * scale).toInt().coerceAtLeast(1),
-                        )
-                    }
-                    // 软件位图：后面要 compress，硬件位图不能直接读像素
-                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    configure(decoder, info)
                 }
             }.onFailure { Logx.w(TAG, "ImageDecoder 失败，退回 BitmapFactory：${it.message}") }
         }
@@ -126,6 +125,47 @@ object CustomBackground {
         return context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, opts)
         } ?: throw IllegalStateException("读取图片失败")
+    }
+
+    /** 同 [decodeBounded]，但直接从文件读。内置浏览器选的是真实路径 */
+    private fun decodeBoundedFile(f: File): Bitmap {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching {
+                val source = ImageDecoder.createSource(f)
+                return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    configure(decoder, info)
+                }
+            }.onFailure { Logx.w(TAG, "ImageDecoder(file) 失败，退回 BitmapFactory：${it.message}") }
+        }
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalStateException("这不是一张图片")
+
+        var sample = 1
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= SAVE_MAX) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeFile(f.path, opts)
+            ?: throw IllegalStateException("读取图片失败")
+    }
+
+    /**
+     * 解码参数：限长边 + 强制软件位图。
+     *
+     * 软件位图不是保守选择：硬件位图不能 `compress`，而我们要把它重压成 JPEG 落盘。
+     */
+    private fun configure(decoder: ImageDecoder, info: ImageDecoder.ImageInfo) {
+        val w = info.size.width
+        val h = info.size.height
+        val longSide = max(w, h)
+        if (longSide > SAVE_MAX) {
+            val scale = SAVE_MAX.toFloat() / longSide
+            decoder.setTargetSize(
+                (w * scale).toInt().coerceAtLeast(1),
+                (h * scale).toInt().coerceAtLeast(1),
+            )
+        }
+        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
     }
 
     /**
@@ -210,6 +250,25 @@ object CustomBackground {
         if (name.isBlank()) return
         runCatching { file(context, name).delete() }
     }
+
+    /**
+     * 这个文件看起来像图片吗。
+     *
+     * 只按扩展名判断，不打开文件：内置浏览器要在一屏里过滤几十项，
+     * 每项都 `openInputStream` 读魔数会让列表滚起来像幻灯片。
+     * 判错也不致命 —— 真选中了一张伪装成 .jpg 的东西，[import] 会给出人话报错。
+     */
+    fun looksLikeImage(file: File): Boolean {
+        if (!file.isFile) return false
+        return file.extension.lowercase() in IMAGE_EXTENSIONS
+    }
+
+    private val IMAGE_EXTENSIONS = setOf(
+        "jpg", "jpeg", "png", "webp", "bmp", "gif",
+        // HEIF/HEIC 从 API 28 起由 ImageDecoder 支持；26~27 上会落到
+        // BitmapFactory 那条退路并报「这不是一张图片」，比不列出来好
+        "heic", "heif", "avif",
+    )
 
     private const val TAG = "CustomBackground"
 }

@@ -76,7 +76,9 @@ import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.screens.files.FileBrowserPanel
 import com.dshwatch.ui.theme.Accents
+import com.dshwatch.ui.theme.CustomBackground
 import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.ThemePresets
 import com.dshwatch.ui.wear.wearVerticalScroll
@@ -207,7 +209,7 @@ fun SettingsGroupScreen(
             SettingsGroups.MODEL -> ModelGroup(settings, nav, s)
             SettingsGroups.ABILITY -> AbilityGroup(settings, update, container, nav, s)
             SettingsGroups.CHAT -> ChatGroup(settings, update, s)
-            SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, s)
+            SettingsGroups.APPEARANCE -> AppearanceGroup(settings, update, profile, container, s)
             SettingsGroups.FILES -> FilesGroup(settings, update, container, nav, s)
             SettingsGroups.DATA -> DataGroup(container, s)
             SettingsGroups.RUNTIME -> RuntimeGroup(settings, update, profile, s)
@@ -402,6 +404,7 @@ private fun AppearanceGroup(
     settings: AppSettings,
     update: Update,
     profile: DeviceProfile,
+    container: AppContainer,
     s: AppStrings,
 ) {
     var editingPreset by remember { mutableStateOf(false) }
@@ -409,6 +412,15 @@ private fun AppearanceGroup(
     var editingUiStyle by remember { mutableStateOf(false) }
     var editingLayout by remember { mutableStateOf(false) }
     var editingBackground by remember { mutableStateOf(false) }
+    /*
+     * 内置文件浏览器挂在**这一层**，不挂在弹窗里。
+     *
+     * 它是整屏面板，而弹窗是独立 Window 的 Dialog —— 塞进 Dialog 只会被裁一条，
+     * 或者被 Dialog 的窗口整个盖住。所以流程是：关弹窗 → 开面板 → 选完把文件
+     * 递回去、弹窗重现（见 [BackgroundDialog] 的 picked 参数）。
+     */
+    var backgroundBrowser by remember { mutableStateOf(false) }
+    var backgroundPick by remember { mutableStateOf<File?>(null) }
     val dark = when (settings.themeMode) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
@@ -982,6 +994,35 @@ private fun AppearanceGroup(
             settings = settings,
             update = update,
             onDismiss = { editingBackground = false },
+            picked = backgroundPick,
+            onPickedConsumed = { backgroundPick = null },
+            onOpenBrowser = {
+                editingBackground = false
+                backgroundBrowser = true
+            },
+        )
+    }
+
+    /*
+     * 内置浏览器：只列目录与图片。
+     *
+     * 系统选择器不可用（华为手表没有文件管理器）时由 [BackgroundDialog] 自动切到
+     * 这里；用户也可以主动点「从文件里挑」。返回 / 关掉都回到弹窗，让遮罩滑块
+     * 还在手边。
+     */
+    if (backgroundBrowser) {
+        FileBrowserPanel(
+            workspace = container.workspaceStore.rootDir(),
+            fileFilter = { CustomBackground.looksLikeImage(it) },
+            onClose = {
+                backgroundBrowser = false
+                editingBackground = true
+            },
+            onPick = { file ->
+                backgroundBrowser = false
+                backgroundPick = file
+                editingBackground = true
+            },
         )
     }
 
