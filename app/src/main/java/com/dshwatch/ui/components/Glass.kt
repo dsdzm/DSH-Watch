@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
@@ -483,7 +482,8 @@ fun Modifier.glassSurface(
     val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
     if (sampleBackdrop) {
         m = m.onGloballyPositioned { coords ->
-            coordsState.value = coords
+            // 只有鱼眼列表项才需要「视觉矩形」，别的地方连引用都不留
+            if (scrollTick != null) coordsState.value = coords
             val p = coords.positionInRoot()
             // 1px 以内不写：亚像素抖动不该换来一次重绘
             if ((p - origin.value).getDistanceSquared() >= 1f) origin.value = p
@@ -512,19 +512,44 @@ fun Modifier.glassSurface(
 
                     val photo = frostPhoto ?: return@drawBehind
                     /*
-                     * 视觉矩形：包含贴边缩小的 scale 与位移。
+                     * 这一行是**重绘订阅**：读 origin 这个 state，卡片位置一变就
+                     * 让本卡的绘制失效。它必须在所有分支之前执行。
                      *
-                     * `positionInRoot()` 是**布局**位置，缩放绕中心发生、它一点不动；
-                     * 拿它采样，再被祖先的 scale 缩小一遍，背景看起来就跟着缩小了。
+                     * 上一版把普通页面也塞进了下面的补偿分支，而那条分支只读
+                     * `coordsState`，没有读 origin —— 于是失去订阅：滚动时
+                     * 父容器只改 RenderNode 的矩阵、不重绘内容，采样的背景就
+                     * 永远停在打开页面时那一帧，滚到哪儿都是最初那块壁纸。
                      */
-                    val visual = coordsState.value?.takeIf { it.isAttached }?.boundsInRoot()
-                    val scale = visual?.let {
-                        if (size.width > 1f) (it.width / size.width).coerceIn(0.5f, 1f) else 1f
-                    } ?: 1f
-                    val left = visual?.topLeft ?: origin.value
+                    val base = origin.value
                     val a = if (enabled) 1f else 0.45f
+                    /*
+                     * 只有在鱼眼列表项里、且卡片真的被缩小了，才谈得上补偿。
+                     *
+                     * `boundsInRoot()` 不是无害的 `positionInRoot()`：它会把整条
+                     * 祖先链的变换矩阵连**裁剪**一起算进来（`clipBounds = true`）。
+                     * 普通页面里卡片没被缩放，却可能因为祖先把边界裁掉一截而
+                     * 报出一个偏小的宽度 —— 于是本来不需要补偿的卡片被放大 1/s
+                     * 并平移，采样的背景整块错位。上一版把所有卡片都改成读它，
+                     * 就是这个后果：列表好了，别的页面全歪了。
+                     *
+                     * 判据放在这里而不是靠「scale 是否等于 1」：没有 tick 就说明
+                     * 不在鱼眼列表里，这一层坐标根本不该参与计算。
+                     */
+                    val visual = if (scrollTick != null) {
+                        coordsState.value?.takeIf { it.isAttached }?.boundsInRootUnclipped()
+                    } else {
+                        null
+                    }
+                    val compensate = visual != null &&
+                        needsVisualSample(visual.width, size.width)
+                    val scale = if (compensate) {
+                        (visual!!.width / size.width).coerceIn(0.5f, 1f)
+                    } else {
+                        1f
+                    }
 
-                    if (scale < 0.995f) {
+                    if (compensate) {
+                        val left = visual!!.topLeft
                         /*
                          * 反向缩放。
                          *
@@ -555,7 +580,7 @@ fun Modifier.glassSurface(
                     } else {
                         drawFrostSlice(
                             photo = photo,
-                            origin = left,
+                            origin = base,
                             rootSize = backdropSize,
                             dim = backdropDim,
                             dark = dark,
@@ -1009,6 +1034,36 @@ private fun DrawScope.drawTopRim(
         style = Stroke(width = width, cap = StrokeCap.Round),
     )
 }
+
+/**
+ * 这张卡是否需要按「视觉矩形」采样（即鱼眼列表里被缩小的情况）。
+ *
+ * 判断要保守：只有宽度真的缩掉 2% 以上才补偿。原因是 [boundsInRoot] 会带上
+ * 祖先的裁剪，普通页面里卡片即使没缩放，宽度也可能报小一点点 —— 那点偏差
+ * 一旦触发补偿，整块背景就会被平移、放大，看上是「卡片里的背景错位」，
+ * 比不补偿难看得多。鱼眼贴边时缩放通常在 0.85 附近，离阈值很远。
+ */
+internal fun needsVisualSample(visualWidth: Float, layoutWidth: Float): Boolean =
+    layoutWidth > 1f && visualWidth > 1f && visualWidth / layoutWidth < 0.98f
+
+/**
+ * 卡片在根坐标系里的矩形，**不计祖先裁剪**。
+ *
+ * `boundsInRoot()` 等价于 `localBoundingBoxOf(root, clipBounds = true)`：圆屏页面的
+ * 圆形裁剪会把卡片两侧切掉一块，报出来的宽度比实际布局小几个百分点。那个偏小的
+ * 宽度会被当成「卡片被缩小了」，触发反向补偿 —— 卡片里的背景被整体放大、平移。
+ *
+ * 这里自己爬到根、把 `clipBounds` 关掉：只保留祖先的缩放/平移（鱼眼要的正是这一层），
+ * 忽略裁剪。
+ */
+private fun LayoutCoordinates.boundsInRootUnclipped(): Rect {
+    var root: LayoutCoordinates = this
+    while (true) {
+        root = root.parentLayoutCoordinates ?: break
+    }
+    return root.localBoundingBoxOf(this, false)
+}
+
 
 /**
  * 卡片磨砂：把「我背后那一块背景」画进玻璃底下。

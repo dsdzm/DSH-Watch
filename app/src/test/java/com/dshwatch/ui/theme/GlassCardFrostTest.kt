@@ -1,5 +1,6 @@
 package com.dshwatch.ui.theme
 
+import com.dshwatch.ui.components.needsVisualSample
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.io.File
@@ -87,12 +88,55 @@ class GlassCardFrostTest {
          */
         val body = code("ui/components/Glass.kt")
         // 视觉矩形（含缩放/位移）才是采样依据
-        assertThat(body).contains("boundsInRoot()")
+        assertThat(body).contains("boundsInRootUnclipped()")
+        // 但不能要裁剪：圆屏的圆形裁剪会把宽度算小，误判成「被缩小了」
+        assertThat(body).contains("localBoundingBoxOf(this, false)")
         // 先反向放大 1/scale，抵消祖先的缩小，采样图在屏幕上保持 1:1
         assertThat(body).contains("withTransform({")
         assertThat(body).contains("scale(1f / scale, 1f / scale, size.center)")
         // 订阅滚动：鱼眼只改 RenderNode 矩阵，不重放显示列表，不订阅就会停在第一帧
         assertThat(body).contains("scrollTick?.invoke(this)")
+    }
+
+    @Test
+    fun `只有鱼眼列表项才启用缩放补偿`() {
+        /*
+         * beta.17 的教训：把所有卡片都改成读视觉矩形，列表是对了，别的页面全歪 ——
+         * 而且那些页面不再读 origin，连带丢了重绘订阅，滚动后采样图停在原地。
+         *
+         * 所以补偿必须由「有没有 tick」把门：不在鱼眼列表里就根本不算这一层。
+         */
+        val body = code("ui/components/Glass.kt")
+        assertThat(body).contains("val visual = if (scrollTick != null) {")
+        // 另一个判据：缩放要真的超过 2% 才补偿，避免裁剪造成的微小误差误触
+        assertThat(body).contains("needsVisualSample(visual.width, size.width)")
+    }
+
+    @Test
+    fun `普通卡片的采样起点必须在所有分支之前读一次`() {
+        /*
+         * `origin` 是 state：draw 阶段读它 = 订阅「卡片位置变了要重画」。
+         * beta.17 里补偿分支只读 coordsState、没读 origin，滚动时父容器
+         * 只改 RenderNode 矩阵不重绘内容，卡片里的背景就永远停在打开页面那一帧。
+         */
+        val body = code("ui/components/Glass.kt")
+        val read = body.indexOf("val base = origin.value")
+        val visual = body.indexOf("val visual = if (scrollTick != null)")
+        assertThat(read).isGreaterThan(-1)
+        assertThat(visual).isGreaterThan(-1)
+        assertThat(read).isLessThan(visual)
+    }
+
+    @Test
+    fun `缩放补偿的门槛是 2%`() {
+        // 鱼眼贴边时缩放约 0.85，离门槛很远；普通页面的裁剪误差在 1% 以内
+        assertThat(needsVisualSample(85f, 100f)).isTrue()
+        assertThat(needsVisualSample(97f, 100f)).isTrue()
+        assertThat(needsVisualSample(99f, 100f)).isFalse()
+        assertThat(needsVisualSample(100f, 100f)).isFalse()
+        // 退化输入不补：size 还没量出来时不能贸然放大
+        assertThat(needsVisualSample(0f, 100f)).isFalse()
+        assertThat(needsVisualSample(80f, 0f)).isFalse()
     }
 
     @Test

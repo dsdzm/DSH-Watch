@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.18",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修好 beta.17 引入的回归：列表以外的页面滚到哪儿，卡片里的糊影就停在打开页面时那一帧",
+                "缩放补偿只在鱼眼列表里生效，其他页面的采样回到原来的坐标，不再被整体放大、平移",
+                "视觉矩形改按「不计裁剪」计算，圆屏的圆形裁边不会再被误判成卡片缩小",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.17",
             date = "2026-11-27",
             highlights = listOf(
