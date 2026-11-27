@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.17",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修好圆屏列表滚动时「卡片缩小、背景也跟着缩小」：采样改按卡片的视觉矩形，反向抵消鱼眼缩放",
+                "没有 WebView 的手表也能登录 DeepSeek：优先唤起已安装的浏览器，不再在入口处被 WebView 检测挡住",
+                "浏览器与 WebView 都没有时才提示改用 API Key，不再让 WebView 构造失败把应用带走",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.16",
             date = "2026-11-27",
             highlights = listOf(

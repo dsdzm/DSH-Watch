@@ -79,6 +79,32 @@ class GlassCardFrostTest {
     }
 
     @Test
+    fun `鱼眼缩放不会把背景一起缩小`() {
+        /*
+         * 用户反馈：圆屏列表上下滚动、卡片贴边缩小时，卡片里透出的背景也跟着缩小，
+         * 像壁纸被吸进卡片。根子是采样用 `positionInRoot()`（布局坐标，不含
+         * 祖先 graphicsLayer 的 scale），而绘制结果又被那一层缩小一遍。
+         */
+        val body = code("ui/components/Glass.kt")
+        // 视觉矩形（含缩放/位移）才是采样依据
+        assertThat(body).contains("boundsInRoot()")
+        // 先反向放大 1/scale，抵消祖先的缩小，采样图在屏幕上保持 1:1
+        assertThat(body).contains("withTransform({")
+        assertThat(body).contains("scale(1f / scale, 1f / scale, size.center)")
+        // 订阅滚动：鱼眼只改 RenderNode 矩阵，不重放显示列表，不订阅就会停在第一帧
+        assertThat(body).contains("scrollTick?.invoke(this)")
+    }
+
+    @Test
+    fun `列表项把滚动进度交给子树`() {
+        val body = code("ui/wear/WearLists.kt")
+        assertThat(body).contains("val LocalItemScrollTick = staticCompositionLocalOf")
+        assertThat(body).contains("CompositionLocalProvider(LocalItemScrollTick provides tick)")
+        // 读 scrollProgress 只是订阅（内部读 layoutInfo 这个 state），不取值
+        assertThat(body).contains("drawScope.scrollProgress")
+    }
+
+    @Test
     fun `取样层画在纱底下，不会盖住文字`() {
         val body = code("ui/components/Glass.kt")
         val slice = body.indexOf("drawFrostSlice(")

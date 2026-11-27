@@ -42,6 +42,7 @@ import com.dshwatch.net.deepseek.DeepSeekAccountApi
 import com.dshwatch.net.deepseek.LoopbackCallbackServer
 import com.dshwatch.ui.components.GhostButton
 import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.html.WebViewSupport
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.nav.WatchNavigator
 import kotlinx.coroutines.CancellationException
@@ -100,6 +101,8 @@ fun DeepSeekLoginScreen(
 
     val serverRef = remember { AtomicReference<LoopbackCallbackServer?>(null) }
     val webRef = remember { AtomicReference<WebView?>(null) }
+    // 兜底路径的前提：这台机器真的能构造 WebView（精简 ROM 会整个剔掉实现）
+    val hasWebView = remember { WebViewSupport.isAvailable() }
 
     fun fail(message: String) {
         error = message
@@ -176,6 +179,23 @@ fun DeepSeekLoginScreen(
     // 第二条路：WebView（没有浏览器，或端口全占）
     LaunchedEffect(mode, attempt) {
         if (mode != Mode.WebView) return@LaunchedEffect
+        if (!hasWebView) {
+            /*
+             * 两条路都断了。
+             *
+             * 以前这里会直接 `WebView(ctx)`，构造函数自己抛
+             * `UnsupportedOperationException` —— 用户点一下，应用就没了。
+             * 现在给一句能照做的提示，不再假装还能继续。
+             */
+            fail(
+                if (zh) {
+                    "这台设备既没有浏览器，也没有可用的 WebView。请先安装一个浏览器，或改用 API Key 登录。"
+                } else {
+                    "No browser and no WebView on this device. Install a browser, or sign in with an API key."
+                },
+            )
+            return@LaunchedEffect
+        }
         repo.beginSignIn()
             .onSuccess { ticket = it.copy(authorizeUrl = withTheme(it.authorizeUrl, dark)) }
             .onFailure { fail(it.message ?: it.javaClass.simpleName) }
@@ -235,17 +255,19 @@ fun DeepSeekLoginScreen(
                             attempt++
                         },
                     )
-                    Spacer(Modifier.height(6.dp))
-                    GhostButton(
-                        text = if (zh) "改用内置页面登录" else "Use the in-app page",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            error = null
-                            ticket = null
-                            mode = Mode.WebView
-                            attempt++
-                        },
-                    )
+                    if (hasWebView) {
+                        Spacer(Modifier.height(6.dp))
+                        GhostButton(
+                            text = if (zh) "改用内置页面登录" else "Use the in-app page",
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                error = null
+                                ticket = null
+                                mode = Mode.WebView
+                                attempt++
+                            },
+                        )
+                    }
                 }
 
                 ticket == null -> Column(
@@ -299,17 +321,19 @@ fun DeepSeekLoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = { ticket?.let { openInBrowser(context, it.authorizeUrl) } },
                     )
-                    Spacer(Modifier.height(6.dp))
-                    GhostButton(
-                        text = if (zh) "改用内置页面" else "Use in-app page",
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            repo.cancelSignInAsync(ticket)
-                            ticket = null
-                            mode = Mode.WebView
-                            attempt++
-                        },
-                    )
+                    if (hasWebView) {
+                        Spacer(Modifier.height(6.dp))
+                        GhostButton(
+                            text = if (zh) "改用内置页面" else "Use in-app page",
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                repo.cancelSignInAsync(ticket)
+                                ticket = null
+                                mode = Mode.WebView
+                                attempt++
+                            },
+                        )
+                    }
                 }
 
                 else -> AndroidView(

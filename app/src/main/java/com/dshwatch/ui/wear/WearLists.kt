@@ -8,8 +8,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -98,6 +101,24 @@ object WearLayout {
 }
 
 /**
+ * 「列表正在滚动」的订阅口。
+ *
+ * 鱼眼变换是 `graphicsLayer` 的属性：滚动时它每帧改缩放与透明度，但**不重新
+ * 执行子节点的 `drawBehind`** —— RenderNode 只是把已经录好的显示列表换个矩阵。
+ *
+ * 卡片里的磨砂采样必须每帧重画：位置在变（`placeWithLayer` 平移），缩放也在变
+ * （贴边缩小）。少了这个订阅，就会看到用户截图里的那一幕 —— 卡片缩小了，
+ * 卡片透出的背景也跟着一起缩小，像是壁纸被吸进卡片里。
+ *
+ * 这里传下去的是一个函数，而不是浮点数：调用它会在当前 `DrawScope` 上读一次
+ * `scrollProgress`（内部读的是 `layoutInfo` 这个 state），于是一次读取就完成了
+ * 「订阅」，而且只让绘制失效、不触发重组。
+ *
+ * 非 [WearList] 的层级拿到的默认值是 null，采样逻辑保持原样（缩放恒为 1）。
+ */
+val LocalItemScrollTick = staticCompositionLocalOf<((DrawScope) -> Unit)?> { null }
+
+/**
  * [WearList] 的 scope。
  *
  * 存在的唯一理由是：给每一项套上 `transformedHeight` + 容器变换。
@@ -139,6 +160,11 @@ private fun TransformingLazyColumnItemScope.FisheyeItem(
     spec: TransformationSpec,
     content: @Composable TransformingLazyColumnItemScope.() -> Unit,
 ) {
+    val itemScope = this
+    // 这个 lambda 在 draw 阶段调用：读 scrollProgress 只是订阅，不取值
+    val tick: (DrawScope) -> Unit = remember(itemScope) {
+        { drawScope -> with(itemScope) { drawScope.scrollProgress } }
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -149,7 +175,9 @@ private fun TransformingLazyColumnItemScope.FisheyeItem(
                 }
             },
     ) {
-        content()
+        CompositionLocalProvider(LocalItemScrollTick provides tick) {
+            content()
+        }
     }
 }
 

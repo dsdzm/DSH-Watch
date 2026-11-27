@@ -157,15 +157,21 @@ fun AccountScreen(
                             text = if (zh) "去登录" else "Sign in",
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
-                                if (!com.dshwatch.ui.html.WebViewSupport.isAvailable()) {
-                                    Toast.makeText(
-                                        context,
-                                        if (zh) "这台设备没有 WebView，改用 API Key 方式" else "No WebView on this device; use an API key",
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                } else {
-                                    nav.push(Screen.DeepSeekLogin)
-                                }
+                                /*
+                                 * 不再用「有没有 WebView」挡在门口。
+                                 *
+                                 * 登录的首选路径是**系统浏览器 + 回环回调**，WebView
+                                 * 只是没有浏览器时的兜底 —— 手表上装了第三方浏览器
+                                 * （腕上浏览器之类）就完全不需要 WebView。
+                                 *
+                                 * 以前这里先问 WebView，一问不到就弹「改用 API Key」，
+                                 * 于是有浏览器的设备也被挡在外面：用户看到的正是
+                                 * 那句提示，而不是浏览器里打开的平台登录页。
+                                 *
+                                 * 真正的可用性判断交给登录页：先试浏览器，打不开再
+                                 * 退回 WebView，两者都没有才给一句人话。
+                                 */
+                                nav.push(Screen.DeepSeekLogin)
                             },
                         )
                     }

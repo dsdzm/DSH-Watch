@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -35,8 +36,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
@@ -53,6 +57,7 @@ import com.dshwatch.ui.theme.LocalGlassBlur
 import com.dshwatch.ui.theme.LocalGlassDim
 import com.dshwatch.ui.theme.LocalPerf
 import com.dshwatch.ui.theme.coverRect
+import com.dshwatch.ui.wear.LocalItemScrollTick
 import kotlin.math.roundToInt
 
 /**
@@ -221,6 +226,8 @@ fun Modifier.glassSurface(
     // 卡片背后那块底有多亮（见 LocalBackdropLuma）。压暗与描边都按它补偿：
     // 暗底少压、边略亮；亮底多压、边略收
     val backdropLuma = LocalBackdropLuma.current
+    // 列表滚动的订阅口；`CompositionLocal.current` 是 @Composable，必须在这里读
+    val scrollTick = LocalItemScrollTick.current
     /*
      * 卡片自己那句「高斯模糊」。
      *
@@ -465,8 +472,18 @@ fun Modifier.glassSurface(
      * 不会经过组合。这是 Compose 里「布局阶段写、绘制阶段读」的标准组合。
      */
     val origin = remember { mutableStateOf(Offset.Zero) }
+    /*
+     * 卡片自己的坐标对象。
+     *
+     * 和 origin 一起存：`boundsInRoot()` 相对 `positionInRoot()` 多带了
+     * **祖先 graphicsLayer 的缩放与平移** —— 鱼眼列表里卡片贴边缩小，
+     * 缩的正是这一层。绘制阶段拿它算「我视觉上占哪一块」，才不会把
+     * 背景一起缩进去。
+     */
+    val coordsState = remember { mutableStateOf<LayoutCoordinates?>(null) }
     if (sampleBackdrop) {
         m = m.onGloballyPositioned { coords ->
+            coordsState.value = coords
             val p = coords.positionInRoot()
             // 1px 以内不写：亚像素抖动不该换来一次重绘
             if ((p - origin.value).getDistanceSquared() >= 1f) origin.value = p
@@ -484,14 +501,67 @@ fun Modifier.glassSurface(
         .then(
             if (sampleBackdrop) {
                 Modifier.drawBehind {
-                    drawFrostSlice(
-                        photo = frostPhoto ?: return@drawBehind,
-                        origin = origin.value,
-                        rootSize = backdropSize,
-                        dim = backdropDim,
-                        dark = dark,
-                        alpha = if (enabled) 1f else 0.45f,
-                    )
+                    /*
+                     * 先订阅列表滚动。
+                     *
+                     * 鱼眼列表滚动时只改 RenderNode 的矩阵，不重放显示列表；
+                     * 这一行读一次 scrollProgress，让本卡的绘制跟着每帧失效。
+                     * 不订阅的话，下面的坐标与缩放会停在开始滚动的那一帧。
+                     */
+                    scrollTick?.invoke(this)
+
+                    val photo = frostPhoto ?: return@drawBehind
+                    /*
+                     * 视觉矩形：包含贴边缩小的 scale 与位移。
+                     *
+                     * `positionInRoot()` 是**布局**位置，缩放绕中心发生、它一点不动；
+                     * 拿它采样，再被祖先的 scale 缩小一遍，背景看起来就跟着缩小了。
+                     */
+                    val visual = coordsState.value?.takeIf { it.isAttached }?.boundsInRoot()
+                    val scale = visual?.let {
+                        if (size.width > 1f) (it.width / size.width).coerceIn(0.5f, 1f) else 1f
+                    } ?: 1f
+                    val left = visual?.topLeft ?: origin.value
+                    val a = if (enabled) 1f else 0.45f
+
+                    if (scale < 0.995f) {
+                        /*
+                         * 反向缩放。
+                         *
+                         * 绘制内容最终会被祖先按 scale 缩小；这里先放大 1/scale，
+                         * 两者抵消，采样图在屏幕上保持 1:1 —— 卡片缩小只是
+                         * 「窗口变小」，透过它看到的背景位置与大小都不变。
+                         *
+                         * 偏移补的是「缩放绕中心」带来的左上角位移：
+                         * 视觉左上角 = 布局左上角 + 中心 × (1 − scale)，
+                         * 反算回布局坐标要减掉这一截。
+                         */
+                        val shift = Offset(
+                            (1f - scale) * size.width / 2f,
+                            (1f - scale) * size.height / 2f,
+                        )
+                        withTransform({
+                            scale(1f / scale, 1f / scale, size.center)
+                        }) {
+                            drawFrostSlice(
+                                photo = photo,
+                                origin = left - shift,
+                                rootSize = backdropSize,
+                                dim = backdropDim,
+                                dark = dark,
+                                alpha = a,
+                            )
+                        }
+                    } else {
+                        drawFrostSlice(
+                            photo = photo,
+                            origin = left,
+                            rootSize = backdropSize,
+                            dim = backdropDim,
+                            dark = dark,
+                            alpha = a,
+                        )
+                    }
                 }
             } else {
                 Modifier
