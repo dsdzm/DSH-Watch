@@ -533,6 +533,18 @@ data class AppSettings(
      */
     val appearance: String = Appearances.M3E,
 
+    /**
+     * 玻璃底是否叠真高斯模糊。
+     *
+     * 默认关。三点原因：
+     *  - `Modifier.blur` 走 RenderEffect，API 31 以下**静默无效**，不能当默认路径；
+     *  - 它是一次全屏的 GPU 效果，低端表上仍要用户自己决定值不值；
+     *  - 玻璃的默认观感（多层低对比渐变）本来就是按「不糊」调的，糊了会改变调性。
+     *
+     * 只在 `appearance = 玻璃` 时有意义；M3E 材质下卡片不透明，看不出差别。
+     */
+    val glassBlur: Boolean = false,
+
     /** 强调色 id：在预设色板之上换主色，不改背景与正文层次 */
     val accentColor: String = "blue",
 

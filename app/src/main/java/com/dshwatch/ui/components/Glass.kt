@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.dshwatch.domain.DeviceTier
 import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.LocalGlass
+import com.dshwatch.ui.theme.LocalGlassBlur
 import com.dshwatch.ui.theme.LocalPerf
 
 /**
@@ -164,6 +165,8 @@ fun Modifier.glassSurface(
      * 浅色模式直接变成黑卡片配深色字，什么都读不出来。
      */
     val dark = LocalDarkTheme.current
+    // 卡片底下是不是真糊着（只在玻璃 + 用户开启 + API 31+ 时为 true）
+    val frosted = LocalGlassBlur.current
     // 浅色底上「压暗」用的颜色：正文色。在 Composable 作用域里取好再传进 DrawScope
     val onSurface = MaterialTheme.colorScheme.onSurface
 
@@ -326,6 +329,7 @@ fun Modifier.glassSurface(
             drawGlassPanel(
                 corner = cornerRadius?.toPx() ?: (size.height / 2f),
                 dark = dark,
+                frosted = frosted,
                 bodyTint = onSurface,
                 tint = tint,
                 press = p,
@@ -374,6 +378,8 @@ fun Modifier.glassSurface(
 private fun DrawScope.drawGlassPanel(
     corner: Float,
     dark: Boolean,
+    /** 底是不是真的糊了：决定本体要不要变薄（见 body 的注释） */
+    frosted: Boolean,
     bodyTint: Color,
     tint: Color,
     press: Float,
@@ -458,8 +464,18 @@ private fun DrawScope.drawGlassPanel(
             // 靠 0.92 的白硬盖在观感上是一块白板；背后糊掉之后，
             // 0.56 的白 + 上沿高光 + 下沿厚度才是「一块毛玻璃」。
             elevated -> 0.56f
-            dark -> 0.24f
-            else -> 0.55f
+            /*
+             * 普通卡片（非弹窗）。开了真模糊时本体薄一档：
+             *
+             * 那层 0.68 的黑是为「背景清晰」准备的 —— 它把底下压成一块均匀的灰，
+             * 文字才有地方站。但底一旦是糊的，就没有「细节」需要压了，
+             * 继续压 0.68 只会把模糊也一起吃掉，用户点开开关看不到任何变化。
+             *
+             * 所以糊的时候把黑收到 0.56、白收到 0.18：平均亮度几乎不变
+             * （文字对比度不掉），透上来的却是**有纹理**的底色 —— 这就是「通透」。
+             */
+            dark -> if (frosted) 0.18f else 0.24f
+            else -> if (frosted) 0.48f else 0.55f
         }
         if (dark) {
             /*
@@ -481,7 +497,12 @@ private fun DrawScope.drawGlassPanel(
              * 对比度 (230+5)/(46+5) ≈ 4.6:1 —— 过线，同时还剩 32% 的背景
              * 透上来，仍然是玻璃，不是一块实心板。
              */
-            drawRoundRect(Color.Black, cornerRadius = r, alpha = 0.68f * alpha)
+            /*
+             * 弹窗不动这一笔（0.68）：它背后由宿主糊到 18dp，文字本来就站在
+             * 一团看不出细节的底上，再放低只会把已经调好的 4.6:1 对比度拉回去。
+             * 只有**普通卡片**在真模糊下降一档，见上面 body 的注释。
+             */
+            drawRoundRect(Color.Black, cornerRadius = r, alpha = (if (frosted && !elevated) 0.56f else 0.68f) * alpha)
             drawRoundRect(Color.White, cornerRadius = r, alpha = body * alpha)
         } else if (elevated) {
             /*

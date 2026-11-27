@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.7",
+            date = "2026-11-27",
+            highlights = listOf(
+                "外观设置新增「高斯模糊」开关，玻璃卡片下的背景可叠加真高斯模糊",
+                "开启后玻璃卡片本体变薄，背景纹理透出更明显",
+                "开关仅在玻璃材质与 Android 12 及以上系统中可用",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.6",
             date = "2026-11-27",
             highlights = listOf(

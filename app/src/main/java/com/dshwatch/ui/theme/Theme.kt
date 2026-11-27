@@ -1,5 +1,6 @@
 package com.dshwatch.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -50,13 +53,51 @@ val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.ds
  *  - 关掉它零成本：没有额外 draw、没有 pointer 追踪、没有动画；
  *  - 打开它整机的胶囊、卡片、按钮一起变，不用逐个页面改。
  *
- * 为什么不是真的高斯模糊：本项目 minSdk 28，而 `Modifier.blur` / RenderEffect
+ * 为什么默认不是真的高斯模糊：本项目 minSdk 28，而 `Modifier.blur` / RenderEffect
  * 要 API 31 才生效，在 Android 9 的手表上会被静默忽略。RenderScript 早已废弃、
  * 且逐帧模糊一块 200×120dp 的区域在 512MB 内存的表上会直接掉帧。
- * 所以这里画的是「模糊的观感」——多层低对比渐变 + 边缘光，GPU 填充成本约等于
+ * 所以默认画的是「模糊的观感」——多层低对比渐变 + 边缘光，GPU 填充成本约等于
  * 几次纯色圆角矩形，比真模糊低一个数量级。
+ *
+ * 用户可以在外观设置里打开真模糊（[LocalGlassBlur]）：那是显式选择，
+ * 代价（API 31+、一次全屏 RenderEffect）由用户自己承担。
  */
 val LocalGlass = staticCompositionLocalOf { false }
+
+/**
+ * 玻璃是否叠在**真高斯模糊**的背景上。
+ *
+ * 默认 false：低端表上整屏 RenderEffect 的代价仍然可观，而且它只在
+ * API 31+ 生效，不该成为默认路径。用户在外观设置里打开后为 true，
+ * 两件事同时发生：
+ *
+ *  1. 主题的背景层（照片 / 色晕）整体挂 `Modifier.blur`，玻璃透过去的是糊的底；
+ *  2. [com.dshwatch.ui.components.glassSurface] 的本体略微变薄 —— 不然那层
+ *     0.68 的黑会把糊掉的底重新压成一块灰板，「通透」看不出任何变化。
+ *
+ * 注意它和 [LocalGlass] 是两件事：后者决定「卡片是不是玻璃」，
+ * 前者只决定「玻璃底下糊不糊」。所以 M3E 材质下它永远是 false。
+ */
+val LocalGlassBlur = staticCompositionLocalOf { false }
+
+/**
+ * 背景层的模糊半径。
+ *
+ * 22dp：比弹窗那层（18dp）略重。弹窗要「读出层次」，卡片底下只需要
+ * 「看不出细节」；表屏只有 200dp 出头，半径再大就糊成一片色块，
+ * 玻璃反而失去「底下有东西」的感觉。
+ */
+internal val GLASS_BLUR_RADIUS = 22.dp
+
+/**
+ * 真模糊的最低系统版本。
+ *
+ * `Modifier.blur` 走 RenderEffect，API 31 之前是**空操作** —— 不报错、
+ * 不生效。所以开关在低版本上必须是不可用的，否则用户会点开、看不到变化，
+ * 以为功能坏了。
+ */
+internal const val MIN_SDK_GLASS_BLUR = 31
+
 
 /**
  * 当前主题是不是深色。
@@ -192,6 +233,13 @@ fun DshWatchTheme(
     /** 背景是否虚化（读得粗 + 放大，见 [CustomBackground]） */
     customBackgroundFrost: Boolean = true,
     /**
+     * 玻璃底是否叠真高斯模糊。
+     *
+     * 只在「材质 = 玻璃」且 API 31+ 时生效，低版本会被静默降级成原来的
+     * 观感玻璃 —— 见 [LocalGlassBlur]。
+     */
+    glassBlur: Boolean = false,
+    /**
      * 界面整体缩放，1.0 = 标准。
      *
      * **这是唯一的缩放轴。** v1.15.21 及以前这里还并行一个 `fontScale`：
@@ -314,6 +362,14 @@ fun DshWatchTheme(
     val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
 
     /*
+     * 真模糊只在「玻璃 + 用户打开 + 系统支持」三者同时成立时生效。
+     *
+     * 少了任何一条都退回原来的观感玻璃，而不是「开了但什么都没发生」：
+     * 开关在设置页里也是按同一条判据决定能不能点（见 SettingsGroupScreen）。
+     */
+    val blurBackdrop = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
+
+    /*
      * 浅色底判定直接取主题的明暗，不再看 background 的亮度。
      *
      * `Color.Transparent.luminance()` 是 0，而玻璃预设的 background 正是透明的 ——
@@ -390,6 +446,7 @@ fun DshWatchTheme(
         LocalContentColor provides colorScheme.onSurface,
         LocalStrings provides strings,
         LocalGlass provides glass,
+        LocalGlassBlur provides blurBackdrop,
         LocalDarkTheme provides dark,
         LocalUiStyle provides uiStyleNow,
     ) {
@@ -420,10 +477,34 @@ fun DshWatchTheme(
                 //
                 // 色晕在**浅色底上要大幅收力**：白底上叠 0.46 的主色会变成一片色块，
                 // 那不是「环境色」，那是「换了张壁纸」。
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .drawBehind {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    /*
+                     * 背景层单独成一个节点，**不再和内容共用一层**。
+                     *
+                     * 「玻璃卡片底高斯模糊」只能这么做：Compose 没有 backdrop-filter，
+                     * 卡片拿不到"它背后已经画了什么"。但能确定的是——卡片背后永远
+                     * 只有这一层（照片或色晕），所以把这层糊掉，玻璃透过去的就是模糊的底。
+                     *
+                     * 以前背景和内容在同一个 Box 里（drawBehind + content），
+                     * 想糊背景就必然连内容一起糊，所以这个开关只能靠重构成两层来实现。
+                     */
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (blurBackdrop) {
+                                    // Unbounded：默认的 Rectangle 会在四边做一圈渐隐，
+                                    // 满屏铺开时就是一圈「暗边」，看着像屏幕漏光。
+                                    // 半径按屏宽的一小段取，和弹窗的 18dp 同一量级。
+                                    Modifier.blur(
+                                        radius = GLASS_BLUR_RADIUS,
+                                        edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .drawBehind {
                             /*
                              * 有照片就只画照片 + 遮罩，画完直接返回。
                              *
@@ -486,7 +567,7 @@ fun DshWatchTheme(
                                 )
                             }
                         },
-                ) {
+                    )
                     content()
                 }
             } else {

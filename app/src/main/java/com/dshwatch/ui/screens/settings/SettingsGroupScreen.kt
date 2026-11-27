@@ -520,6 +520,38 @@ private fun AppearanceGroup(
             showDivider = true,
             onClick = { editingAppearance = true },
         )
+        /*
+         * 高斯模糊：只在玻璃材质下出现。
+         *
+         * 不放进「外观风格」弹窗，是因为它是**日常会调**的一项（亮/暗、背景图
+         * 换一张，观感差别很大），而弹窗是「先定材质」的一次性选择。放在这里，
+         * 用户切完风格顺手就能试。
+         *
+         * 系统不支持时（API < 31）画成一条没有开关的说明行，而不是一个点了
+         * 没反应的开关 —— `Modifier.blur` 在那些版本上是**静默无效**的。
+         */
+        if (Appearances.isGlass(settings.appearance)) {
+            if (android.os.Build.VERSION.SDK_INT >= com.dshwatch.ui.theme.MIN_SDK_GLASS_BLUR) {
+                SwitchRow(
+                    title = "高斯模糊",
+                    subtitle = if (com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle)) {
+                        "模糊卡片下的背景 · M3E 卡片不透明，仅经典界面可见"
+                    } else {
+                        "模糊卡片下的背景，玻璃更通透"
+                    },
+                    checked = settings.glassBlur,
+                    onCheckedChange = { v -> update { it.copy(glassBlur = v) } },
+                )
+            } else {
+                SettingRow(
+                    title = "高斯模糊",
+                    subtitle = "需要 Android 12 及以上系统",
+                    trailing = "不可用",
+                    showDivider = true,
+                    onClick = null,
+                )
+            }
+        }
     }
     /*
      * 主题色单独一张卡 —— 两个理由：

@@ -142,6 +142,7 @@ class MainActivity : ComponentActivity() {
                 customBackground = settings.customBackground,
                 customBackgroundDim = settings.customBackgroundDim,
                 customBackgroundFrost = settings.customBackgroundFrost,
+                glassBlur = settings.glassBlur,
                 uiScale = uiScale,
                 appLanguage = settings.appLanguage,
                 perf = perf,
