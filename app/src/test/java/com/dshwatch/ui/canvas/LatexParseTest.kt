@@ -30,6 +30,8 @@ class LatexParseTest {
         is MathNode.Big -> node.glyph
         is MathNode.Delim -> node.open + glyphs(node.body) + node.close
         is MathNode.Accent -> glyphs(node.body)
+        is MathNode.Framed -> glyphs(node.body)
+        is MathNode.Rows -> node.rows.joinToString("") { glyphs(it) }
     }
 
     /** 用户截图里的原公式 */
@@ -205,5 +207,52 @@ class LatexParseTest {
         val out = parse(src)
         assertThat(out).doesNotContain("\\")
         assertThat(glyphs(Latex.parse(src))).isEqualTo("XI:XII:XIII:⋯=1:3:5:⋯")
+    }
+
+    /*
+     * 第二张截图：解数学题的一整段推导里，\boxed、\mathbb、\begin{cases}
+     * 全部原样吐在屏幕上。这三条是「解数学题」里出现频率最高的写法，
+     * 以前都落到「未知命令 → 显示原文」的兜底分支。
+     */
+
+    @Test
+    fun `boxed 变成带框的节点，不再漏出命令`() {
+        val node = Latex.parse("""\boxed{[-3,-2]\cup(0,2]}""")
+        assertThat(node).isInstanceOf(MathNode.Framed::class.java)
+        val out = glyphs(node)
+        assertThat(out).doesNotContain("boxed")
+        assertThat(out).contains("[-3,-2]")
+        assertThat(out).contains("∪")
+    }
+
+    @Test
+    fun `mathbb 映射成黑板粗体字符`() {
+        val out = parse("""A\cup B=\mathbb{R}""")
+        assertThat(out).doesNotContain("mathbb")
+        assertThat(out).contains("ℝ")
+        // 多字母要逐个映射，不能只认 R
+        assertThat(glyphs(Latex.parse("""\mathbb{NZQC}"""))).isEqualTo("ℕℤℚℂ")
+    }
+
+    @Test
+    fun `cases 按换行切成多行，左侧带大括号`() {
+        val node = Latex.parse("""\begin{cases}2a-2\ge -3\\2+a\le 2\end{cases}""")
+        assertThat(node).isInstanceOf(MathNode.Rows::class.java)
+        val rows = (node as MathNode.Rows)
+        assertThat(rows.rows).hasSize(2)
+        assertThat(rows.left).isEqualTo("{")
+        val out = glyphs(node)
+        assertThat(out).doesNotContain("begin")
+        assertThat(out).doesNotContain("cases")
+        assertThat(out).contains("≥")
+        assertThat(out).contains("≤")
+    }
+
+    @Test
+    fun `环境里的对齐符被丢掉，不会变成 & 字符`() {
+        val out = glyphs(Latex.parse("""\begin{aligned}a&=1\\b&=2\end{aligned}"""))
+        assertThat(out).doesNotContain("&")
+        assertThat(out).contains("1")
+        assertThat(out).contains("2")
     }
 }

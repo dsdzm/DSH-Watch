@@ -159,6 +159,9 @@ object MathText {
                 node.kind == com.dshwatch.ui.canvas.AccentKind.OVERLINE ||
                 needsBlock(node.body)
         is MathNode.Sqrt -> false
+        // 多行公式压不成一行：中间变成「；」之后读不出「分情况讨论」的结构
+        is MathNode.Rows -> true
+        is MathNode.Framed -> needsBlock(node.body)
         else -> false
     }
 
@@ -282,6 +285,20 @@ object MathText {
              * `\overline{AB}` 会落在 B 上 —— 但它已经排除在压平之外（走画布），
              * 能走到这里的都是单个字母。
              */
+            is MathNode.Framed -> {
+                // 行内压平：方括号代替方框，至少保留「这是一个被框起来的结果」
+                append("[")
+                emit(node.body, b, base, colors, depth + 1)
+                append("]")
+            }
+
+            is MathNode.Rows -> {
+                node.rows.forEachIndexed { i, row ->
+                    if (i > 0) append("；")
+                    emit(row, b, base, colors, depth + 1)
+                }
+            }
+
             is MathNode.Accent -> {
                 emit(node.body, b, base, colors, depth + 1)
                 val mark = when (node.kind) {

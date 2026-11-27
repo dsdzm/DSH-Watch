@@ -12,7 +12,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -198,6 +200,23 @@ sealed interface MathNode {
     data class Big(val glyph: String, val sup: MathNode? = null, val sub: MathNode? = null) : MathNode
     data class Delim(val open: String, val body: MathNode, val close: String) : MathNode
     data class Text(val raw: String) : MathNode
+
+    /**
+     * `\boxed{...}`：外面一圈细框。
+     *
+     * 数学书里「答案是它」的标准写法，模型很爱用。以前它是未知命令，
+     * 屏幕上原样显示 `\boxed{[-3,-2]}` —— 用户看到的就是「公式没加载」。
+     */
+    data class Framed(val body: MathNode) : MathNode
+
+    /**
+     * 多行公式：`cases` / `aligned` / `matrix` 家族。
+     *
+     * [left] 是左侧的定界符（cases 是 `{`，矩阵按环境给括号，aligned 为空）。
+     * 每行只按 `\\` 切分，不做 `&` 对齐 —— 手表宽度下对齐的收益抵不过
+     * 一个不牢靠的对齐算法带来的错位。
+     */
+    data class Rows(val rows: List<MathNode>, val left: String = "", val right: String = "") : MathNode
 
     /**
      * 重音 / 上划线。
@@ -459,6 +478,70 @@ private fun buildMathBox(
         )
     }
 
+    is MathNode.Framed -> {
+        val body = buildMathBox(node.body, size, m, color)
+        val pad = size * 0.16f
+        val thick = max(1f, size * 0.05f)
+        val radius = size * 0.10f
+        MathBox(
+            width = body.width + pad * 2,
+            ascent = body.ascent + pad,
+            descent = body.descent + pad,
+            draw = { x, base ->
+                body.draw(this, x + pad, base)
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x + thick / 2, base - body.ascent - pad + thick / 2),
+                    size = Size(
+                        body.width + pad * 2 - thick,
+                        body.height + pad * 2 - thick,
+                    ),
+                    cornerRadius = CornerRadius(radius, radius),
+                    style = Stroke(thick),
+                )
+            },
+        )
+    }
+
+    is MathNode.Rows -> {
+        val parts = node.rows.ifEmpty { listOf(MathNode.Text("")) }
+            .map { buildMathBox(it, size, m, color) }
+        val gap = size * 0.20f
+        val lineAscent = parts.maxOfOrNull { it.ascent } ?: size
+        val lineDescent = parts.maxOfOrNull { it.descent } ?: (size * 0.25f)
+        /*
+         * 行距按「最高那行的 ascent + descent + 一点缝」算，所有行共用同一个
+         * 步长。逐行自适应步长会让 `cases` 的两行一大一小错开，比固定步长更难读。
+         */
+        val lineStep = lineAscent + lineDescent + gap
+        val bodyW = parts.maxOfOrNull { it.width } ?: 0f
+        val braceScale = 1f + 0.42f * (parts.size - 1).coerceAtLeast(0)
+        val left = if (node.left.isEmpty()) null else
+            textBox(node.left, size * braceScale, m, color, italic = false, upright = true)
+        val right = if (node.right.isEmpty()) null else
+            textBox(node.right, size * braceScale, m, color, italic = false, upright = true)
+        val lw = left?.width ?: 0f
+        val rw = right?.width ?: 0f
+        val extra = (parts.size - 1) * lineStep
+        MathBox(
+            width = lw + bodyW + rw,
+            ascent = lineAscent,
+            descent = lineDescent + extra,
+            draw = { x, base ->
+                /*
+                 * 大括号要以整块的**竖直中心**落位：cases 的括号一旦按第一行
+                 * 基线对齐，下面几行就会跑到括号外面去。
+                 */
+                val centerY = base + (extra - lineDescent + lineAscent) / 2f
+                left?.draw(this, x, centerY)
+                right?.draw(this, x + lw + bodyW, centerY)
+                parts.forEachIndexed { i, p ->
+                    p.draw(this, x + lw, base + i * lineStep)
+                }
+            },
+        )
+    }
+
     is MathNode.Delim -> {
         val body = buildMathBox(node.body, size, m, color)
         val open = textBox(node.open, size * 1.15f, m, color, italic = false)
@@ -641,6 +724,31 @@ object Latex {
 
     private val BOLD_CMDS = setOf("mathbf", "boldsymbol", "bm", "bf")
 
+    /** 能按「多行」处理的环境。其它环境（如 tabular）没有对应排版，直接忽略 */
+    private val MATH_ENVS = setOf(
+        "cases", "aligned", "align", "gathered", "split", "array",
+        "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix",
+    )
+
+    /**
+     * 黑板粗体（`\mathbb`）的字符映射。
+     *
+     * R / N / Z / Q / C 走 BMP（U+211D 一带），字体覆盖最稳；
+     * 其余走 Unicode 的 𝔸 区段（U+1D538 起），个别字体缺字时会显示方框，
+     * 但总比把 `\mathbb{A}` 原样吐出来强。
+     */
+    private val BLACKBOARD = mapOf(
+        'R' to "ℝ", 'N' to "ℕ", 'Z' to "ℤ", 'Q' to "ℚ", 'C' to "ℂ", 'P' to "ℙ",
+        'H' to "ℍ", 'A' to "𝔸", 'B' to "𝔹", 'D' to "𝔻", 'E' to "𝔼", 'F' to "𝔽",
+        'G' to "𝔾", 'I' to "𝕀", 'J' to "𝕁", 'K' to "𝕂", 'L' to "𝕃", 'M' to "𝕄",
+        'O' to "𝕆", 'S' to "𝕊", 'T' to "𝕋", 'U' to "𝕌", 'V' to "𝕍", 'W' to "𝕎",
+        'X' to "𝕏", 'Y' to "𝕐",
+    )
+
+    private fun blackboard(raw: String): String = buildString {
+        for (c in raw) append(BLACKBOARD[c] ?: c)
+    }
+
     /** 声明式命令：作用于排版环境，本身不出字形 */
     private val STYLE_CMDS = setOf(
         "displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle",
@@ -729,6 +837,8 @@ object Latex {
         )
         is MathNode.Delim -> MathNode.Delim(node.open, uprightOf(node.body, bold), node.close)
         is MathNode.Accent -> MathNode.Accent(uprightOf(node.body, bold), node.kind)
+        is MathNode.Framed -> MathNode.Framed(uprightOf(node.body, bold))
+        is MathNode.Rows -> MathNode.Rows(node.rows.map { uprightOf(it, bold) }, node.left, node.right)
         is MathNode.Text -> node
     }
 
@@ -847,6 +957,39 @@ object Latex {
              */
             if (name in STYLE_CMDS) return MathNode.Text("")
 
+            /*
+             * \boxed{…}：数学书里「答案是它」的标准写法。
+             *
+             * 这是用户截图里 `\boxed{[-3,-2]∪(0,2]}` 原样漏出来的原因：
+             * 未知命令会按原文显示，而那一段正好是整页推导的结论。
+             */
+            if (name == "boxed" || name == "fbox" || name == "framebox") {
+                return MathNode.Framed(parseGroup(depth + 1))
+            }
+            /*
+             * \mathbb{R}：黑板粗体。
+             *
+             * 直接换成 Unicode 字符，不建节点 —— ℝ 本身就是个字，画出来和
+             * 任何普通符号一样，还能参与后面的排版。
+             */
+            if (name == "mathbb" || name == "Bbb") {
+                return MathNode.Text(blackboard(readBraceRaw()))
+            }
+            /*
+             * \begin{cases} … \end{cases}（以及 aligned / matrix 家族）。
+             *
+             * 模型写「分两种情况」几乎只用 cases。以前 `\begin` 是未知命令，
+             * 屏幕上就是一串 `\begin{cases}2a-2≥-3\\2+a≤2\end{cases}`。
+             */
+            if (name == "begin") {
+                return parseEnvironment(depth) ?: MathNode.Text("")
+            }
+            if (name == "end") {
+                // 落单的 \end：把环境名吃掉，别把它当文字显示
+                readBraceRaw()
+                return MathNode.Text("")
+            }
+
             // \frac{}{} —— 两个必选参数
             if (name == "frac" || name == "dfrac" || name == "tfrac") {
                 val num = parseGroup(depth + 1)
@@ -947,6 +1090,52 @@ object Latex {
                 else -> null
             }
         }
+
+        /**
+         * 解析 `\begin{...} … \end{...}`。
+         *
+         * 只按 `\\` 切行，`&` 直接丢掉：手表宽度下逐列对齐的收益很低，
+         * 而一个不牢靠的对齐算法会把 `cases` 里的两行叠在一起。
+         *
+         * 未知环境返回 null，调用方按空文本处理 —— 总比把 `\begin{foo}`
+         * 吐到屏幕上强。
+         */
+        private fun parseEnvironment(depth: Int): MathNode? {
+            val env = readBraceRaw().trim()
+            val brace = when (env) {
+                "cases" -> "{" to ""
+                "pmatrix" -> "(" to ")"
+                "bmatrix" -> "[" to "]"
+                "Bmatrix" -> "{" to "}"
+                "vmatrix" -> "|" to "|"
+                "Vmatrix" -> "‖" to "‖"
+                else -> "" to ""
+            }
+            if (env !in MATH_ENVS) return null
+            val rows = ArrayList<MathNode>()
+            var current = ArrayList<MathNode>()
+            while (pos < toks.size) {
+                val t = toks[pos]
+                if (t is Tok.Cmd && t.name == "end") {
+                    pos++
+                    readBraceRaw()
+                    break
+                }
+                if (t is Tok.Cmd && t.name == "\\") {
+                    pos++
+                    if (current.isNotEmpty()) { rows += toSeq(current); current = ArrayList() }
+                    continue
+                }
+                if (t is Tok.Ch && t.c == '&') { pos++; continue }
+                current += parseAtom(depth + 1)
+            }
+            if (current.isNotEmpty()) rows += toSeq(current)
+            if (rows.isEmpty()) return null
+            return MathNode.Rows(rows, brace.first, brace.second)
+        }
+
+        private fun toSeq(items: List<MathNode>): MathNode =
+            if (items.size == 1) items[0] else MathNode.Seq(items)
 
         private fun readBraceRaw(): String {
             if (toks.getOrNull(pos) !is Tok.Open) {

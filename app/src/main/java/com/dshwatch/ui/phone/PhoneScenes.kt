@@ -62,6 +62,7 @@ import com.dshwatch.domain.model.ReasoningEffort
 import com.dshwatch.domain.roleplay.CardPlugin
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.domain.roleplay.isFishCard
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.screens.writing.ImportDialog
 import com.dshwatch.ui.screens.writing.parseLore
@@ -161,10 +162,17 @@ private fun PhoneRoleList(
     var renameTarget by remember { mutableStateOf<Conversation?>(null) }
     var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
 
-    LaunchedEffect(scene) {
+    /*
+     * 随导航深度重读：从编辑页删掉一张卡、或新建一张回来，列表要立刻变。
+     * 只依赖 `scene` 的话，pop 回来看到的还是旧列表。
+     */
+    val depth = nav.watchStack.depth
+    LaunchedEffect(scene, depth) {
         cards = runCatching { container.roleCardStore.index(scene) }
             .onFailure { Logx.e("PhoneScene", "读取卡片失败 scene=$scene", it) }
             .getOrDefault(emptyList())
+            // 大肥鱼是养鱼场景的固定角色，不属于酒馆的「可挑选列表」
+            .filterNot { it.isFishCard }
         loaded = true
     }
 

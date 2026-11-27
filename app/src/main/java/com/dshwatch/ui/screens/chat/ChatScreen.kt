@@ -289,14 +289,35 @@ fun ChatScreen(
         }
     }
 
+    /*
+     * 进页面 / 切会话先落到底，之后再按 atBottom 跟随。
+     *
+     * 列表的初始位置永远是第 0 项（__info__ 头项），所以以前从历史里点开一条
+     * 聊了半天的会话，看到的是**最早的那几句**，得自己一路翻下来。atBottom
+     * 此刻又恰好是 false（列表停在顶部），跟随逻辑根本不会触发。
+     *
+     * 用 requestScrollToItem 而不是 scrollToItem：进页面的第一帧 `layoutInfo`
+     * 还没量出来（totalItemsCount = 0），scrollToItem 会被夹到 0，等于没滚。
+     * request 是挂起的，等下一次测量时按目标索引落位。
+     */
+    var landedAtTail by remember { mutableStateOf(false) }
+    LaunchedEffect(conversation?.id) { landedAtTail = false }
     // 流式刷新节流后仍会频繁触发，这里用 scrollToItem（无动画）避免低端机掉帧
     LaunchedEffect(turns.size, live.text.length, streaming) {
-        if (!settings.autoScroll) return@LaunchedEffect
-        if (!atBottom) return@LaunchedEffect
-        if (turns.isNotEmpty()) {
-            // +1 是那个 __info__ 头项：列表里第 0 项已经不是第一条消息了
-            runCatching { listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1) }
+        if (turns.isEmpty()) return@LaunchedEffect
+        // +1 是那个 __info__ 头项：列表里第 0 项已经不是第一条消息了
+        val tail = turns.size + 1
+        // 最后一条是自己刚发的：一定要跟着走，哪怕此刻判定「不在底部」
+        // （输入框刚弹起时视口被压缩，atBottom 十有八九是 false）
+        val mine = messages.lastOrNull()?.role == Role.USER
+        if (!landedAtTail) {
+            listState.requestScrollToItem(tail)
+            landedAtTail = true
+            return@LaunchedEffect
         }
+        if (!mine && !settings.autoScroll) return@LaunchedEffect
+        if (!mine && !atBottom) return@LaunchedEffect
+        runCatching { listState.scrollToItem(tail) }
     }
     // 生成期间保持亮屏（可选）。手表抬手看进度时不用反复抬腕。
     LaunchedEffect(streaming, settings.keepScreenOn) {

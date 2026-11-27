@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,6 +38,7 @@ import com.dshwatch.domain.roleplay.LoreEntry
 import com.dshwatch.domain.roleplay.CardPlugin
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.ui.components.GlassDialog
 import com.dshwatch.ui.components.HintText
 import com.dshwatch.ui.components.M3Switch
 import com.dshwatch.ui.components.SectionHeader
@@ -77,6 +79,7 @@ fun CardEditScreen(
     var card by remember { mutableStateOf(RoleCard(kind = Scenes.of(kind))) }
     var loaded by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(cardId) {
         if (cardId.isNotBlank()) {
@@ -330,7 +333,57 @@ fun CardEditScreen(
             if (card.builtin) {
                 HintText("这是内置卡，改动会直接生效；想保留原样可以先把名字改掉再保存")
             }
+            /*
+             * 删除入口。
+             *
+             * 以前这一页只有「保存 / 取消」——卡片一旦建出来就再也删不掉，
+             * 用户只能靠「改个名字当废弃」绕过去。列表页也没提供长按菜单
+             * （手表上长按被系统占着），所以删除只能放在这里。
+             *
+             * 内置卡同样允许删：`RoleCardStore` 有一本安装账本，
+             * 删掉之后升级不会再把它们塞回来。
+             */
+            if (cardId.isNotBlank()) {
+                Spacer(Modifier.height(16.dp))
+                WatchGhostButton(
+                    text = if (isTavern) "删除这张角色卡" else "删除这则设定",
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { confirmDelete = true },
+                )
+                HintText(
+                    if (isTavern) "删除后无法撤销；已经聊过的会话仍留在历史里"
+                    else "删除后无法撤销；已经续写过的内容仍留在历史里"
+                )
+            }
         }
+    }
+
+    if (confirmDelete) {
+        GlassDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = "删除？",
+            content = {
+                Text(
+                    text = "「${card.displayName.ifBlank { "这张卡" }}」会从列表里消失，无法撤销。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            },
+            buttons = {
+                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        scope.launch {
+                            runCatching { container.roleCardStore.delete(card.id) }
+                            nav.pop()
+                        }
+                    },
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+        )
     }
 }
 

@@ -11,6 +11,14 @@ package com.dshwatch.domain.roleplay
  */
 object BuiltinCards {
 
+    /**
+     * 大肥鱼这张卡的 id。
+     *
+     * 单独抽成常量：养鱼场景按它取卡、酒馆列表按它排除。写死字符串在两处
+     * 各自维护，改一次 id 就会一边能取到、一边漏进列表。
+     */
+    const val FISH_ID = "builtin-tavern-feiyu"
+
     fun all(): List<RoleCard> = tavern() + writing()
 
     /**
@@ -21,7 +29,7 @@ object BuiltinCards {
      * 进去就是和她聊天，所以 [Scenes.FISH] 直接按 id 取这一张。
      */
     fun feiyu(): RoleCard = RoleCard(
-        id = "builtin-tavern-feiyu",
+        id = FISH_ID,
         kind = Scenes.TAVERN,
         name = "大肥鱼",
         tagline = "黏人，但不缠人",
@@ -154,3 +162,13 @@ object BuiltinCards {
         ),
     )
 }
+
+/**
+ * 这张卡是养鱼场景的固定角色，不该出现在酒馆的角色列表里。
+ *
+ * 它和普通角色卡存在同一个目录、同一个 `kind`（tavern），列表按 kind 取，
+ * 于是它会混在「深夜食堂的老板娘」旁边。用户点进去聊、或者复制一份改，
+ * 都会把养鱼那套「一次 1~3 条、每条 4~20 字」的文风规则当成普通角色卡在用；
+ * 更要紧的是**删掉它**——养鱼场景按 id 取卡，取不到整条链路就空了。
+ */
+val RoleCard.isFishCard: Boolean get() = id == BuiltinCards.FISH_ID

@@ -274,7 +274,16 @@ fun FishPhoneScreen(
     LaunchedEffect(Unit) {
         // 先取卡面：下面的「长期记忆」开关、开场白都按它来
         card = runCatching { container.roleCardStore.load(BuiltinCards.feiyu().id) }
-            .getOrNull() ?: BuiltinCards.feiyu()
+            .getOrNull() ?: BuiltinCards.feiyu().also { fallback ->
+                /*
+                 * 卡被删了。养鱼场景是「按 id 取一张固定的卡」，取不到就等于
+                 * 整条链路空转（没有名字、没有记忆开关、开场白也没了）。
+                 *
+                 * 以前这里只是回退到内存里的内置卡，下次启动依旧读不到 ——
+                 * 现在顺手补回存储，养鱼自己能恢复。
+                 */
+                runCatching { container.roleCardStore.save(fallback.copy(builtin = true)) }
+            }
         // 今天还没写过动态就补一条：素材是今天聊过的话，不依赖会话是否已经打开
         runCatching { FishMomentWriter.writeIfDue(context) }
         if (Scenes.of(engine.conversation.value?.scene) == Scenes.FISH) {

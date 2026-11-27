@@ -192,9 +192,18 @@ fun PhoneChatScreen(
      * 一帧跳到尾部的观感像「画面闪了一下」。流式期间每个增量都会触发这里，
      * 但 `turns.size` / 文本长度变化时才会重跑，节流交给 Compose 的跳过机制。
      */
+    var landedAtTail by remember { mutableStateOf(false) }
+    LaunchedEffect(conversation?.id) { landedAtTail = false }
     LaunchedEffect(turns.size, live?.text?.length, streaming) {
-        if (!settings.autoScroll) return@LaunchedEffect
         if (turns.isEmpty()) return@LaunchedEffect
+        val mine = messages.lastOrNull()?.role == Role.USER
+        if (!landedAtTail) {
+            // 从历史点开一条老会话时，列表默认停在第一条 —— 先挂一个落位请求
+            listState.requestScrollToItem(turns.lastIndex)
+            landedAtTail = true
+            return@LaunchedEffect
+        }
+        if (!mine && !settings.autoScroll) return@LaunchedEffect
         runCatching { listState.animateScrollToItem(turns.lastIndex) }
     }
 

@@ -202,9 +202,18 @@ fun M3eChatScreen(
      * 只在 `autoScroll` 打开时跟随：用户正在往回翻历史的时候自动跳回底部，
      * 是比"没跟上"更让人恼火的事。
      */
+    var landedAtTail by remember { mutableStateOf(false) }
+    LaunchedEffect(conversation?.id) { landedAtTail = false }
     LaunchedEffect(turns.size, live?.text?.length, streaming) {
-        if (!settings.autoScroll) return@LaunchedEffect
         if (turns.isEmpty()) return@LaunchedEffect
+        val mine = messages.lastOrNull()?.role == Role.USER
+        if (!landedAtTail) {
+            // 首帧还没量出来，scrollToItem 会被夹到 0 —— 用 request 挂到下一次测量
+            listState.requestScrollToItem(turns.size + 1)
+            landedAtTail = true
+            return@LaunchedEffect
+        }
+        if (!mine && !settings.autoScroll) return@LaunchedEffect
         runCatching { listState.scrollToItem(turns.size + 1) }
     }
 

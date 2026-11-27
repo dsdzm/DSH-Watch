@@ -169,14 +169,20 @@ fun RoleplayChatScreen(
      * 所以第一次拿到消息时无条件滚到尾，把「跟随」留给后续的增量。
      */
     var landedAtTail by remember { mutableStateOf(false) }
+    LaunchedEffect(conversation?.id) { landedAtTail = false }
     LaunchedEffect(messages.size, live.text.length, streaming) {
         if (messages.isEmpty()) return@LaunchedEffect
+        // 最后一条是自己刚发的：无条件跟到底。
+        // 输入框刚收起/弹起时视口高度在变，atBottom 常常是 false，
+        // 用户发完一句却停在原地 —— 看不到自己发的那条，更看不到它开始回答。
+        val mine = messages.lastOrNull()?.role == Role.USER
         if (!landedAtTail) {
-            runCatching { listState.scrollToItem(messages.size) }
+            // 首帧 layoutInfo 还没量出来，scrollToItem 会被夹到 0，等于没滚
+            listState.requestScrollToItem(messages.size)
             landedAtTail = true
             return@LaunchedEffect
         }
-        if (!atBottom) return@LaunchedEffect
+        if (!mine && !atBottom) return@LaunchedEffect
         runCatching { listState.scrollToItem(messages.size) }
     }
 

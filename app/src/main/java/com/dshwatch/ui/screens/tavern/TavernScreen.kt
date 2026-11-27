@@ -43,6 +43,7 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.model.AppSettings
 import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.domain.roleplay.isFishCard
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.GlassCircleButton
 import com.dshwatch.ui.components.IconTap
@@ -79,10 +80,16 @@ fun TavernScreen(
     var loaded by remember { mutableStateOf(false) }
     var showPicker by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    /*
+     * 列表随导航深度重读：从编辑页删掉一张卡、或新建了一张回来，这一页要立刻变。
+     * 以前是 `LaunchedEffect(Unit)` —— 组合只发生一次，pop 回来看到的还是旧列表。
+     */
+    val depth = nav.depth
+    LaunchedEffect(depth) {
         cards = runCatching { container.roleCardStore.index(Scenes.TAVERN) }
             .onFailure { com.dshwatch.core.Logx.e("Tavern", "读取角色列表失败", it) }
             .getOrDefault(emptyList())
+            .filterNot { it.isFishCard }
         loaded = true
     }
 

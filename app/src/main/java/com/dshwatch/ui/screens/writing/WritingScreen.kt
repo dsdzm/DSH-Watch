@@ -89,7 +89,12 @@ fun WritingScreen(
     var showPicker by remember { mutableStateOf(false) }
     var importTarget by remember { mutableStateOf<RoleCard?>(null) }
 
-    LaunchedEffect(Unit) {
+    /*
+     * 随导航深度重读：删掉一则设定、或新建一则回来，列表要立刻反映。
+     * `LaunchedEffect(Unit)` 只在首次组合时跑一次，pop 回来看到的是旧列表。
+     */
+    val depth = nav.depth
+    LaunchedEffect(depth) {
         cards = runCatching { container.roleCardStore.index(Scenes.WRITING) }
             .onFailure { Logx.e("Writing", "读取作品列表失败", it) }
             .getOrDefault(emptyList())

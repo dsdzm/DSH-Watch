@@ -228,12 +228,13 @@ fun PhoneRoleplayChatScreen(
     LaunchedEffect(messages.size, live.text.length, streaming) {
         if (messages.isEmpty()) return@LaunchedEffect
         val target = messages.size
+        val mine = messages.lastOrNull()?.role == Role.USER
         if (!landed) {
-            runCatching { listState.scrollToItem(target) }
+            listState.requestScrollToItem(target)
             landed = true
             return@LaunchedEffect
         }
-        if (!atBottom) return@LaunchedEffect
+        if (!mine && !atBottom) return@LaunchedEffect
         runCatching { listState.scrollToItem(target) }
     }
 
