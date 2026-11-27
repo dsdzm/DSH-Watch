@@ -77,12 +77,14 @@ import com.dshwatch.domain.update.UpdateState
 import com.dshwatch.ui.nav.Screen
 import com.dshwatch.ui.nav.WatchNavigator
 import com.dshwatch.ui.theme.Accents
+import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.ThemePresets
 import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * 设置页的分组 id。
@@ -558,6 +560,60 @@ private fun AppearanceGroup(
                 },
                 checked = settings.glassBlur,
                 onCheckedChange = { v -> update { it.copy(glassBlur = v) } },
+            )
+        }
+        /*
+         * 两根滑块：模糊强度、卡片压暗。
+         *
+         * 为什么是连续的两根而不是更多档位：这两件事的「对不对」因人因屏而异 ——
+         * 同样的半径，在 412px 的方表和 466px 的圆表上占屏宽的比例差了 13%，
+         * 同样的黑纱，在 OLED 纯黑底和照片底上读出来的味道完全不同。
+         * 给出范围让用户自己停在舒服的位置，比给三档「弱/中/强」再猜一遍要准。
+         *
+         * 顺序：先「糊得多狠」，再「盖得多实」。前者决定玻璃的「毛」，后者决定「透」。
+         */
+        val blurActive = Appearances.isGlass(settings.appearance) && settings.glassBlur
+        val bgBlurActive = settings.customBackground.isNotBlank() && settings.backgroundBlur
+        if (blurActive || bgBlurActive) {
+            WatchSlider(
+                value = settings.blurStrength,
+                onChange = { v -> update { it.copy(blurStrength = v) } },
+                valueRange = 0f..1f,
+                steps = 9,
+                label = "模糊强度",
+                valueText = percentOf(settings.blurStrength),
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                text = if (blurActive) {
+                    "背景层与卡片玻璃共用一根轴 · 拉满时卡片几乎看不出背后的细节"
+                } else {
+                    "只影响背景图，卡片的磨砂在「磨砂玻璃」里"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+            )
+        }
+        if (Appearances.isGlass(settings.appearance)) {
+            WatchSlider(
+                value = settings.cardDim,
+                onChange = { v -> update { it.copy(cardDim = v) } },
+                valueRange = 0f..1f,
+                steps = 9,
+                label = "卡片压暗",
+                valueText = percentOf(settings.cardDim),
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                text = if (LocalDarkTheme.current) {
+                    "深色下是黑纱的厚度 · 越低越透，背景会从卡片里浮上来"
+                } else {
+                    "浅色下是奶白的厚度 · 越高越不透底，字更清楚"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
             )
         }
     }
@@ -2184,3 +2240,11 @@ private fun humanSize(dir: File): String {
         else -> String.format(java.util.Locale.US, "%.1f MB", kb / 1024.0)
     }
 }
+
+/**
+ * 0~1 的档位 → 百分比文案。
+ *
+ * 两根滑块都只有「强弱」没有物理单位，给百分比最诚实 —— 写「22dp」只会让人
+ * 以为那是他能对照的东西，而实际半径是按屏宽换算的。
+ */
+private fun percentOf(v: Float): String = "${(v.coerceIn(0f, 1f) * 100).roundToInt()}%"

@@ -144,6 +144,8 @@ class MainActivity : ComponentActivity() {
                 customBackgroundFrost = settings.customBackgroundFrost,
                 glassBlur = settings.glassBlur,
                 backgroundBlur = settings.backgroundBlur,
+                blurStrength = settings.blurStrength,
+                cardDim = settings.cardDim,
                 uiScale = uiScale,
                 appLanguage = settings.appLanguage,
                 perf = perf,

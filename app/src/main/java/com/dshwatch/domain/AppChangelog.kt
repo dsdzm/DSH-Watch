@@ -592,6 +592,16 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.11",
+            date = "2026-11-27",
+            highlights = listOf(
+                "卡片自带高斯模糊：按自己在屏幕上的位置采样背景，关掉背景模糊后玻璃仍然是毛的，不再变透明",
+                "用户消息改为染色玻璃，思维链卡片接入玻璃材质",
+                "新增「模糊强度」滑块：背景层与卡片玻璃共用一根轴，6~38dp 可调",
+                "新增「卡片压暗」滑块：深色控制黑纱厚度，浅色控制奶白厚度",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.10",
             date = "2026-11-27",
             highlights = listOf(

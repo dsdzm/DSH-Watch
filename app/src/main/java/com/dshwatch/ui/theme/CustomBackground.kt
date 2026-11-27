@@ -53,7 +53,7 @@ object CustomBackground {
     private const val SAVE_MAX = 1080
 
     /** 虚化时读进内存的短边像素数。100 上下在 412px 的屏上放大 3~4 倍，边缘全软 */
-    private const val FROST_READ_WIDTH = 120
+    private const val VEIL_READ_WIDTH = 120
 
     fun dir(context: Context): File = File(context.filesDir, DIR)
 
@@ -145,13 +145,21 @@ object CustomBackground {
         name: String,
         frost: Boolean,
         blurRadiusFraction: Float = 0f,
+        /**
+         * 目标读取宽度。0 = 按 [frost] / [blurRadiusFraction] 自动选。
+         *
+         * 卡片磨砂（[FROST_READ_WIDTH]）传 192：它要的是「糊到没有细节」，
+         * 和背景层那个 256 不是同一个用途，不能共用一条自动规则。
+         */
+        readWidth: Int = 0,
     ): ImageBitmap? = withContext(Dispatchers.IO) {
         val f = file(context, name)
         if (!f.isFile) return@withContext null
         val want = when {
+            readWidth > 0 -> readWidth
             // 要糊的时候，frost 那个 120px 反而成了障碍：先读细一点
             blurRadiusFraction > 0f -> BLUR_READ_WIDTH
-            frost -> FROST_READ_WIDTH
+            frost -> VEIL_READ_WIDTH
             else -> SAVE_MAX
         }
         val bitmap = decodeScaled(f, want) ?: return@withContext null

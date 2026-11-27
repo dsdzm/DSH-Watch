@@ -950,6 +950,17 @@ private fun BubbleScaffold(
     val light = !LocalDarkTheme.current
     val glass = LocalGlass.current
     val bubbleColor = when {
+        /*
+         * 玻璃主题下用户消息也是**玻璃**（染色），不是一块实色块。
+         *
+         * 之前这里写死 `secondaryContainer` / `0xFF4A5670`：整屏卡片都在透底，
+         * 只有自己发的那一条是块不透明的板子 —— 用户的原话是「用户消息没做玻璃」。
+         *
+         * 染色而不是纯半透明白：气泡需要一眼认出「这是我说的」，而白色玻璃
+         * 和 AI 气泡长得一样。浓度 0.82（见 glassSurface 的 tintAlpha）——
+         * 低于这个值，照片的明暗会从底下渗上来，正文就开始读不清了。
+         */
+        isUser && glass -> Color.Transparent
         isUser && light -> MaterialTheme.colorScheme.secondaryContainer
         isUser -> Color(0xFF4A5670)
         // 玻璃主题下 AI 气泡不填色：交给 glassSurface 的半透明白，
@@ -958,10 +969,14 @@ private fun BubbleScaffold(
         else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val textColor = when {
+        // 染色玻璃用 primaryContainer 系：M3 保证 onPrimaryContainer 压在它上面
+        // 有 4.5:1 以上，而画面基调仍然跟着明暗走（深色里是深蓝底，浅色里是浅蓝底）
+        isUser && glass -> MaterialTheme.colorScheme.onPrimaryContainer
         isUser && light -> MaterialTheme.colorScheme.onSecondaryContainer
         isUser -> Color(0xFFF2F2F2)
         else -> MaterialTheme.colorScheme.onSurface
     }
+    val bubbleTint = if (isUser && glass) MaterialTheme.colorScheme.primaryContainer else Color.Unspecified
     when (layout) {
         /*
          * 极简：去掉所有底色，只靠一条细分隔线划分回合。
@@ -998,7 +1013,12 @@ private fun BubbleScaffold(
                     .fillMaxWidth(if (isUser) (if (isRound) 0.92f else 0.94f) else 1f)
                     .then(
                         if (glass && bubbleColor == Color.Transparent) {
-                            Modifier.glassSurface(shape = RoundedCornerShape(16.dp), cornerRadius = 16.dp)
+                            Modifier.glassSurface(
+                                shape = RoundedCornerShape(16.dp),
+                                cornerRadius = 16.dp,
+                                tint = bubbleTint,
+                                tintAlpha = 0.82f,
+                            )
                         } else {
                             Modifier.clip(RoundedCornerShape(16.dp)).background(bubbleColor)
                         },
@@ -1042,6 +1062,8 @@ private fun BubbleScaffold(
                             Modifier.glassSurface(
                                 shape = RoundedCornerShape(if (isRound) 22.dp else 26.dp),
                                 cornerRadius = if (isRound) 22.dp else 26.dp,
+                                tint = bubbleTint,
+                                tintAlpha = 0.82f,
                             )
                         } else {
                             Modifier
@@ -1867,19 +1889,33 @@ private fun ThinkingCard(key: String, text: String, streaming: Boolean) {
     }
     val expanded = manual ?: streaming
     /*
-     * 思考卡是「工作块里的一行」，不是独立的玻璃卡片。
+     * 思考卡是「工作块里的一行」，但仍然要有玻璃 —— 用户报过「思维链没做模糊」。
      *
-     * 它套在外层工作块（已经是玻璃/实色卡）里面，再用 glassSurface 就是
-     * 两层描边叠在一起：一眼看过去厚度、圆角都和旁边的工具卡对不上，
-     * 之前那一版的观感退化就出在这里。这里改回轻量的 tertiary 色块，
-     * 只保留圆角与工具卡一致（M3E 20dp / 经典 12dp）。
+     * 这里的取法是**薄一点的同一块玻璃**（weight 0.72），不是另画一种色块：
+     *
+     *  · 它套在外层工作块（已经是玻璃）里面，用满厚的玻璃会叠出两层描边，
+     *    一眼看过去厚度、圆角都和旁边的工具卡对不上；
+     *  · 只用 tertiaryContainer 色块又回到了「一块平的色片」，和整屏玻璃割裂。
+     *
+     * weight 只乘最终 alpha（见 glassSurface 的说明），所以观感是「同一块玻璃，
+     * 薄一档」，圆角与工具卡一致（M3E 20dp / 经典 12dp），交替排列时不一段胖一段瘦。
      */
     val radius = if (com.dshwatch.ui.theme.isM3eUi) 20.dp else 12.dp
+    val skin = if (LocalGlass.current) {
+        Modifier.glassSurface(
+            shape = RoundedCornerShape(radius),
+            cornerRadius = radius,
+            weight = 0.72f,
+        )
+    } else {
+        Modifier
+            .clip(RoundedCornerShape(radius))
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.32f))
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(radius))
-            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.32f))
+            .then(skin)
             .padding(horizontal = 7.dp, vertical = 5.dp),
     ) {
         Row(

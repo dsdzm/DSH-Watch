@@ -90,13 +90,65 @@ val LocalGlass = staticCompositionLocalOf { false }
 val LocalGlassBlur = staticCompositionLocalOf { false }
 
 /**
+ * 卡片「压暗」档位，0~1，0.5 = 标准。
+ *
+ * 由设置里的滑块给，[com.dshwatch.ui.components.glassSurface] 读它决定
+ * 本体那层纱有多厚。之所以走 CompositionLocal 而不是给每个调用点加参数：
+ * 这是**全局观感**，不该由七十多个调用点各自表态。
+ */
+val LocalGlassDim = staticCompositionLocalOf { 0.5f }
+
+/**
+ * 卡片自己磨砂时取样的那张图 —— 背景图的**重度模糊**副本。
+ *
+ * ## 为什么卡片需要自己的一份，而不是复用背景层
+ *
+ * 关掉「背景模糊」之后，背景是**清晰**的照片；卡片如果只是半透明，
+ * 用户看到的就是「照片原样从卡片里穿过去」—— 也就是「卡片像透明了」。
+ * 真毛玻璃的行为正相反：背景清晰、玻璃底下糊。
+ *
+ * Compose 没有 backdrop-filter，卡片拿不到「我背后画了什么」，所以只能
+ * 预先备一张糊得比背景更狠的小图（[FROST_READ_WIDTH] 宽），卡片按自己的
+ * 屏幕坐标去**采样对应的一块**画进来（见 Glass.kt 的 drawFrostSlice）。
+ *
+ * 这样每张卡每帧只多一次 `drawImage`，没有离屏层、没有逐帧卷积 ——
+ * 在 512MB 的表上这是唯一可行的做法。
+ */
+val LocalFrostPhoto = staticCompositionLocalOf<ImageBitmap?> { null }
+
+/**
+ * 背景层（照片）在屏幕上的绘制尺寸，px。
+ *
+ * 卡片要按它算出「满屏铺开的那张图，在我这个位置对应哪一块」。
+ * 取的是窗口尺寸而不是布局实测值：差几个像素在重度模糊的图上完全看不出来，
+ * 而省掉一次「先测量再重组」的启动开销。
+ */
+val LocalBackdropSize = staticCompositionLocalOf { IntSize.Zero }
+
+/** 背景照片上的遮罩浓度，卡片采样时要补上同一层，否则卡片底下会亮一块 */
+val LocalBackdropDim = staticCompositionLocalOf { 0f }
+
+/**
  * 背景层的模糊半径。
  *
- * 22dp：比弹窗那层（18dp）略重。弹窗要「读出层次」，卡片底下只需要
- * 「看不出细节」；表屏只有 200dp 出头，半径再大就糊成一片色块，
+ * 22dp 是**默认档**（强度 0.5）：比弹窗那层（18dp）略重。弹窗要「读出层次」，
+ * 卡片底下只需要「看不出细节」；表屏只有 200dp 出头，半径再大就糊成一片色块，
  * 玻璃反而失去「底下有东西」的感觉。
+ *
+ * 用户可以在设置里用「模糊强度」把它从 6dp 调到 38dp：小屏上有人觉得
+ * 22dp 还不够化开（尤其是背景图本身细节很碎），也有人嫌糊成色块。
  */
-internal val GLASS_BLUR_RADIUS = 22.dp
+internal val GLASS_BLUR_RADIUS: Dp = glassBlurRadius(0.5f)
+
+/** 强度 0 时的半径。再小就是「没糊」，不如直接关掉开关 */
+internal const val GLASS_BLUR_MIN_DP = 6f
+
+/** 强度 1 时比默认档多出来的量：0.5 → 22dp，1.0 → 38dp */
+internal const val GLASS_BLUR_SPAN_DP = 32f
+
+/** 强度 → 半径。线性就够了：滑块的每个位置都对应一个肉眼可分辨的档 */
+internal fun glassBlurRadius(strength: Float): Dp =
+    (GLASS_BLUR_MIN_DP + GLASS_BLUR_SPAN_DP * strength.coerceIn(0f, 1f)).dp
 
 /**
  * 真模糊的最低系统版本。
@@ -139,6 +191,34 @@ internal const val BLUR_READ_WIDTH = 256
  * 「屏宽的 5.3%」，和 31+ 上 [GLASS_BLUR_RADIUS] 的观感对齐。
  */
 internal const val BLUR_RADIUS_FRACTION = 0.053f
+
+/**
+ * 强度 → 离线模糊半径比例。
+ *
+ * 0.5 必须落回 [BLUR_RADIUS_FRACTION]：那是 1.24.1 的取值，升级不该改变观感。
+ * 上限卡在 0.098 而不是随强度线性放大到底：`ScriptIntrinsicBlur` 的半径超过 25
+ * 会抛异常（见 [RsBlur]），256 × 0.098 ≈ 25 正好压在上限内。
+ */
+internal fun blurRadiusFraction(strength: Float): Float =
+    (BLUR_RADIUS_FRACTION * (0.36f + 1.28f * strength.coerceIn(0f, 1f)))
+        .coerceIn(0.012f, 0.098f)
+
+/**
+ * 卡片磨砂取样图的读取宽度。
+ *
+ * 比背景层（256）小：卡片里那块玻璃本来就要「糊到没有细节」，
+ * 192 糊完再放大已经足够；顺便把内存压到 147KB，几十张卡共用同一张，不随卡片数增长。
+ */
+internal const val FROST_READ_WIDTH = 192
+
+/**
+ * 卡片磨砂的模糊比例，比背景层重一倍多。
+ *
+ * 磨砂玻璃的定义就是「比背景糊」：背景层 0.053，这里 0.05~0.13 —— 强度拉满时
+ * 192 × 0.13 = 25px，正好是 RenderScript 硬上限，等效到屏幕上约是屏宽的 12%。
+ */
+internal fun frostRadiusFraction(strength: Float): Float =
+    (0.05f + 0.08f * strength.coerceIn(0f, 1f)).coerceIn(0f, 25f / FROST_READ_WIDTH)
 
 
 /**
@@ -296,6 +376,18 @@ fun DshWatchTheme(
      */
     glassBlur: Boolean = false,
     /**
+     * 模糊强度，0~1，0.5 = 标准。
+     *
+     * 同时作用于背景层与卡片磨砂，见 [com.dshwatch.domain.model.AppSettings.blurStrength]。
+     */
+    blurStrength: Float = 0.5f,
+    /**
+     * 卡片压暗档位，0~1，0.5 = 标准。
+     *
+     * 只在玻璃材质下有意义。见 [com.dshwatch.domain.model.AppSettings.cardDim]。
+     */
+    cardDim: Float = 0.5f,
+    /**
      * 界面整体缩放，1.0 = 标准。
      *
      * **这是唯一的缩放轴。** v1.15.21 及以前这里还并行一个 `fontScale`：
@@ -398,6 +490,9 @@ fun DshWatchTheme(
     val blurBackdrop = backgroundBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
     val liveBlur = blurBackdrop && Build.VERSION.SDK_INT >= MIN_SDK_LIVE_BLUR
     val photoBlur = blurBackdrop && !liveBlur
+    // 两根滑块的取值先夹一遍：存档里可能是 1.7 或者手工改坏的负数
+    val strength = blurStrength.coerceIn(0f, 1f)
+    val dim = cardDim.coerceIn(0f, 1f)
 
     /*
      * 背景图在**主题这一层**解码，而不是每页各读一遍。
@@ -408,12 +503,14 @@ fun DshWatchTheme(
      * key 里带 frost：切换虚化要重新解码（读的采样率不同），不是重新画一遍。
      * 带 photoBlur：低版本上开关一开，图要重新读一遍并糊掉 —— 只重画是没用的，
      * 糊过的像素已经不在手里了。
+     * 带 strength：半径变了同样要重糊（离线路径没有「改个参数重画」这回事）。
      */
     val backdrop by produceState<ImageBitmap?>(
         null,
         customBackground,
         customBackgroundFrost,
         photoBlur,
+        strength,
     ) {
         value = if (customBackground.isBlank()) {
             null
@@ -422,7 +519,35 @@ fun DshWatchTheme(
                 context = context,
                 name = customBackground,
                 frost = customBackgroundFrost,
-                blurRadiusFraction = if (photoBlur) BLUR_RADIUS_FRACTION else 0f,
+                blurRadiusFraction = if (photoBlur) blurRadiusFraction(strength) else 0f,
+            )
+        }
+    }
+
+    /*
+     * 卡片磨砂的取样图。
+     *
+     * 这是「卡片自己糊」的唯一来源：它比背景层糊得更重，卡片按自己的屏幕坐标
+     * 采一块画进玻璃底下（见 [LocalFrostPhoto]）。
+     *
+     * 只在「玻璃 + 磨砂」时才解码 —— 清玻璃本来就要透出清晰背景，糊一张反而错。
+     * 与 backgroundBlur 无关：这正是「背景清晰、玻璃发毛」能成立的原因。
+     */
+    val frostPhoto by produceState<ImageBitmap?>(
+        null,
+        customBackground,
+        glassFrost,
+        strength,
+    ) {
+        value = if (!glassFrost || customBackground.isBlank()) {
+            null
+        } else {
+            CustomBackground.load(
+                context = context,
+                name = customBackground,
+                frost = true,
+                blurRadiusFraction = frostRadiusFraction(strength),
+                readWidth = FROST_READ_WIDTH,
             )
         }
     }
@@ -528,6 +653,12 @@ fun DshWatchTheme(
         LocalStrings provides strings,
         LocalGlass provides glass,
         LocalGlassBlur provides glassFrost,
+        LocalGlassDim provides dim,
+        LocalFrostPhoto provides frostPhoto,
+        LocalBackdropDim provides customBackgroundDim.coerceIn(0f, MAX_BACKDROP_DIM),
+        LocalBackdropSize provides remember(scaledProfile) {
+            IntSize(scaledProfile.screenWidthPx, scaledProfile.screenHeightPx)
+        },
         LocalDarkTheme provides dark,
         LocalUiStyle provides uiStyleNow,
     ) {
@@ -581,7 +712,7 @@ fun DshWatchTheme(
                                     // 满屏铺开时就是一圈「暗边」，看着像屏幕漏光。
                                     // 半径按屏宽的一小段取，和弹窗的 18dp 同一量级。
                                     Modifier.blur(
-                                        radius = GLASS_BLUR_RADIUS,
+                                        radius = glassBlurRadius(strength),
                                         edgeTreatment = BlurredEdgeTreatment.Unbounded,
                                     )
                                 } else {

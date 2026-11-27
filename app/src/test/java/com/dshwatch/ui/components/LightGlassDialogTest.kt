@@ -45,7 +45,9 @@ class LightGlassDialogTest {
         assertTrue(
             "浅色弹窗要叠一层奶白（0.52）+ 一点正文色：再高就是一块白板（看不出玻璃），" +
                 "再低就回到「字压在一页滚动的聊天记录上」",
-            glass.contains("drawRoundRect(Color.White, cornerRadius = r, alpha = 0.52f"),
+            // 0.52 现在由「卡片压暗」滑块按系数放大（0.5 档 = 1.0 倍），
+            // 所以断言的是基准值本身，而不是乘完之后的结果
+            glass.contains("drawRoundRect(Color.White, cornerRadius = r, alpha = veil(0.52f)"),
         )
     }
 

@@ -26,20 +26,31 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.dshwatch.domain.DeviceTier
+import com.dshwatch.ui.theme.LocalBackdropDim
+import com.dshwatch.ui.theme.LocalBackdropSize
 import com.dshwatch.ui.theme.LocalDarkTheme
+import com.dshwatch.ui.theme.LocalFrostPhoto
 import com.dshwatch.ui.theme.LocalGlass
 import com.dshwatch.ui.theme.LocalGlassBlur
+import com.dshwatch.ui.theme.LocalGlassDim
 import com.dshwatch.ui.theme.LocalPerf
+import com.dshwatch.ui.theme.coverRect
+import kotlin.math.roundToInt
 
 /**
  * 「质感玻璃」的唯一入口。
@@ -148,6 +159,15 @@ fun Modifier.glassSurface(
      */
     weight: Float = 1f,
     /**
+     * 染色玻璃的浓度，只在 [tint] 有效时生效。
+     *
+     * 0.42 是「染色」—— 主色只给卡片上一层色，底下的东西还看得见。
+     * 用户消息气泡要 0.82：那是一条**内容**，不是列表项，读不清就是坏的；
+     * 0.82 时颜色已经足够压住底，`onPrimary` 的文字在任何背景图上都读得出来，
+     * 但仍然留 18% 让背后的糊影透上来，不至于变成一块纯色贴片。
+     */
+    tintAlpha: Float = 0.42f,
+    /**
      * 是否跟踪手指位置，让光斑**跟手**。
      *
      * 默认跟着 [onClick]：能点的玻璃本来就应该跟手。
@@ -188,10 +208,38 @@ fun Modifier.glassSurface(
      * 浅色模式直接变成黑卡片配深色字，什么都读不出来。
      */
     val dark = LocalDarkTheme.current
-    // 卡片底下是不是真糊着（只在玻璃 + 用户开启 + API 31+ 时为 true）
+    // 卡片底下是不是真糊着（只在玻璃 + 用户开启 + API 26+ 时为 true）
     val frosted = LocalGlassBlur.current
     // 浅色底上「压暗」用的颜色：正文色。在 Composable 作用域里取好再传进 DrawScope
     val onSurface = MaterialTheme.colorScheme.onSurface
+    // 卡片「压暗」档位 0~1（见设置里的滑块）。只在 Composable 作用域里取 ——
+    // `CompositionLocal.current` 是 @Composable getter，drawBehind 里读不了
+    val glassDim = LocalGlassDim.current
+    /*
+     * 卡片自己那句「高斯模糊」。
+     *
+     * 磨砂开启时，卡片**不再靠背景层糊**：它按自己的屏幕坐标，从一张重度模糊的
+     * 背景副本里采一块画在纱底下（见 [drawFrostSlice]）。这样：
+     *
+     *   · 关掉「背景模糊」→ 壁纸清晰、玻璃仍然发毛（用户报的「卡片像透明了」）；
+     *   · 打开「背景模糊」→ 背景糊一档、卡片糊得更狠，层次反而更清楚。
+     *
+     * 三个前提缺一不可：磨砂开着、有那张图、这张卡不在对话框里。
+     * 低端档不采样：每张卡多一次缩放贴图，列表里十几张一起画在 512MB 的机器上不划算。
+     *
+     * `elevated`（对话框）**不采样**：`Dialog` 画在另一个 Window，节点坐标是相对
+     * 那个窗口的，按它去取背景会取错位置；而且对话框本来就该盖住底下的界面，
+     * 不该把自己变成一块「透出壁纸的洞」。
+     */
+    val frostPhoto = LocalFrostPhoto.current
+    val backdropSize = LocalBackdropSize.current
+    val backdropDim = LocalBackdropDim.current
+    val sampleBackdrop = frosted &&
+        !elevated &&
+        frostPhoto != null &&
+        backdropSize.width > 0 &&
+        backdropSize.height > 0 &&
+        perf.tier != DeviceTier.LOW
 
     val ownInteraction = remember { MutableInteractionSource() }
     val src = interaction ?: ownInteraction
@@ -360,8 +408,42 @@ fun Modifier.glassSurface(
         }
     }
 
+    /*
+     * 卡片在屏幕上的位置。
+     *
+     * 用一个**普通对象**而不是 state 存：滚动时这个值每帧都变，写成 state 会让
+     * 每张卡每帧重组一次。而绘制层本来就会跟着卡片一起平移，读到旧值也不会错位
+     * 到肉眼能看出来的程度（采样源是一张糊到没有细节的图）。
+     */
+    val origin = remember { OffsetHolder() }
+    if (sampleBackdrop) {
+        m = m.onGloballyPositioned { origin.value = it.positionInRoot() }
+    }
+
     m = m
         .clip(shape)
+        /*
+         * 磨砂取样层：画在纱底下、被形状裁住。
+         *
+         * 必须在 `clip` 之后、面板之前 —— 顺序错了就是「糊影盖在卡片上」，
+         * 文字会跟着糊成一片。两个 drawBehind 的先后顺序就是绘制顺序。
+         */
+        .then(
+            if (sampleBackdrop) {
+                Modifier.drawBehind {
+                    drawFrostSlice(
+                        photo = frostPhoto ?: return@drawBehind,
+                        origin = origin.value,
+                        rootSize = backdropSize,
+                        dim = backdropDim,
+                        dark = dark,
+                        alpha = if (enabled) 1f else 0.45f,
+                    )
+                }
+            } else {
+                Modifier
+            },
+        )
         .then(
             // 只要想跟手就装，与「能不能点」解耦 —— 见 trackPointer 的说明
             if (animated && trackPointer) {
@@ -418,6 +500,8 @@ fun Modifier.glassSurface(
                 solid = solid,
                 elevated = elevated,
                 alpha = (if (enabled) 1f else 0.45f) * weight,
+                tintAlpha = tintAlpha,
+                dim = glassDim,
                 bottomBrush = bottomBrush,
                 edgeBrush = edgeBrush,
                 glossBrush = glossBrush,
@@ -455,6 +539,10 @@ private fun DrawScope.drawGlassPanel(
     solid: Boolean,
     elevated: Boolean,
     alpha: Float,
+    /** 染色玻璃的浓度（见 [glassSurface] 的同名参数） */
+    tintAlpha: Float,
+    /** 卡片压暗档位 0~1，0.5 = 标准（见 [LocalGlassDim]） */
+    dim: Float,
     bottomBrush: Brush,
     edgeBrush: Brush,
     /** 上沿那一层光泽（见 glossBrush 的注释） */
@@ -464,6 +552,16 @@ private fun DrawScope.drawGlassPanel(
     val r = CornerRadius(corner.coerceAtLeast(0f), corner.coerceAtLeast(0f))
     val w = size.width
     val h = size.height
+
+    /*
+     * 压暗档位 → 网的厚度。
+     *
+     * 0.5 时系数正好是 1.0，也就是上一版写死的那套配比 —— 升级不改变观感。
+     * 两端留了 0.35 / 1.65 的余量：再淡卡片就成一层雾，再实还不如关掉玻璃。
+     * 上限 0.92：留 8% 的缝，卡片永远不是一块不透明的板。
+     */
+    val k = 0.35f + 1.3f * dim.coerceIn(0f, 1f)
+    fun veil(base: Float): Float = (base * k).coerceIn(0f, 0.92f)
 
     // 浅色底下的「厚度」不能是黑的：白底上压一道黑，看着像脏边/没擦干净。
     // 浅色下这层底色本来就是 onSurface 的极淡版，直接用它，只是更浓一点，
@@ -481,9 +579,9 @@ private fun DrawScope.drawGlassPanel(
         drawRoundRect(Color.White, cornerRadius = r, alpha = 0.06f * press * alpha)
         drawBottomShade(r, shadeBrush, alpha)
     } else if (tint != Color.Unspecified) {
-        // 染色玻璃：选中态、错误色。用染色**替换**白色而不是叠加，
+        // 染色玻璃：选中态、错误色、用户消息。用染色**替换**白色而不是叠加，
         // 叠加会让两者互相稀释，最后既不白也不彩
-        drawRoundRect(tint.copy(alpha = 0.42f), cornerRadius = r, alpha = alpha)
+        drawRoundRect(tint.copy(alpha = tintAlpha), cornerRadius = r, alpha = alpha)
         drawBottomShade(r, shadeBrush, alpha)
     } else {
         /*
@@ -514,32 +612,36 @@ private fun DrawScope.drawGlassPanel(
         when {
             dark -> {
                 // 弹窗要盖住下面那一层，压得更实
-                val scrim = when {
-                    elevated -> 0.74f
-                    frosted -> 0.60f
-                    else -> 0.55f
-                }
-                val film = when {
-                    elevated -> 0.10f
-                    frosted -> 0.10f
-                    else -> 0.09f
-                }
+                val scrim = veil(
+                    when {
+                        elevated -> 0.74f
+                        frosted -> 0.60f
+                        else -> 0.55f
+                    },
+                )
+                val film = veil(
+                    when {
+                        elevated -> 0.10f
+                        frosted -> 0.10f
+                        else -> 0.09f
+                    },
+                )
                 drawRoundRect(Color.Black, cornerRadius = r, alpha = scrim * alpha)
                 drawRoundRect(Color.White, cornerRadius = r, alpha = film * alpha)
             }
             elevated -> {
                 // 浅色弹窗：0.80 的白在观感上就是一块白板（背后糊成什么样都看不见）。
                 // 0.52 才让「底下是糊的」成立，正文仍有 7:1 以上
-                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.52f * alpha)
-                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.05f * alpha)
+                drawRoundRect(Color.White, cornerRadius = r, alpha = veil(0.52f) * alpha)
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = veil(0.05f) * alpha)
             }
             frosted -> {
-                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.26f * alpha)
-                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.045f * alpha)
+                drawRoundRect(Color.White, cornerRadius = r, alpha = veil(0.26f) * alpha)
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = veil(0.045f) * alpha)
             }
             else -> {
                 // 清玻璃：不叠白，只压一点正文色 —— 卡片与底之间靠「略暗」分开
-                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.085f * alpha)
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = veil(0.085f) * alpha)
             }
         }
         drawBottomShade(r, shadeBrush, alpha)
@@ -656,4 +758,74 @@ private fun DrawScope.drawEdge(corner: Float, w: Float, h: Float, alpha: Float, 
         ),
         style = Stroke(width = width),
     )
+}
+
+/**
+ * 卡片磨砂：把「我背后那一块背景」画进玻璃底下。
+ *
+ * ## 为什么不是「给卡片挂一个 blur」
+ *
+ * `Modifier.blur` 糊的是**节点自己的内容**。挂在卡片上，文字和图标一起糊；
+ * 挂在卡片内部一个空 Box 上，它背后什么都没有，糊出来是透明的。
+ * Compose 至今没有 backdrop-filter，卡片读不到「它背后已经画了什么」。
+ *
+ * 所以反过来做：背景图在主题层已经备好一张**重度模糊**的小图
+ * （[com.dshwatch.ui.theme.LocalFrostPhoto]），这里只按卡片在屏幕上的位置，
+ * 把整张图平移过去、用它自己的坐标系铺满卡片 —— 被形状裁住之后，
+ * 露出来的正好是「我背后那一块」的模糊版本。
+ *
+ * 一次 `drawImage` 就是全部成本：没有离屏层、没有逐帧卷积，
+ * 图是几十张卡共用的一张，内存不随卡片数增长。
+ *
+ * ## 位置是「读的时候」拿的，不是「布局的时候」写进 state 的
+ *
+ * 列表滚动时每张卡的坐标每帧都变。写进 state 就是每张卡每帧重组一次；
+ * 而绘制层本来就会跟着卡片一起平移，采样源又是糊到没有细节的图，
+ * 差几个像素肉眼无法分辨。所以用一个普通对象持有，只在真正重绘时读一次。
+ */
+private fun DrawScope.drawFrostSlice(
+    photo: ImageBitmap,
+    /** 卡片左上角在根布局里的坐标，px */
+    origin: Offset,
+    /** 根布局（= 背景层）的尺寸，px */
+    rootSize: IntSize,
+    /** 背景图上那层遮罩的浓度。不补的话卡片底会比周围亮一块 */
+    dim: Float,
+    dark: Boolean,
+    alpha: Float,
+) {
+    if (alpha <= 0.01f) return
+    // 照片在根布局上是「等比铺满 + 居中裁」—— 与背景层用同一个纯函数，
+    // 否则卡片里的糊影会和周围的照片错开
+    val cover = coverRect(
+        imageWidth = photo.width,
+        imageHeight = photo.height,
+        canvasWidth = rootSize.width.toFloat(),
+        canvasHeight = rootSize.height.toFloat(),
+    ) ?: return
+
+    drawImage(
+        image = photo,
+        // 整张图平移过来：卡片自己的原点对应根布局的 (origin)，所以铺图的
+        // 左上角要减去它。画到卡片外的部分由 clip(shape) 裁掉
+        dstOffset = IntOffset(
+            (cover.left - origin.x).roundToInt(),
+            (cover.top - origin.y).roundToInt(),
+        ),
+        dstSize = IntSize(cover.width, cover.height),
+        alpha = alpha,
+        // Low = 双线性：这张图本来就是「放大后发虚」，再贵的采样也看不出差别
+        filterQuality = FilterQuality.Low,
+    )
+    if (dim > 0.01f) {
+        drawRect(
+            color = if (dark) Color.Black else Color.White,
+            alpha = dim.coerceIn(0f, 0.9f),
+        )
+    }
+}
+
+/** 只用来放一个 Offset，不参与快照系统 —— 见 [drawFrostSlice] 的说明 */
+private class OffsetHolder {
+    var value: Offset = Offset.Zero
 }

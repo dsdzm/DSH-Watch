@@ -90,8 +90,8 @@ class RenderScriptBlurTest {
         assertThat(theme).contains("val photoBlur = blurBackdrop && !liveBlur")
         // Modifier.blur 只在 liveBlur 分支里挂
         assertThat(theme).contains("if (liveBlur) {")
-        // 低版本把半径交给解码阶段
-        assertThat(theme).contains("blurRadiusFraction = if (photoBlur) BLUR_RADIUS_FRACTION else 0f")
+        // 低版本把半径交给解码阶段（半径随「模糊强度」滑块走，见 GlassCardFrostTest）
+        assertThat(theme).contains("blurRadiusFraction = if (photoBlur) blurRadiusFraction(strength) else 0f")
         // 开关变化要重新解码（糊过的像素已经不在手里，重画没用）
         assertThat(theme).contains("photoBlur,")
     }

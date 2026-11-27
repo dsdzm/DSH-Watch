@@ -56,4 +56,26 @@ class AppSettingsCompatTest {
         // 看到「开关是开的、界面毫无变化」，反而像坏了
         assertThat(AppSettings().glassBlur).isFalse()
     }
+
+    @Test
+    fun `两根新滑块的老用户默认值落在标准档`() {
+        // 0.5 = 上一版写死的配比。缺字段时落到 0.5 才不会「升级后卡片突然变透明」
+        assertThat(AppSettings().blurStrength).isEqualTo(0.5f)
+        assertThat(AppSettings().cardDim).isEqualTo(0.5f)
+
+        val old = """{"appearance":"glass"}"""
+        val s = Jsonx.lenient.decodeFromString(AppSettings.serializer(), old)
+        assertThat(s.blurStrength).isEqualTo(0.5f)
+        assertThat(s.cardDim).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `滑块值能往返序列化`() {
+        val s = AppSettings(blurStrength = 0.8f, cardDim = 0.2f)
+        val text = Jsonx.lenient.encodeToString(AppSettings.serializer(), s)
+        val back = Jsonx.lenient.decodeFromString(AppSettings.serializer(), text)
+        assertThat(back.blurStrength).isEqualTo(0.8f)
+        assertThat(back.cardDim).isEqualTo(0.2f)
+        assertThat(back).isEqualTo(s)
+    }
 }
