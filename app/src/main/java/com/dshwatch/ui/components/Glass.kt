@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.dshwatch.domain.DeviceTier
 import com.dshwatch.ui.theme.LocalBackdropDim
 import com.dshwatch.ui.theme.LocalBackdropSize
 import com.dshwatch.ui.theme.LocalDarkTheme
@@ -225,21 +224,29 @@ fun Modifier.glassSurface(
      *   · 打开「背景模糊」→ 背景糊一档、卡片糊得更狠，层次反而更清楚。
      *
      * 三个前提缺一不可：磨砂开着、有那张图、这张卡不在对话框里。
-     * 低端档不采样：每张卡多一次缩放贴图，列表里十几张一起画在 512MB 的机器上不划算。
      *
-     * `elevated`（对话框）**不采样**：`Dialog` 画在另一个 Window，节点坐标是相对
-     * 那个窗口的，按它去取背景会取错位置；而且对话框本来就该盖住底下的界面，
-     * 不该把自己变成一块「透出壁纸的洞」。
+     * **这里不看性能档。** 曾经加过一条 `perf.tier != LOW`（怕低端表扛不住），
+     * 结果是：省电模式会把任何机器强制打成 LOW，512MB 的表本来就判 LOW ——
+     * 于是这些设备上「磨砂玻璃」开关打开后卡片毫无变化，用户只会认为功能坏了。
+     * 一次 `drawImage` 的代价远小于「功能看起来不存在」。
+     *
+     * `elevated`（对话框）**也采样**。
+     *
+     * 一度以为对话框的坐标对不上：`Dialog` 画在另一个 Window，`positionInRoot`
+     * 给的是那个窗口的坐标。但本项目所有对话框都是
+     * `DialogProperties(usePlatformDefaultWidth = false)` + `Box(fillMaxSize)`，
+     * 也就是**和宿主页面同尺寸、同原点**，所以坐标是通用的。
+     *
+     * 这一点很关键：用户说「弹窗也没有做玻璃」，指的就是弹窗里看不到底下的糊影。
+     * 关掉采样它永远是一块纯白板，开着才真的是「浮在磨砂背景上的一层」。
      */
     val frostPhoto = LocalFrostPhoto.current
     val backdropSize = LocalBackdropSize.current
     val backdropDim = LocalBackdropDim.current
     val sampleBackdrop = frosted &&
-        !elevated &&
         frostPhoto != null &&
         backdropSize.width > 0 &&
-        backdropSize.height > 0 &&
-        perf.tier != DeviceTier.LOW
+        backdropSize.height > 0
 
     val ownInteraction = remember { MutableInteractionSource() }
     val src = interaction ?: ownInteraction

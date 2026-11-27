@@ -13,8 +13,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -53,11 +51,10 @@ val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.ds
  *  - 关掉它零成本：没有额外 draw、没有 pointer 追踪、没有动画；
  *  - 打开它整机的胶囊、卡片、按钮一起变，不用逐个页面改。
  *
- * 为什么默认不是真的高斯模糊：真模糊要么是 API 31+ 的 RenderEffect（整屏一次，
- * 低端表上代价可观），要么是低版本上离线跑的 RenderScript（见 [RsBlur]，
- * 只能糊背景图、糊不了色晕）。两者都不该成为默认路径 —— 默认画的是
- * 「模糊的观感」：多层低对比渐变 + 边缘光，GPU 填充成本约等于几次纯色圆角矩形，
- * 比真模糊低一个数量级，且在任何版本上完全一致。
+ * 为什么默认不是真的高斯模糊：真模糊要在解码阶段算一次（见 [SoftBlur]），
+ * 有几十毫秒的等待。默认画的是「模糊的观感」：多层低对比渐变 + 边缘光，
+ * GPU 填充成本约等于几次纯色圆角矩形，比真模糊低一个数量级，
+ * 且在任何版本上完全一致。
  *
  * 用户可以在外观设置里打开真模糊（[LocalGlassBlur]）：那是显式选择，
  * 代价由用户自己承担。
@@ -67,22 +64,20 @@ val LocalGlass = staticCompositionLocalOf { false }
 /**
  * 玻璃是否叠在**真高斯模糊**的背景上。
  *
- * 默认 false：整屏实时模糊在低端表上代价可观，不该成为默认路径。
+ * 默认 false：真模糊要在解码阶段算一次，不该成为默认路径。
  * 用户在外观设置里打开后为 true，两件事同时发生：
  *
- *  1. 背景层变糊 —— 具体走哪条路按系统版本分：
- *     · API 31+：背景层整体挂 `Modifier.blur`，照片和色晕一起实时糊；
- *     · API 26~30：背景图在解码时用 RenderScript 离线糊一次
- *       （[RsBlur]），之后每帧只画一张已经糊好的图，运行时零成本。
+ *  1. 卡片按自己的屏幕坐标，从一张**重度模糊**的背景副本里采一块画在纱底下 ——
+ *     这就是「毛玻璃」本身（见 [LocalFrostPhoto]）；
  *  2. [com.dshwatch.ui.components.glassSurface] 的本体略微变薄 —— 不然那层
  *     0.68 的黑会把糊掉的底重新压成一块灰板，「通透」看不出任何变化。
  *
- * ## 低版本只糊照片，是有意的
+ * ## 只糊背景图，不糊色晕
  *
  * 色晕是几团半径 1.25 倍屏宽的低频渐变，本身就比任何高斯核都平滑；把它
- * 再糊一遍，肉眼和像素都看不出差别，却要为此每帧多一张离屏位图。
- * 所以低版本只处理有真实细节的那一层（背景图）。没有背景图时，
- * 打开开关仍然会让玻璃变薄 —— 只是不会有「照片化开」的效果。
+ * 再糊一遍，肉眼和像素都看不出差别，却要为此多算一遍全屏。所以只处理有
+ * 真实细节的那一层（背景图）。没有背景图时，打开开关仍然会让玻璃变薄、
+ * 颗粒变细 —— 只是不会有「照片化开」的效果。
  *
  * 注意它和 [LocalGlass] 是两件事：后者决定「卡片是不是玻璃」，
  * 前者只决定「玻璃底下糊不糊」。所以 M3E 材质下它永远是 false。
@@ -129,97 +124,63 @@ val LocalBackdropSize = staticCompositionLocalOf { IntSize.Zero }
 val LocalBackdropDim = staticCompositionLocalOf { 0f }
 
 /**
- * 背景层的模糊半径。
+ * 背景模糊的读取宽度。
  *
- * 22dp 是**默认档**（强度 0.5）：比弹窗那层（18dp）略重。弹窗要「读出层次」，
- * 卡片底下只需要「看不出细节」；表屏只有 200dp 出头，半径再大就糊成一片色块，
- * 玻璃反而失去「底下有东西」的感觉。
+ * 384 ≈ 屏宽的 0.93 倍，铺满时几乎 1:1，糊多少像素在屏幕上就是多少像素 ——
+ * 这是「读多大」和「糊多准」唯一能不打架的尺寸。
  *
- * 用户可以在设置里用「模糊强度」把它从 6dp 调到 38dp：小屏上有人觉得
- * 22dp 还不够化开（尤其是背景图本身细节很碎），也有人嫌糊成色块。
+ * 读得太小（120）只会得到一团马赛克；读得太大（1080）在手表上要多算三四倍
+ * 像素（[SoftBlur] 的耗时与像素数成正比）却看不出区别。
  */
-internal val GLASS_BLUR_RADIUS: Dp = glassBlurRadius(0.5f)
-
-/** 强度 0 时的半径。再小就是「没糊」，不如直接关掉开关 */
-internal const val GLASS_BLUR_MIN_DP = 6f
-
-/** 强度 1 时比默认档多出来的量：0.5 → 22dp，1.0 → 38dp */
-internal const val GLASS_BLUR_SPAN_DP = 32f
-
-/** 强度 → 半径。线性就够了：滑块的每个位置都对应一个肉眼可分辨的档 */
-internal fun glassBlurRadius(strength: Float): Dp =
-    (GLASS_BLUR_MIN_DP + GLASS_BLUR_SPAN_DP * strength.coerceIn(0f, 1f)).dp
+internal const val BG_BLUR_READ_WIDTH = 384
 
 /**
- * 真模糊的最低系统版本。
+ * 背景模糊在 0.5 档时的半径，占**图宽**的比例。
  *
- * 26 = 本项目 minSdk，也是 RenderScript 兼容路径可用的下限
- * （`ScriptIntrinsicBlur` 自 API 17 起就有）。所以这个判断在当前
- * minSdk 下恒为 true —— 保留它是因为它是「功能可用性」的单一出处：
- * 设置页据此决定画开关还是画说明行，主题据此决定要不要糊。
+ * 0.055 × 384 ≈ 21px，摊到满屏约等于屏宽的 5.5% —— 这个量级刚好把照片的
+ * 细节（发丝、文字、纹理）化开，同时保住「这是同一张图」的构图。
+ * 再重就成了一块色斑，用户会说「背景图没了」。
  */
-internal const val MIN_SDK_GLASS_BLUR = 26
+internal const val BG_RADIUS_FRACTION = 0.055f
 
 /**
- * 实时模糊的最低系统版本。
+ * 背景模糊强度（0~1）→ 半径比例。
  *
- * `Modifier.blur` 走 RenderEffect，API 31 之前是**空操作** —— 不报错、
- * 不生效。低版本必须换 [RsBlur] 那条离线路径，否则用户会点开、
- * 看不到变化，以为功能坏了。
+ * 0 → 0.0165（几乎不糊，但和「关闭」仍然有别），1 → 0.132（图宽 13%，
+ * 只剩大块明暗）。中间是线性：滑块的每一格都对应肉眼可分辨的差异。
  */
-internal const val MIN_SDK_LIVE_BLUR = 31
-
-/**
- * 离线模糊时背景图的读取宽度。
- *
- * 256 是三个约束的交点：
- *
- *  - 够大：糊完再放大到全屏，不会露出块状像素（120px 的虚化读法就会）；
- *  - 够小：ARGB_8888 只有 256 KB，两张（进 / 出）也不到 1MB，
- *    在 512MB 的表上安全；
- *  - 半径合适：视觉上要等效于屏幕上的 22dp，而 22dp ≈ 屏宽的 5.3%
- *    （412dp 的表），256 × 5.3% ≈ 13.6，正好落在 25 的硬上限以内，
- *    不需要二次模糊。
- */
-internal const val BLUR_READ_WIDTH = 256
-
-/**
- * 离屏模糊的半径，占图宽的比例。
- *
- * 用比例而不是 dp：背景图读进来是 256px，屏幕是 400 多 dp，两者之间
- * 差一个缩放。按比例算，模糊强度在任何屏幕、任何读取宽度下都保持
- * 「屏宽的 5.3%」，和 31+ 上 [GLASS_BLUR_RADIUS] 的观感对齐。
- */
-internal const val BLUR_RADIUS_FRACTION = 0.053f
-
-/**
- * 强度 → 离线模糊半径比例。
- *
- * 0.5 必须落回 [BLUR_RADIUS_FRACTION]：那是 1.24.1 的取值，升级不该改变观感。
- * 上限卡在 0.098 而不是随强度线性放大到底：`ScriptIntrinsicBlur` 的半径超过 25
- * 会抛异常（见 [RsBlur]），256 × 0.098 ≈ 25 正好压在上限内。
- */
-internal fun blurRadiusFraction(strength: Float): Float =
-    (BLUR_RADIUS_FRACTION * (0.36f + 1.28f * strength.coerceIn(0f, 1f)))
-        .coerceIn(0.012f, 0.098f)
+internal fun bgRadiusFraction(strength: Float): Float =
+    (BG_RADIUS_FRACTION * (0.30f + 1.40f * strength.coerceIn(0f, 1f)))
+        .coerceIn(0.008f, 0.14f)
 
 /**
  * 卡片磨砂取样图的读取宽度。
  *
- * 比背景层（256）小：卡片里那块玻璃本来就要「糊到没有细节」，
- * 192 糊完再放大已经足够；顺便把内存压到 147KB，几十张卡共用同一张，不随卡片数增长。
+ * 比背景层（512）小：卡片里那块玻璃本来就要「糊到没有细节」，320 糊完再放大
+ * 已经足够，内存也只要 400KB —— 几十张卡共用同一张，不随卡片数增长。
  */
-internal const val FROST_READ_WIDTH = 192
+internal const val FROST_READ_WIDTH = 320
 
 /**
- * 卡片磨砂的模糊比例，比背景层重一倍多。
+ * 卡片磨砂强度（0~1）→ 半径比例。
  *
- * 磨砂玻璃的定义就是「比背景糊」：背景层 0.053，这里 0.05~0.13 —— 强度拉满时
- * 192 × 0.13 = 25px，正好是 RenderScript 硬上限，等效到屏幕上约是屏宽的 12%。
+ * **比背景重得多，这是磨砂玻璃的定义**：背景层 0.5 档是 0.055，这里 0.5 档是
+ * 0.17（约 3 倍）。0 → 0.07（仍然是毛的，只是能看出轮廓），1 → 0.30
+ * （图宽 30%，等价于一块纯色柔光）。
+ *
+ * 上限卡在 0.34 是因为 [SoftBlur] 会把半径夹到短边的 1/3 —— 超过就没有意义了。
  */
-internal fun frostRadiusFraction(strength: Float): Float =
-    (0.05f + 0.08f * strength.coerceIn(0f, 1f)).coerceIn(0f, 25f / FROST_READ_WIDTH)
+internal fun glassRadiusFraction(strength: Float): Float =
+    (0.07f + 0.23f * strength.coerceIn(0f, 1f)).coerceIn(0f, 0.34f)
 
+/**
+ * 模糊功能的最低系统版本。
+ *
+ * 26 = 本项目 minSdk。现在模糊走纯 Kotlin（[SoftBlur]），没有任何系统 API 依赖，
+ * 所以这个判断恒为 true —— 保留它是「功能可用性」的单一出处：设置页据此决定
+ * 画开关还是画说明行。
+ */
+internal const val MIN_SDK_GLASS_BLUR = 26
 
 /**
  * 当前主题是不是深色。
@@ -368,19 +329,27 @@ fun DshWatchTheme(
      */
     backgroundBlur: Boolean = true,
     /**
-     * 玻璃底是否叠真高斯模糊。
+     * 卡片这块玻璃是否磨砂。
      *
-     * 只在「材质 = 玻璃」时生效。31+ 走实时 RenderEffect，26~30 走
-     * RenderScript 离线模糊背景图 —— 见 [LocalGlassBlur] 与 [RsBlur]。
-     * 低于 [MIN_SDK_GLASS_BLUR]（当前等于 minSdk）时降级成原来的观感玻璃。
+     * 只在「材质 = 玻璃」时生效。它决定的是**卡片底下那块背景糊不糊**：
+     * 卡片按自己的屏幕坐标，从一张重度模糊的副本里采一块画在纱底下
+     * （见 [LocalFrostPhoto]）。所以「壁纸清晰、玻璃发毛」是成立的。
      */
     glassBlur: Boolean = false,
     /**
-     * 模糊强度，0~1，0.5 = 标准。
+     * 背景模糊强度，0~1，0.5 = 标准。
      *
-     * 同时作用于背景层与卡片磨砂，见 [com.dshwatch.domain.model.AppSettings.blurStrength]。
+     * 只作用于背景层，见 [com.dshwatch.domain.model.AppSettings.blurStrength]。
+     * 卡片那一条是 [glassBlurStrength] —— 两者分开，才能「背景只是虚一点、
+     * 卡片彻底毛掉」。
      */
     blurStrength: Float = 0.5f,
+    /**
+     * 卡片玻璃的模糊强度，0~1，0.5 = 标准。
+     *
+     * 见 [com.dshwatch.domain.model.AppSettings.glassBlurStrength]。
+     */
+    glassBlurStrength: Float = 0.5f,
     /**
      * 卡片压暗档位，0~1，0.5 = 标准。
      *
@@ -475,23 +444,26 @@ fun DshWatchTheme(
     val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
 
     /*
-     * 两条链路分开算：
-     *  · 背景层是否糊 → [backgroundBlur]，与材质无关；
-     *  · 玻璃是否磨砂 → [glassBlur] + 玻璃材质。
+     * 三条互相独立的轴，全部由用户给：
      *
-     * 两条实现路径按版本分：
-     *  · 31+：实时 RenderEffect，背景层整层挂 `Modifier.blur`，照片与色晕一起糊；
-     *  · 26~30：`Modifier.blur` 是空操作，改用 RenderScript 在解码阶段把
-     *    背景图糊一次（[RsBlur]）。色晕不处理 —— 它对低频渐变本就无感。
+     *  · 背景糊不糊 → [backgroundBlur]，与材质无关；
+     *  · 背景糊多狠 → [blurStrength]；
+     *  · 玻璃本身糊多狠 → [glassBlurStrength]（只在玻璃材质 + 磨砂开启时有意义）。
+     *
+     * 前两条与第三条是**两张不同的图**：背景层用 512px 副本，卡片用 320px、
+     * 糊得更重的副本。这样「背景只是虚一点、卡片彻底毛掉」的层次才成立 ——
+     * 如果两者共用一张，卡片和背景永远一样糊，玻璃就没了厚度。
+     *
+     * 实现只有一条路径：[SoftBlur]（纯 Kotlin 盒式高斯）在解码阶段算一次。
+     * 曾经用过 `Modifier.blur`（API 31+）与 RenderScript（26~30）两条"更快"的路，
+     * 但它们在真机上都会**静默退回原图** —— 用户连着两个版本报「开了没变化」，
+     * 根子就在这里。功能宁可慢几十毫秒，也不能靠设备运气。
      */
-    // 玻璃自己的磨砂（奶白 + 颗粒 + 亮边），只在玻璃材质且用户打开时成立
-    val glassFrost = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
-    // 背景层糊不糊：由「背景模糊」独立决定，与材质无关
-    val blurBackdrop = backgroundBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
-    val liveBlur = blurBackdrop && Build.VERSION.SDK_INT >= MIN_SDK_LIVE_BLUR
-    val photoBlur = blurBackdrop && !liveBlur
-    // 两根滑块的取值先夹一遍：存档里可能是 1.7 或者手工改坏的负数
-    val strength = blurStrength.coerceIn(0f, 1f)
+    val glassFrost = glass && glassBlur
+    val blurBackdrop = backgroundBlur
+    // 滑块取值先夹一遍：存档里可能是 1.7 或者手工改坏的负数
+    val bgStrength = blurStrength.coerceIn(0f, 1f)
+    val glassStrength = glassBlurStrength.coerceIn(0f, 1f)
     val dim = cardDim.coerceIn(0f, 1f)
 
     /*
@@ -500,17 +472,16 @@ fun DshWatchTheme(
      * produceState 的初值是 null：首帧先按原来的纯色/色晕画，读到图之后自动重组。
      * 这样冷启动不会因为「等一张照片」卡住首帧 —— 手表上首帧快慢的感知特别明显。
      *
-     * key 里带 frost：切换虚化要重新解码（读的采样率不同），不是重新画一遍。
-     * 带 photoBlur：低版本上开关一开，图要重新读一遍并糊掉 —— 只重画是没用的，
-     * 糊过的像素已经不在手里了。
-     * 带 strength：半径变了同样要重糊（离线路径没有「改个参数重画」这回事）。
+     * key 里必须带「糊不糊」和「糊多狠」：
+     *  · 带 frost：切换虚化要重新解码（读的采样率不同），不是重新画一遍；
+     *  · 带 blurBackdrop / bgStrength：糊过的像素已经不在手里了，只重画没用。
      */
     val backdrop by produceState<ImageBitmap?>(
         null,
         customBackground,
         customBackgroundFrost,
-        photoBlur,
-        strength,
+        blurBackdrop,
+        bgStrength,
     ) {
         value = if (customBackground.isBlank()) {
             null
@@ -519,7 +490,8 @@ fun DshWatchTheme(
                 context = context,
                 name = customBackground,
                 frost = customBackgroundFrost,
-                blurRadiusFraction = if (photoBlur) blurRadiusFraction(strength) else 0f,
+                blurRadiusFraction = if (blurBackdrop) bgRadiusFraction(bgStrength) else 0f,
+                readWidth = if (blurBackdrop) BG_BLUR_READ_WIDTH else 0,
             )
         }
     }
@@ -537,7 +509,7 @@ fun DshWatchTheme(
         null,
         customBackground,
         glassFrost,
-        strength,
+        glassStrength,
     ) {
         value = if (!glassFrost || customBackground.isBlank()) {
             null
@@ -546,7 +518,7 @@ fun DshWatchTheme(
                 context = context,
                 name = customBackground,
                 frost = true,
-                blurRadiusFraction = frostRadiusFraction(strength),
+                blurRadiusFraction = glassRadiusFraction(glassStrength),
                 readWidth = FROST_READ_WIDTH,
             )
         }
@@ -700,25 +672,13 @@ fun DshWatchTheme(
                      * 以前背景和内容在同一个 Box 里（drawBehind + content），
                      * 想糊背景就必然连内容一起糊，所以这个开关只能靠重构成两层来实现。
                      *
-                     * 31+ 在这一层上实时糊；低版本的图在解码时就糊好了（见 backdrop），
-                     * 这里什么都不用做。
+                     * 这一层**不挂任何实时模糊**：糊发生在解码阶段（见 backdrop），
+                     * 画出来的已经是一张糊好的图。`Modifier.blur` 曾经用在这里，
+                     * 但它在部分手表 ROM 上会被静默忽略 —— 开关打开、画面不动。
                      */
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .then(
-                                if (liveBlur) {
-                                    // Unbounded：默认的 Rectangle 会在四边做一圈渐隐，
-                                    // 满屏铺开时就是一圈「暗边」，看着像屏幕漏光。
-                                    // 半径按屏宽的一小段取，和弹窗的 18dp 同一量级。
-                                    Modifier.blur(
-                                        radius = glassBlurRadius(strength),
-                                        edgeTreatment = BlurredEdgeTreatment.Unbounded,
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            )
                             .drawBehind {
                             /*
                              * 有照片就只画照片 + 遮罩，画完直接返回。

@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.12",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修好「模糊开了却没变化」：不再依赖系统 RenderEffect 与 RenderScript，改为应用内自算高斯",
+                "背景与卡片各一根强度滑块，互不影响",
+                "弹窗也透出模糊的背景，不再是一块纯白板",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.11",
             date = "2026-11-27",
             highlights = listOf(

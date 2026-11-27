@@ -145,6 +145,7 @@ class MainActivity : ComponentActivity() {
                 glassBlur = settings.glassBlur,
                 backgroundBlur = settings.backgroundBlur,
                 blurStrength = settings.blurStrength,
+                glassBlurStrength = settings.glassBlurStrength,
                 cardDim = settings.cardDim,
                 uiScale = uiScale,
                 appLanguage = settings.appLanguage,

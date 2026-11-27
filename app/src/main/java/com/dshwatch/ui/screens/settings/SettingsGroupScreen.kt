@@ -553,43 +553,57 @@ private fun AppearanceGroup(
         if (Appearances.isGlass(settings.appearance)) {
             SwitchRow(
                 title = "磨砂玻璃",
-                subtitle = if (settings.backgroundBlur || settings.customBackground.isBlank()) {
-                    "卡片叠加奶白与颗粒，玻璃更厚实"
+                subtitle = if (settings.customBackground.isBlank()) {
+                    "卡片叠加奶白与颗粒；没有背景图时看不出「底下糊了」"
                 } else {
-                    "卡片叠加奶白与颗粒 · 背景未模糊时颗粒更明显"
+                    "卡片叠加奶白与颗粒，底下的背景按坐标糊给你看"
                 },
                 checked = settings.glassBlur,
                 onCheckedChange = { v -> update { it.copy(glassBlur = v) } },
             )
         }
         /*
-         * 两根滑块：模糊强度、卡片压暗。
+         * 三根滑块：背景模糊强度、卡片模糊强度、卡片压暗。
          *
-         * 为什么是连续的两根而不是更多档位：这两件事的「对不对」因人因屏而异 ——
-         * 同样的半径，在 412px 的方表和 466px 的圆表上占屏宽的比例差了 13%，
-         * 同样的黑纱，在 OLED 纯黑底和照片底上读出来的味道完全不同。
-         * 给出范围让用户自己停在舒服的位置，比给三档「弱/中/强」再猜一遍要准。
+         * 为什么前两根必须分开：用户的两句话是「卡片和背景都要糊」和「强度可以单独调」。
+         * 共用一根轴时，把背景调到舒服的位置，卡片往往还不够毛（或者反过来）——
+         * 毛玻璃的本质是「玻璃比背景糊」，两者共用一个数就永远做不出这个差。
          *
-         * 顺序：先「糊得多狠」，再「盖得多实」。前者决定玻璃的「毛」，后者决定「透」。
+         * 为什么是连续滑块而不是三档：同样的半径，在 412px 的方表和 466px 的圆表上
+         * 占屏宽的比例差了 13%；同样的黑纱，在 OLED 纯黑底和照片底上读出来的味道
+         * 完全不同。给出范围让用户自己停在舒服的位置，比给「弱/中/强」再猜一遍要准。
          */
         val blurActive = Appearances.isGlass(settings.appearance) && settings.glassBlur
         val bgBlurActive = settings.customBackground.isNotBlank() && settings.backgroundBlur
-        if (blurActive || bgBlurActive) {
+        if (bgBlurActive) {
             WatchSlider(
                 value = settings.blurStrength,
                 onChange = { v -> update { it.copy(blurStrength = v) } },
                 valueRange = 0f..1f,
                 steps = 9,
-                label = "模糊强度",
+                label = "背景模糊强度",
                 valueText = percentOf(settings.blurStrength),
                 modifier = Modifier.padding(top = 6.dp),
             )
             Text(
-                text = if (blurActive) {
-                    "背景层与卡片玻璃共用一根轴 · 拉满时卡片几乎看不出背后的细节"
-                } else {
-                    "只影响背景图，卡片的磨砂在「磨砂玻璃」里"
-                },
+                text = "只糊背景图 · 松开手指后重算，0% 仍保留一点柔化",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),
+            )
+        }
+        if (blurActive) {
+            WatchSlider(
+                value = settings.glassBlurStrength,
+                onChange = { v -> update { it.copy(glassBlurStrength = v) } },
+                valueRange = 0f..1f,
+                steps = 9,
+                label = "卡片模糊强度",
+                valueText = percentOf(settings.glassBlurStrength),
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                text = "卡片底下那块的糊度 · 比背景重得多，松开后生效",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 2.dp, bottom = 2.dp),

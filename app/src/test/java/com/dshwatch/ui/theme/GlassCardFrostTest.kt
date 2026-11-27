@@ -1,6 +1,5 @@
 package com.dshwatch.ui.theme
 
-import androidx.compose.ui.unit.dp
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.io.File
@@ -37,7 +36,7 @@ class GlassCardFrostTest {
         val theme = code("ui/theme/Theme.kt")
         // 专门的一张图，和背景层那张（backdrop）不是同一份：半径不同、读取宽度不同
         assertThat(theme).contains("val frostPhoto by produceState<ImageBitmap?>")
-        assertThat(theme).contains("blurRadiusFraction = frostRadiusFraction(strength)")
+        assertThat(theme).contains("blurRadiusFraction = glassRadiusFraction(glassStrength)")
         assertThat(theme).contains("readWidth = FROST_READ_WIDTH")
         // 只在「玻璃 + 磨砂」时解码：清玻璃要透出清晰背景，糊一张反而错
         assertThat(theme).contains("if (!glassFrost || customBackground.isBlank())")
@@ -55,10 +54,18 @@ class GlassCardFrostTest {
         assertThat(body).contains("positionInRoot()")
         // 用同一个铺满算法，否则卡片里的糊影会和周围照片错开
         assertThat(body).contains("coverRect(")
-        // 对话框（elevated）不采样：它在另一个 Window 里，坐标对不上
-        assertThat(body).contains("!elevated &&")
-        // 低端档不采样
-        assertThat(body).contains("perf.tier != DeviceTier.LOW")
+        /*
+         * 对话框也要采样。所有 Dialog 都是 usePlatformDefaultWidth=false +
+         * fillMaxSize，与宿主页面同尺寸同原点，坐标是通用的。
+         * 关掉它，弹窗就永远是块纯白板 —— 用户那句「弹窗也没有做」正是这个。
+         */
+        assertThat(body).doesNotContain("!elevated &&")
+        /*
+         * **不许再按性能档关掉采样。**
+         * 曾经写过 `perf.tier != DeviceTier.LOW`，结果省电模式会把任何机器打成 LOW，
+         * 512MB 的表本来就判 LOW —— 这些设备上「磨砂玻璃」打开后卡片毫无变化。
+         */
+        assertThat(body).doesNotContain("DeviceTier")
     }
 
     @Test
@@ -76,37 +83,37 @@ class GlassCardFrostTest {
 
     @Test
     fun `标准档必须落回上一版的观感`() {
-        // 0.5 = 1.24.1 写死的 22dp / 5.3%。缺了这条，老用户一升级就会觉得「怎么变了」
-        assertThat(glassBlurRadius(0.5f)).isEqualTo(22.dp)
-        assertThat(blurRadiusFraction(0.5f)).isWithin(0.001f).of(BLUR_RADIUS_FRACTION)
+        // 0.5 = 上一版写死的 5.3%。缺了这条，老用户一升级就会觉得「怎么变了」
+        assertThat(bgRadiusFraction(0.5f)).isWithin(0.001f).of(BG_RADIUS_FRACTION)
+        // 系数必须在 0.5 处正好是 1.0（0.30 + 1.40 × 0.5）
+        assertThat(0.30f + 1.40f * 0.5f).isWithin(0.0001f).of(1f)
     }
 
     @Test
-    fun `模糊强度单调且不越界`() {
+    fun `两根强度轴都单调，且各自独立`() {
         var last = -1f
         for (i in 0..10) {
             val s = i / 10f
-            val r = glassBlurRadius(s).value
+            val r = bgRadiusFraction(s)
             assertThat(r).isGreaterThan(last)
             last = r
         }
-        // 拉满也不能糊到「整屏一个色块」：38dp 在 200dp 宽的表上已经是 19%
-        assertThat(glassBlurRadius(1f).value).isAtMost(40f)
-        assertThat(glassBlurRadius(0f).value).isAtLeast(4f)
+        // 0 档也不能是「没糊」：那样开关打开看起来就是坏的
+        assertThat(bgRadiusFraction(0f)).isAtLeast(0.008f)
+        assertThat(glassRadiusFraction(0f)).isAtLeast(0.05f)
     }
 
     @Test
-    fun `卡片磨砂比背景层更狠，但不超过 RenderScript 的硬上限`() {
-        // 磨砂的定义就是「比背景糊」——两个比例在同一强度下必须拉开
+    fun `卡片磨砂比背景层更狠`() {
+        // 磨砂玻璃的定义就是「比背景糊」——两个比例在同一强度下必须拉开
         for (i in 0..10) {
             val s = i / 10f
-            assertThat(frostRadiusFraction(s)).isGreaterThan(blurRadiusFraction(s))
+            assertThat(glassRadiusFraction(s)).isGreaterThan(bgRadiusFraction(s) * 2f)
         }
-        // ScriptIntrinsicBlur 半径 > 25 会抛异常（见 RsBlur），读取宽度 192
-        assertThat(FROST_READ_WIDTH * frostRadiusFraction(1f)).isAtMost(25f)
-        assertThat(BLUR_READ_WIDTH * blurRadiusFraction(1f)).isAtMost(25f)
-        // 也不能小到看不出：至少是图宽的 5%
-        assertThat(frostRadiusFraction(0f)).isAtLeast(0.04f)
+        // 同一个强度下，卡片那张图的糊度要明显高于背景那张
+        val s = 0.5f
+        assertThat(FROST_READ_WIDTH * glassRadiusFraction(s))
+            .isGreaterThan(BG_BLUR_READ_WIDTH * bgRadiusFraction(s) * 2f)
     }
 
     // ---------------- 两根滑块的接线 ----------------
@@ -115,8 +122,10 @@ class GlassCardFrostTest {
     fun `设置页给出模糊强度与卡片压暗`() {
         val body = code("ui/screens/settings/SettingsGroupScreen.kt")
         assertThat(body).contains("blurStrength = v")
+        assertThat(body).contains("glassBlurStrength = v")
         assertThat(body).contains("cardDim = v")
-        assertThat(body).contains("模糊强度")
+        assertThat(body).contains("背景模糊强度")
+        assertThat(body).contains("卡片模糊强度")
         assertThat(body).contains("卡片压暗")
         // 只在玻璃 / 背景模糊真的生效时才占地方
         assertThat(body).contains("val blurActive =")
@@ -126,6 +135,7 @@ class GlassCardFrostTest {
     fun `滑块值真的传进主题`() {
         val body = code("MainActivity.kt")
         assertThat(body).contains("blurStrength = settings.blurStrength")
+        assertThat(body).contains("glassBlurStrength = settings.glassBlurStrength")
         assertThat(body).contains("cardDim = settings.cardDim")
     }
 

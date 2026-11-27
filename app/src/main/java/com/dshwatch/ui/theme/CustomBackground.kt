@@ -135,10 +135,12 @@ object CustomBackground {
      * @param blurRadiusFraction 大于 0 时，读完再用 RenderScript 糊一次
      *   （半径 = 图宽 × 该比例，见 [BLUR_RADIUS_FRACTION]）。
      *
-     *   这条路径专给 API 26~30 用：那些版本上 `Modifier.blur` 是空操作，
-     *   想真模糊只能离线算。**读的宽度会因此变大**（[BLUR_READ_WIDTH]）——
-     *   拿 120px 的图去糊只会糊成一团色块，看不出「高斯」的形状；
-     *   256px 糊完再放大，边缘才是柔和过渡而不是台阶。
+     *   这是**唯一**的模糊路径：`Modifier.blur` 要 API 31 且看 ROM 脸色，
+     *   RenderScript 在精简固件上会直接抛异常 —— 两者都会安静地退回原图，
+     *   用户看到的就是「开关开了、画面没变」。见 [SoftBlur] 的说明。
+     *
+     *   代价是**读的宽度要够**（[BG_BLUR_READ_WIDTH]）：拿 120px 的图去糊只会糊成
+     *   一团色块，看不出「高斯」的形状；512px 糊完再放大，边缘才是柔和过渡。
      */
     suspend fun load(
         context: Context,
@@ -158,23 +160,34 @@ object CustomBackground {
         val want = when {
             readWidth > 0 -> readWidth
             // 要糊的时候，frost 那个 120px 反而成了障碍：先读细一点
-            blurRadiusFraction > 0f -> BLUR_READ_WIDTH
+            blurRadiusFraction > 0f -> BG_BLUR_READ_WIDTH
             frost -> VEIL_READ_WIDTH
             else -> SAVE_MAX
         }
         val bitmap = decodeScaled(f, want) ?: return@withContext null
         if (blurRadiusFraction <= 0f) return@withContext bitmap.asImageBitmap()
 
+        /*
+         * 半径按**图宽**换算，不是按屏幕 dp。
+         *
+         * 图最后要被拉满到屏宽，所以「图宽的比例」和「屏幕上的观感」是一回事；
+         * 用 dp 反而要在两处各自换算，读宽一改就错位。
+         */
         val radius = bitmap.width * blurRadiusFraction
-        RsBlur.blur(context, bitmap, radius)?.let { blurred ->
-            bitmap.recycle()
-            return@withContext blurred.asImageBitmap()
-        }
-        // 模糊失败（驱动缺失的 ROM）：至少还有一张能看的图，不至于背景空白
-        bitmap.asImageBitmap()
+        val blurred = SoftBlur.gaussian(bitmap, radius)
+        if (blurred !== bitmap) bitmap.recycle()
+        blurred.asImageBitmap()
     }
 
-    /** 按目标宽度降采样解码，长边不超过 [want] 的近似值 */
+    /**
+     * 按目标宽度解码。
+     *
+     * 两步而不是一步：[inSampleSize] 只能取 2 的幂，落到 320 时实际会读出 540 ——
+     * 而模糊的耗时与像素数成正比，540² 比 320² 贵近三倍。所以先粗降采样，
+     * 再精确缩放到 [want]（`createScaledBitmap` 是一次双线性拷贝，几十微秒）。
+     *
+     * 顺带让半径换算变准：`图宽 × 比例` 只有在图宽真的等于 want 时才可控。
+     */
     private fun decodeScaled(f: File, want: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, bounds)
@@ -183,7 +196,13 @@ object CustomBackground {
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= want) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return BitmapFactory.decodeFile(f.path, opts)
+        val raw = BitmapFactory.decodeFile(f.path, opts) ?: return null
+        if (raw.width <= want) return raw
+
+        val h = (raw.height * want.toFloat() / raw.width).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(raw, want, h, true)
+        if (scaled !== raw) raw.recycle()
+        return scaled
     }
 
     /** 删掉一张背景图。删不掉也无所谓 —— 设置里已经不再指向它了 */

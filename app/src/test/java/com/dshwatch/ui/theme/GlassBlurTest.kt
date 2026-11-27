@@ -28,13 +28,16 @@ class GlassBlurTest {
     }
 
     @Test
-    fun `主题层把背景单独一层，模糊只作用于它`() {
+    fun `背景层不再挂实时模糊，糊发生在解码阶段`() {
         val body = code("ui/theme/Theme.kt")
-        // 真有 blur
-        assertThat(body).contains("Modifier.blur(")
-        // 只糊背景层：blur 挂在 drawBehind 那一层上
-        assertThat(body).contains("GLASS_BLUR_RADIUS")
-        // 背景与内容分成两个节点 —— 同一个 Box 里两者一起糊
+        /*
+         * `Modifier.blur` 在部分手表 ROM 上会被**静默忽略**：开关打开、画面不动，
+         * 而且没有任何报错。用户连着两个版本报「没变化」，根子就在这里。
+         * 现在改成解码时算一次（SoftBlur），运行时只画一张糊好的图 —— 一定生效。
+         */
+        assertThat(body).doesNotContain("Modifier.blur(")
+        assertThat(body).contains("blurRadiusFraction = if (blurBackdrop) bgRadiusFraction(bgStrength) else 0f")
+        // 背景与内容仍是两个节点：卡片采样要求「背景只有这一层」
         assertThat(body).contains("Box(modifier = Modifier.fillMaxSize()) {")
     }
 
@@ -42,14 +45,14 @@ class GlassBlurTest {
     fun `背景模糊与玻璃磨砂是两条独立的线`() {
         val body = code("ui/theme/Theme.kt")
         // 背景层糊不糊只由 backgroundBlur 决定，与材质无关
-        assertThat(body).contains("val blurBackdrop = backgroundBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR")
+        assertThat(body).contains("val blurBackdrop = backgroundBlur")
         // 玻璃磨砂要同时满足「玻璃材质 + 用户打开」
-        assertThat(body).contains("val glassFrost = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR")
+        assertThat(body).contains("val glassFrost = glass && glassBlur")
         // 卡片的磨砂观感跟着 glassFrost 走，不跟背景层
         assertThat(body).contains("LocalGlassBlur provides glassFrost")
-        // 可用下限是 minSdk（低版本走 RenderScript），实时路径的下限才是 31
-        assertThat(body).contains("const val MIN_SDK_GLASS_BLUR = 26")
-        assertThat(body).contains("const val MIN_SDK_LIVE_BLUR = 31")
+        // 两条轴的强度互不相干：背景那根只在 backdrop 里，卡片那根只在 frostPhoto 里
+        assertThat(body).contains("bgRadiusFraction(bgStrength)")
+        assertThat(body).contains("glassRadiusFraction(glassStrength)")
     }
 
     @Test
