@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -37,6 +38,9 @@ import com.dshwatch.domain.model.ThemeMode
 import com.dshwatch.ui.i18n.AppLanguage
 import com.dshwatch.ui.i18n.LocalStrings
 import com.dshwatch.ui.i18n.stringsFor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** 当前性能档，供组件决定是否播放动画 / 渲染多少内容 */
@@ -124,6 +128,22 @@ val LocalBackdropSize = staticCompositionLocalOf { IntSize.Zero }
 val LocalBackdropDim = staticCompositionLocalOf { 0f }
 
 /**
+ * 卡片背后那张磨砂图的平均亮度（0~1）。
+ *
+ * 玻璃卡片的压暗不能是一个定值：同一块 0.5 的黑纱，压在黄昏的照片上刚好，
+ * 压在深夜的照片上就是「黑上加黑」，整块卡沉进背景里看不见形状 ——
+ * 用户的原话是「背景颜色比较暗的情况下显得不是很透」。
+ *
+ * 所以这里把**底有多亮**量出来交给 [com.dshwatch.ui.components.glassSurface]：
+ * 底暗就少压一点，让糊影透上来；底亮就补一点，白字才站得住。
+ * 描边也用它反向补偿 —— 暗底上那条边要略亮一档才看得出形状。
+ *
+ * 默认 0.25 是深色壁纸的大致中位数：首帧还没有图时先按偏暗处理，
+ * 不会出现「先亮一下再变暗」的跳变。
+ */
+val LocalBackdropLuma = staticCompositionLocalOf { 0.25f }
+
+/**
  * 设置里的「用内置文件浏览器」。
  *
  * 挑文件的入口有九处（附件、背景、插件、归档、皮肤、配图……），它们分散在
@@ -177,14 +197,65 @@ internal const val FROST_READ_WIDTH = 320
 /**
  * 卡片磨砂强度（0~1）→ 半径比例。
  *
- * **比背景重得多，这是磨砂玻璃的定义**：背景层 0.5 档是 0.055，这里 0.5 档是
- * 0.17（约 3 倍）。0 → 0.07（仍然是毛的，只是能看出轮廓），1 → 0.30
- * （图宽 30%，等价于一块纯色柔光）。
+ * **比背景重得多，这是磨砂玻璃的定义**：同一档位下卡片总比背景糊，
+ * 背景只是「虚一点」，卡片才是「毛」的。0.5 档是 0.185（约 3.4 倍）。
  *
- * 上限卡在 0.34 是因为 [SoftBlur] 会把半径夹到短边的 1/3 —— 超过就没有意义了。
+ * ## 下限从 0.07 收到 0.012
+ *
+ * 0.07 × 320 ≈ 22px，铺满屏幕后等效 80px 的模糊 —— 滑块拉到最左，
+ * 卡片仍然是一团糊影。用户要的是「调到最低能看清底下是什么」：
+ * 0.012 × 320 ≈ 4px，只剩一层柔光，照片的轮廓、明暗都在。
+ *
+ * 曲线用 `s^0.62`：低段掉得快（0.2 档就已经很清），高段还能保住
+ * 0.28（图宽 28%，一块纯色柔光）。这样滑块前 1/3 是「清晰 → 轻磨砂」，
+ * 后 1/3 才是「重磨砂」，比线性更好用。
+ *
+ * 0.5 档刻意落回 0.185 附近 —— 默认观感不变，老用户升级不会觉得「怎么变了」。
  */
-internal fun glassRadiusFraction(strength: Float): Float =
-    (0.07f + 0.23f * strength.coerceIn(0f, 1f)).coerceIn(0f, 0.34f)
+internal fun glassRadiusFraction(strength: Float): Float {
+    val s = strength.coerceIn(0f, 1f)
+    return (0.012f + 0.268f * s.pow(0.62f)).coerceIn(0f, 0.34f)
+}
+
+/**
+ * 一张图有多亮（0~1），按 24×24 的稀疏采样估。
+ *
+ * 只用来决定「这块底该压多黑」，不需要精确：整张图几十万个像素扫一遍
+ * 在手表上要十几毫秒，而 24 行 × 24 点的误差早就小于人眼对明暗的分辨。
+ *
+ * `getPixels` 一次取一整行再挑列，比逐点调用少 24 倍的 JNI 往返。
+ * 非 Android 位图（单测里的 `ImageBitmap` 实现）直接给回退值 —— 这个值
+ * 只影响观感，不该让主题因为「量不出来」而崩。
+ */
+internal suspend fun ImageBitmap.averageLuminanceOr(fallback: Float): Float =
+    withContext(Dispatchers.Default) {
+        runCatching {
+            val bitmap = asAndroidBitmap()
+            val w = bitmap.width
+            val h = bitmap.height
+            if (w <= 0 || h <= 0) return@runCatching fallback
+            val rows = 24.coerceAtMost(h)
+            val cols = 24.coerceAtMost(w)
+            val row = IntArray(w)
+            var sum = 0.0
+            var n = 0
+            for (i in 0 until rows) {
+                val y = (i * (h - 1) / (rows - 1).coerceAtLeast(1))
+                bitmap.getPixels(row, 0, w, 0, y, w, 1)
+                for (j in 0 until cols) {
+                    val x = j * (w - 1) / (cols - 1).coerceAtLeast(1)
+                    val p = row[x]
+                    val r = (p shr 16) and 0xFF
+                    val g = (p shr 8) and 0xFF
+                    val b = p and 0xFF
+                    // Rec.601 的权重：手表上的照片多是暖色，用 709 会把黄昏压得过暗
+                    sum += (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+                    n++
+                }
+            }
+            if (n == 0) fallback else (sum / n).toFloat().coerceIn(0f, 1f)
+        }.getOrDefault(fallback)
+    }
 
 /**
  * 模糊功能的最低系统版本。
@@ -545,6 +616,20 @@ fun DshWatchTheme(
     }
 
     /*
+     * 这张磨砂图有多亮 —— 卡片压暗与描边的联动依据（见 [LocalBackdropLuma]）。
+     *
+     * 量的是**糊过之后**的那张：卡片实际看到的就是它，拿原图算会在
+     * 「照片一半黑一半白」时得出一个谁都不像的平均值。
+     *
+     * 稀疏采样，几十微秒级，放在后台线程；量不出来时给 0.25 这个偏暗的
+     * 默认值 —— 深色玻璃预设是最常见的使用场景，宁可一开始压得保守一点。
+     */
+    val lumaPhoto = frostPhoto ?: backdrop
+    val frostLuma by produceState(0.25f, lumaPhoto) {
+        value = lumaPhoto?.averageLuminanceOr(0.25f) ?: 0.25f
+    }
+
+    /*
      * 有背景图时，把 `background` 换成**透明**。
      *
      * 各个页面（WatchScaffold 等）都会铺一层 `colorScheme.background` 当纸。
@@ -647,6 +732,7 @@ fun DshWatchTheme(
         LocalGlassBlur provides glassFrost,
         LocalGlassDim provides dim,
         LocalFrostPhoto provides frostPhoto,
+        LocalBackdropLuma provides frostLuma,
         LocalBuiltinFilePicker provides builtinFilePicker,
         LocalBackdropDim provides customBackgroundDim.coerceIn(0f, MAX_BACKDROP_DIM),
         LocalBackdropSize provides remember(scaledProfile) {

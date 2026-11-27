@@ -23,13 +23,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -41,6 +44,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.dshwatch.ui.theme.LocalBackdropDim
+import com.dshwatch.ui.theme.LocalBackdropLuma
 import com.dshwatch.ui.theme.LocalBackdropSize
 import com.dshwatch.ui.theme.LocalDarkTheme
 import com.dshwatch.ui.theme.LocalFrostPhoto
@@ -214,6 +218,9 @@ fun Modifier.glassSurface(
     // 卡片「压暗」档位 0~1（见设置里的滑块）。只在 Composable 作用域里取 ——
     // `CompositionLocal.current` 是 @Composable getter，drawBehind 里读不了
     val glassDim = LocalGlassDim.current
+    // 卡片背后那块底有多亮（见 LocalBackdropLuma）。压暗与描边都按它补偿：
+    // 暗底少压、边略亮；亮底多压、边略收
+    val backdropLuma = LocalBackdropLuma.current
     /*
      * 卡片自己那句「高斯模糊」。
      *
@@ -298,47 +305,74 @@ fun Modifier.glassSurface(
      * 看起来像从左到右打了个渐变，而不是「上沿受光」。竖直渐变在任何
      * 宽高比下都是「顶边亮、侧边有厚度」，这才是玻璃的形状语言。
      *
-     * 磨砂时整圈都要提亮（0.78 / 0.26 / 0.10）：面被奶白糊住之后，
-     * 只剩这道边还带着「玻璃」的信息；清玻璃下则保持克制，太亮就成了贴纸边框。
+     * ## 为什么整圈比上一版暗了一档
+     *
+     * 上一版磨砂深色的顶边是 0.86：1dp 实线、从卡片最左端一路亮到最右端，
+     * 四个角一样白。用户的原话是「高光描边做得有点太硬」「不太能衬出圆润感」——
+     * 真实的玻璃边上，光是**在圆角处转过去**的，正面看是中间亮、两端淡；
+     * 一圈等亮的线只会读成「描了个白边」。
+     *
+     * 现在基础边压到 0.44，真正的亮部交给 [drawTopRim]：那条沿上沿 + 两个
+     * 圆角走的弧线，亮度在横向中间最高、两端淡出。基础边只负责「有厚度」，
+     * 不再独自承担「亮」。
+     *
+     * 磨砂时仍然比清玻璃亮（0.44 vs 0.34）：面被糊住之后，只剩这道边还带着
+     * 「玻璃」的信息；清玻璃则保持克制，太亮就成了贴纸边框。
      */
     val edgeBrush = remember(dark, elevated, frosted) {
         Brush.verticalGradient(
             0f to Color.White.copy(
                 alpha = when {
-                    frosted && dark -> 0.86f
-                    frosted -> 0.95f
+                    frosted && dark -> 0.44f
+                    frosted -> 0.62f
                     // 深色弹窗：本体压暗之后，这条边成了「弹窗从背景里切出来」
-                    // 的唯一信号，必须够亮
-                    dark && elevated -> 0.70f
-                    // 浅色弹窗是近白的面，白边本来就看不出，靠更亮的顶边 + 下面那道
-                    // 正文色内描边一起成形
-                    elevated -> 0.92f
-                    dark -> 0.52f
-                    else -> 0.62f
+                    // 的唯一信号，仍要比普通卡片亮
+                    dark && elevated -> 0.52f
+                    elevated -> 0.70f
+                    dark -> 0.34f
+                    else -> 0.42f
                 },
             ),
             // 中段不能太亮：整圈都亮就成了描边色块。
             // 深色弹窗的中段略提，让侧边有厚度但不喧宾夺主
             0.34f to Color.White.copy(
                 alpha = when {
-                    frosted && dark -> 0.30f
-                    frosted -> 0.34f
-                    dark && elevated -> 0.24f
-                    dark -> 0.16f
-                    else -> 0.22f
+                    frosted && dark -> 0.14f
+                    frosted -> 0.20f
+                    dark && elevated -> 0.16f
+                    dark -> 0.10f
+                    else -> 0.14f
                 },
             ),
-            // 右下角：深色弹窗收到 0.02。玻璃越薄，下沿那道暗越像「脏边」
+            // 右下角：深色弹窗收到 0.03。玻璃越薄，下沿那道暗越像「脏边」
             1f to Color.White.copy(
                 alpha = when {
-                    frosted -> 0.12f
-                    dark && elevated -> 0.04f
-                    dark -> 0.06f
-                    else -> 0.10f
+                    frosted -> 0.05f
+                    dark && elevated -> 0.03f
+                    dark -> 0.04f
+                    else -> 0.06f
                 },
             ),
         )
     }
+    /*
+     * 上沿弧光的横向分布：中间最亮、向两端淡出。
+     *
+     * 两端留 14% 的透明带，是为了让光「转过圆角」而不是被切在卡片边上。
+     * 这条 Brush 只给 [drawTopRim] 用，基础边仍是竖直渐变 —— 两条渐变叠在
+     * 一起，才有「上表面受光 + 侧边有厚度」两个方向。
+     */
+    val rimBrush = remember {
+        Brush.horizontalGradient(
+            0f to Color.Transparent,
+            0.14f to Color.White.copy(alpha = 0.55f),
+            0.5f to Color.White,
+            0.86f to Color.White.copy(alpha = 0.55f),
+            1f to Color.Transparent,
+        )
+    }
+    // 路径每帧 reset 后复用：列表里几十张卡，每帧 new 一个 Path 是白白的内存抖动
+    val rimPath = remember { Path() }
     /*
      * 顶面光泽：从卡片上沿往下 1/4 逐渐消失的一层白。
      *
@@ -521,8 +555,11 @@ fun Modifier.glassSurface(
                 alpha = (if (enabled) 1f else 0.45f) * weight,
                 tintAlpha = tintAlpha,
                 dim = glassDim,
+                backdropLuma = backdropLuma,
                 bottomBrush = bottomBrush,
                 edgeBrush = edgeBrush,
+                rimBrush = rimBrush,
+                rimPath = rimPath,
                 glossBrush = glossBrush,
             )
         }
@@ -562,8 +599,14 @@ private fun DrawScope.drawGlassPanel(
     tintAlpha: Float,
     /** 卡片压暗档位 0~1，0.5 = 标准（见 [LocalGlassDim]） */
     dim: Float,
+    /** 卡片背后那块底的平均亮度 0~1（见 [LocalBackdropLuma]） */
+    backdropLuma: Float,
     bottomBrush: Brush,
     edgeBrush: Brush,
+    /** 上沿弧光的横向渐变（中间亮、两端淡出） */
+    rimBrush: Brush,
+    /** 复用的路径对象，函数内只 reset，不新建 */
+    rimPath: Path,
     /** 上沿那一层光泽（见 glossBrush 的注释） */
     glossBrush: Brush,
 ) {
@@ -575,12 +618,49 @@ private fun DrawScope.drawGlassPanel(
     /*
      * 压暗档位 → 网的厚度。
      *
-     * 0.5 时系数正好是 1.0，也就是上一版写死的那套配比 —— 升级不改变观感。
-     * 两端留了 0.35 / 1.65 的余量：再淡卡片就成一层雾，再实还不如关掉玻璃。
-     * 上限 0.92：留 8% 的缝，卡片永远不是一块不透明的板。
+     * 上一版是 `0.35 + 1.3 × dim`：滑块拉到最左仍然有 0.35 的系数，
+     * 深色磨砂卡实际还压着 0.60 × 0.35 ≈ 21% 的黑 —— 用户说「调到最低
+     * 还是有点太暗」，根子就在这个下限。
+     *
+     * 现在下限收到 0.12（约 7% 的黑），卡片几乎只剩糊影本身。
+     * 0.5 档仍然正好是 1.0，默认观感不变；0.5 以上才加厚到 1.6。
+     * 上限仍然留 8% 的缝，卡片永远不是一块不透明的板。
      */
-    val k = 0.35f + 1.3f * dim.coerceIn(0f, 1f)
+    val d = dim.coerceIn(0f, 1f)
+    val k = if (d <= 0.5f) 0.12f + 1.76f * d else 1.0f + 1.2f * (d - 0.5f)
     fun veil(base: Float): Float = (base * k).coerceIn(0f, 0.92f)
+
+    /*
+     * 底有多亮 → 压暗该乘多少。
+     *
+     * 0.5 的黑纱压在 55 的底上是「烟熏」，压在 12 的底上就是「一块黑贴片」——
+     * 卡片和背景糊成一片，形状没了，观感是死板的。这不是滑块没调好，
+     * 是压暗**不该是定值**：它要与底联动。
+     *
+     * 系数从 0.72（纯黑底）到 1.28（白底），在 0.5 档附近正好 1.0。
+     * 暗底少压 28%，糊影和色相能透上来；亮底多压 28%，白字才不飘。
+     */
+    val lumaK = (0.72f + 0.56f * (if (dark) backdropLuma.coerceIn(0f, 1f) else 0.5f))
+        .coerceIn(0.68f, 1.30f)
+
+    /*
+     * 底越暗，边要略亮一点才看得出形状；底亮时收回来，免得像贴了圈白边。
+     * ±18% 的幅度，肉眼刚好能感觉「这块卡是浮在暗处的」。
+     */
+    val edgeK = if (dark) {
+        1.18f - 0.36f * backdropLuma.coerceIn(0f, 1f)
+    } else {
+        1f
+    }
+
+    /*
+     * 下沿那道暗也要跟着压暗档位走。
+     *
+     * 它是固定 0.13 的黑，与 scrim 无关 —— 卡片拉到最透时，本体只剩 6% 的黑，
+     * 下沿却还压着 13%，观感是一块透明玻璃底下糊了一条脏印。
+     * 0.5 档系数为 1.0（默认观感不变），最低档收到 0.45。
+     */
+    val shadeK = 0.45f + 1.10f * d
 
     // 浅色底下的「厚度」不能是黑的：白底上压一道黑，看着像脏边/没擦干净。
     // 浅色下这层底色本来就是 onSurface 的极淡版，直接用它，只是更浓一点，
@@ -596,12 +676,12 @@ private fun DrawScope.drawGlassPanel(
         // 底暗与边照画 —— 少了这两笔它就不是玻璃，是一块纯色贴片
         drawRoundRect(tint, cornerRadius = r, alpha = alpha)
         drawRoundRect(Color.White, cornerRadius = r, alpha = 0.06f * press * alpha)
-        drawBottomShade(r, shadeBrush, alpha)
+        drawBottomShade(r, shadeBrush, alpha * shadeK)
     } else if (tint != Color.Unspecified) {
         // 染色玻璃：选中态、错误色、用户消息。用染色**替换**白色而不是叠加，
         // 叠加会让两者互相稀释，最后既不白也不彩
         drawRoundRect(tint.copy(alpha = tintAlpha), cornerRadius = r, alpha = alpha)
-        drawBottomShade(r, shadeBrush, alpha)
+        drawBottomShade(r, shadeBrush, alpha * shadeK)
     } else {
         /*
          * 面 = 一层压暗 + 一层白（深色）/ 一层奶白 + 一点正文色（浅色）。
@@ -631,13 +711,15 @@ private fun DrawScope.drawGlassPanel(
         when {
             dark -> {
                 // 弹窗要盖住下面那一层，压得更实
-                val scrim = veil(
+                val scrim = (veil(
                     when {
                         elevated -> 0.74f
-                        frosted -> 0.60f
+                        // 0.60 → 0.54：磨砂卡在暗底上偏实，减掉这一档、
+                        // 再乘底亮度系数，才不会「黑上加黑」
+                        frosted -> 0.54f
                         else -> 0.55f
                     },
-                )
+                ) * lumaK).coerceIn(0f, 0.92f)
                 val film = veil(
                     when {
                         elevated -> 0.10f
@@ -663,7 +745,7 @@ private fun DrawScope.drawGlassPanel(
                 drawRoundRect(bodyTint, cornerRadius = r, alpha = veil(0.085f) * alpha)
             }
         }
-        drawBottomShade(r, shadeBrush, alpha)
+        drawBottomShade(r, shadeBrush, alpha * shadeK)
     }
 
     // ---- 1.5) 顶面光泽 ----
@@ -696,7 +778,35 @@ private fun DrawScope.drawGlassPanel(
     // 这里踩过一次：先画一圈 0.6dp 均匀边，再在顶端叠一道 0.8dp 高光，
     // 结果长条胶囊的顶边出现「双线」—— 像描了两遍边，很脏。
     // 真实玻璃只有一条边，亮度的差异全部由它自己承担。
-    drawEdge(corner, w, h, alpha, edgeBrush)
+    drawEdge(corner, w, h, alpha * edgeK, edgeBrush)
+
+    /*
+     * 上沿弧光：沿「左上圆角 → 上边 → 右上圆角」走一条路径。
+     *
+     * 这一笔是这次「高光太硬」的主要修法。之前亮的是**整圈**描边的顶部，
+     * 包括两个直角转折 —— 一条 1dp 的白线从卡片最左端直拉到最右端，
+     * 四个角一样亮，看起来是「描边」而不是「受光」，也不衬圆角。
+     *
+     * 现在：
+     *   · 路径自己带圆角，光顺着圆角转过去，边缘的圆润感是形状给的；
+     *   · 横向渐变让中间最亮、两端淡出，光有了方向；
+     *   · 先铺一道 2.6dp 的极淡（0.22×）同路径，再压 1dp 的亮线 ——
+     *     没有 blur API，用两层宽度不同的描边模拟「光渗进玻璃里」，
+     *     边看起来是软的，不会像一道切线。
+     *
+     * 强度跟压暗档位走：卡片压得越实，边越清晰；拉到最透时只剩一点暗示，
+     * 否则一张几乎透明的卡片顶着一条亮线，反而更假。
+     */
+    val rimAlpha = when {
+        !dark && elevated -> 0.30f
+        frosted && dark -> 0.26f
+        frosted -> 0.32f
+        dark && elevated -> 0.22f
+        dark -> 0.16f
+        else -> 0.20f
+    } * (0.60f + 0.80f * d) * edgeK
+    drawTopRim(rimPath, corner, w, h, rimAlpha * alpha * 0.22f, rimBrush, 2.6.dp.toPx())
+    drawTopRim(rimPath, corner, w, h, rimAlpha * alpha, rimBrush, 1.dp.toPx())
 
     /*
      * 浅色弹窗再补一道 1dp 的正文色内描边。
@@ -776,6 +886,57 @@ private fun DrawScope.drawEdge(corner: Float, w: Float, h: Float, alpha: Float, 
             (corner - inset).coerceAtLeast(0f),
         ),
         style = Stroke(width = width),
+    )
+}
+
+/**
+ * 上沿弧光：只画「左上圆角 → 上边 → 右上圆角」这一条。
+ *
+ * ## 为什么不是再画一层圆角矩形
+ *
+ * 圆角矩形的描边一定会连两侧和底边一起画。想在顶部单独加亮，只能叠一道
+ * 很宽的横向渐变矩形 —— 那会在两个圆角处露出直角的边界，转角处出现一道
+ * 硬折，比原来的等亮描边更假。
+ *
+ * 手写一条 Path 才能让线**跟着圆角弯**。这也是「边缘圆润感」的来源：
+ * 光沿着弧线走，眼睛就读出「这里是个圆弧」，而不是「这里是个倒角」。
+ *
+ * 路径内缩半个线宽：Stroke 以路径为中轴，贴着 0 画会被 clip 裁掉一半，
+ * 1dp 的线只剩 0.5dp，又回到「有边但看不见」。
+ */
+private fun DrawScope.drawTopRim(
+    path: Path,
+    corner: Float,
+    w: Float,
+    h: Float,
+    alpha: Float,
+    brush: Brush,
+    width: Float,
+) {
+    if (alpha <= 0.005f) return
+    val inset = width / 2f
+    val left = inset
+    val right = w - inset
+    val top = inset
+    val c = (corner - inset).coerceIn(0f, (minOf(w, h) / 2f - inset).coerceAtLeast(0f))
+
+    path.reset()
+    if (c <= 0.5f) {
+        path.moveTo(left, top)
+        path.lineTo(right, top)
+    } else {
+        // 左上角：从 180°（左中点）扫到 270°（顶点）
+        path.moveTo(left, top + c)
+        path.arcTo(Rect(left, top, left + c * 2f, top + c * 2f), 180f, 90f, false)
+        path.lineTo(right - c, top)
+        // 右上角：从 270°（顶点）扫到 360°（右中点）
+        path.arcTo(Rect(right - c * 2f, top, right, top + c * 2f), 270f, 90f, false)
+    }
+    drawPath(
+        path = path,
+        brush = brush,
+        alpha = alpha.coerceIn(0f, 1f),
+        style = Stroke(width = width, cap = StrokeCap.Round),
     )
 }
 

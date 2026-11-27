@@ -592,6 +592,16 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.16",
+            date = "2026-11-27",
+            highlights = listOf(
+                "暗色玻璃卡片：模糊与压暗的下限大幅下调，拉到最左几乎能看清底下的照片",
+                "压暗不再是一块固定厚度的黑纱：底越暗压得越轻，糊影和色相能透上来",
+                "高光改为沿上沿与两个圆角走的弧线，中间亮两端淡，边缘不再是等亮的一圈",
+                "下沿的暗部与磨砂颗粒随压暗档位一起收放，最透的时候不会剩一条脏印",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.15",
             date = "2026-11-27",
             highlights = listOf(

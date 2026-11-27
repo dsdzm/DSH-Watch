@@ -108,15 +108,25 @@ class GlassCardFrostTest {
             assertThat(r).isGreaterThan(last)
             last = r
         }
-        // 0 档也不能是「没糊」：那样开关打开看起来就是坏的
+        // 0 档也不能是「没糊」：那样开关打开看起来就是坏的。
+        // 卡片这一轴的下限从 0.05 收到 0.012 —— 用户要求「拉到最低能看清底下」，
+        // 但 0.012 仍然不是 0：那是一层极淡的柔光，不是「没效果」。
         assertThat(bgRadiusFraction(0f)).isAtLeast(0.008f)
-        assertThat(glassRadiusFraction(0f)).isAtLeast(0.05f)
+        assertThat(glassRadiusFraction(0f)).isAtLeast(0.01f)
+        // 下限要明显低于 0.5 档：滑块前半段必须真的「越滑越清」
+        assertThat(glassRadiusFraction(0f)).isLessThan(glassRadiusFraction(0.5f) * 0.2f)
     }
 
     @Test
-    fun `卡片磨砂比背景层更狠`() {
-        // 磨砂玻璃的定义就是「比背景糊」——两个比例在同一强度下必须拉开
-        for (i in 0..10) {
+    fun `卡片磨砂比背景层更狠，但最低档允许更清`() {
+        /*
+         * 磨砂玻璃的定义是「同一档位下比背景糊」，但**最低档例外**。
+         *
+         * 用户的原话是「卡片模糊调到最低还是有点太模糊」—— 那一刻他要的是
+         * 「看清底下是什么」，不是「保持磨砂的层次」。所以 0 档允许比背景
+         * 的默认 0.055 更清；越过 0.3 之后，两条轴重新按磨砂的比例拉开。
+         */
+        for (i in 3..10) {
             val s = i / 10f
             assertThat(glassRadiusFraction(s)).isGreaterThan(bgRadiusFraction(s) * 2f)
         }
@@ -153,9 +163,11 @@ class GlassCardFrostTest {
     fun `压暗档位在玻璃里真的被读`() {
         val body = code("ui/components/Glass.kt")
         assertThat(body).contains("val glassDim = LocalGlassDim.current")
-        assertThat(body).contains("val k = 0.35f + 1.3f * dim")
+        assertThat(body).contains("val k = if (d <= 0.5f) 0.12f + 1.76f * d")
         // 0.5 时系数必须是 1.0，否则标准档就不再是上一版的配比
-        assertThat(0.35f + 1.3f * 0.5f).isWithin(0.0001f).of(1f)
+        assertThat(0.12f + 1.76f * 0.5f).isWithin(0.0001f).of(1f)
+        // 下限必须真的低：旧版 0.35 的系数就是「拉到最低还是太暗」的根子
+        assertThat(0.12f).isLessThan(0.35f)
     }
 
     // ---------------- 用户消息与思维链 ----------------

@@ -42,8 +42,43 @@ class GlassMaterialTest {
     fun `磨砂玻璃的边更亮，清玻璃保持克制`() {
         val body = code("ui/components/Glass.kt")
         // frosted 分支必须先于 dark/elevated 命中，否则磨砂的边拿不到高值
-        assertThat(body).contains("frosted && dark -> 0.86f")
-        assertThat(body).contains("frosted -> 0.95f")
+        assertThat(body).contains("frosted && dark -> 0.44f")
+        assertThat(body).contains("frosted -> 0.62f")
+        /*
+         * 上限必须收住。上一版是 0.86 / 0.95 —— 1dp 实线、整条顶边一样白，
+         * 用户的原话是「高光描边做得有点太硬」。
+         */
+        assertThat(body).doesNotContain("frosted && dark -> 0.86f")
+    }
+
+    @Test
+    fun `高光沿上沿与圆角走，中间亮两端淡`() {
+        val body = code("ui/components/Glass.kt")
+        // 顶边高光必须是路径，而不是再叠一个圆角矩形：矩形会在两个角露出直角折线
+        assertThat(body).contains("private fun DrawScope.drawTopRim(")
+        assertThat(body).contains("path.arcTo(")
+        assertThat(body).contains("StrokeCap.Round")
+        // 横向渐变：中间 0.5 最亮，两端透明 —— 光要「转过圆角」而不是被切在边上
+        assertThat(body).contains("val rimBrush = remember {")
+        assertThat(body).contains("Brush.horizontalGradient(")
+        // 两层宽度：2.6dp 柔光 + 1dp 亮线，模拟「光渗进玻璃」的软边
+        assertThat(body).contains("rimAlpha * alpha * 0.22f")
+        assertThat(body).contains("2.6.dp.toPx()")
+        // 路径复用，不在每帧 new
+        assertThat(body).contains("val rimPath = remember { Path() }")
+        assertThat(body).contains("path.reset()")
+    }
+
+    @Test
+    fun `压暗与描边跟着底的亮度联动`() {
+        val body = code("ui/components/Glass.kt")
+        // 压暗不再是定值：暗底少压、亮底多压
+        assertThat(body).contains("val lumaK = (0.72f + 0.56f")
+        assertThat(body).contains("backdropLuma")
+        // 暗底上边的补偿方向相反：底越暗，边略亮，形状才立得住
+        assertThat(body).contains("1.18f - 0.36f * backdropLuma")
+        // 用户报「最低还是太暗」：系数下限必须真的低下来（旧版是 0.35）
+        assertThat(body).contains("0.12f + 1.76f * d")
     }
 
     @Test
@@ -63,7 +98,7 @@ class GlassMaterialTest {
         assertThat(body).contains("GlassGrain.brush")
         // 画在本体之上、描边之下
         val grain = body.indexOf("GlassGrain.brush")
-        val edge = body.indexOf("drawEdge(corner, w, h, alpha, edgeBrush)")
+        val edge = body.indexOf("drawEdge(corner, w, h, alpha * edgeK, edgeBrush)")
         assertThat(grain).isLessThan(edge)
     }
 
