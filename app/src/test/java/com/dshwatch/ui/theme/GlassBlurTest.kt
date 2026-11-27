@@ -41,9 +41,11 @@ class GlassBlurTest {
     @Test
     fun `模糊只在国内条件成立时启用`() {
         val body = code("ui/theme/Theme.kt")
-        // 玻璃 + 用户开启 + API 31+
+        // 玻璃 + 用户开启 + 系统支持
         assertThat(body).contains("glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR")
-        assertThat(body).contains("const val MIN_SDK_GLASS_BLUR = 31")
+        // 可用下限是 minSdk（低版本走 RenderScript），实时路径的下限才是 31
+        assertThat(body).contains("const val MIN_SDK_GLASS_BLUR = 26")
+        assertThat(body).contains("const val MIN_SDK_LIVE_BLUR = 31")
         assertThat(body).contains("LocalGlassBlur provides blurBackdrop")
     }
 
@@ -63,9 +65,9 @@ class GlassBlurTest {
         val body = code("ui/screens/settings/SettingsGroupScreen.kt")
         assertThat(body).contains("glassBlur = v")
         assertThat(body).contains("Appearances.isGlass(settings.appearance)")
-        // 低版本画成说明行，不给一个点了没反应的开关
-        assertThat(body).contains("MIN_SDK_GLASS_BLUR")
-        assertThat(body).contains("需要 Android 12 及以上系统")
+        // 低版本也有兼容路径，不能再画「不可用」挡掉
+        assertThat(body).doesNotContain("需要 Android 12 及以上系统")
+        assertThat(body).contains("MIN_SDK_LIVE_BLUR")
     }
 
     @Test

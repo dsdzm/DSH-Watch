@@ -38,8 +38,12 @@ import kotlin.math.max
  *
  * `customBackgroundFrost` 打开时，读文件用的是很大的 `inSampleSize`：
  * 一张 1080 宽的图被读成 100 多像素，再用双线性放大铺满屏幕，观感就是磨砂。
- * 好处是**每帧成本为零** —— 实时高斯模糊在手表上要整屏离屏渲染，
+ * 好处是**每帧成本为零** —— 逐帧高斯模糊在手表上要整屏离屏渲染，
  * 512MB 的机器上直接掉帧。
+ *
+ * 这条路径和「玻璃高斯模糊」不是一回事：前者是常驻的观感处理，后者是用户
+ * 显式打开的选项。低版本（API 26~30）上启用后者时，这里会改读 256px 再用
+ * [RsBlur] 糊一次 —— 那是真高斯，只是算在解码阶段而不是每帧。
  */
 object CustomBackground {
 
@@ -128,24 +132,50 @@ object CustomBackground {
      * 读出用于绘制的位图。
      *
      * @param frost 虚化时用很大的采样率读，尺寸只有 100 多像素，放大后自然发虚
+     * @param blurRadiusFraction 大于 0 时，读完再用 RenderScript 糊一次
+     *   （半径 = 图宽 × 该比例，见 [BLUR_RADIUS_FRACTION]）。
+     *
+     *   这条路径专给 API 26~30 用：那些版本上 `Modifier.blur` 是空操作，
+     *   想真模糊只能离线算。**读的宽度会因此变大**（[BLUR_READ_WIDTH]）——
+     *   拿 120px 的图去糊只会糊成一团色块，看不出「高斯」的形状；
+     *   256px 糊完再放大，边缘才是柔和过渡而不是台阶。
      */
     suspend fun load(
         context: Context,
         name: String,
         frost: Boolean,
+        blurRadiusFraction: Float = 0f,
     ): ImageBitmap? = withContext(Dispatchers.IO) {
         val f = file(context, name)
         if (!f.isFile) return@withContext null
+        val want = when {
+            // 要糊的时候，frost 那个 120px 反而成了障碍：先读细一点
+            blurRadiusFraction > 0f -> BLUR_READ_WIDTH
+            frost -> FROST_READ_WIDTH
+            else -> SAVE_MAX
+        }
+        val bitmap = decodeScaled(f, want) ?: return@withContext null
+        if (blurRadiusFraction <= 0f) return@withContext bitmap.asImageBitmap()
 
-        val want = if (frost) FROST_READ_WIDTH else SAVE_MAX
+        val radius = bitmap.width * blurRadiusFraction
+        RsBlur.blur(context, bitmap, radius)?.let { blurred ->
+            bitmap.recycle()
+            return@withContext blurred.asImageBitmap()
+        }
+        // 模糊失败（驱动缺失的 ROM）：至少还有一张能看的图，不至于背景空白
+        bitmap.asImageBitmap()
+    }
+
+    /** 按目标宽度降采样解码，长边不超过 [want] 的近似值 */
+    private fun decodeScaled(f: File, want: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(f.path, bounds)
-        if (bounds.outWidth <= 0) return@withContext null
+        if (bounds.outWidth <= 0) return null
 
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= want) sample *= 2
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        BitmapFactory.decodeFile(f.path, opts)?.asImageBitmap()
+        return BitmapFactory.decodeFile(f.path, opts)
     }
 
     /** 删掉一张背景图。删不掉也无所谓 —— 设置里已经不再指向它了 */

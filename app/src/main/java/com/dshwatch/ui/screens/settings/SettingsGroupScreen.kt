@@ -527,30 +527,26 @@ private fun AppearanceGroup(
          * 换一张，观感差别很大），而弹窗是「先定材质」的一次性选择。放在这里，
          * 用户切完风格顺手就能试。
          *
-         * 系统不支持时（API < 31）画成一条没有开关的说明行，而不是一个点了
-         * 没反应的开关 —— `Modifier.blur` 在那些版本上是**静默无效**的。
+         * 两个系统区间都在这里给开关，只是副标题说清各自的实现：
+         *  · API 31+：实时 RenderEffect，照片和色晕一起糊；
+         *  · API 26~30：RenderScript 离线糊背景图（见 RsBlur），点开就能看到效果。
+         * 以前低版本画成「不可用」的说明行 —— 那是 `Modifier.blur` 静默失效时
+         * 的权宜做法，现在有兼容路径了，没必要再挡。
          */
         if (Appearances.isGlass(settings.appearance)) {
-            if (android.os.Build.VERSION.SDK_INT >= com.dshwatch.ui.theme.MIN_SDK_GLASS_BLUR) {
-                SwitchRow(
-                    title = "高斯模糊",
-                    subtitle = if (com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle)) {
+            val live = android.os.Build.VERSION.SDK_INT >= com.dshwatch.ui.theme.MIN_SDK_LIVE_BLUR
+            SwitchRow(
+                title = "高斯模糊",
+                subtitle = when {
+                    com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle) ->
                         "模糊卡片下的背景 · M3E 卡片不透明，仅经典界面可见"
-                    } else {
-                        "模糊卡片下的背景，玻璃更通透"
-                    },
-                    checked = settings.glassBlur,
-                    onCheckedChange = { v -> update { it.copy(glassBlur = v) } },
-                )
-            } else {
-                SettingRow(
-                    title = "高斯模糊",
-                    subtitle = "需要 Android 12 及以上系统",
-                    trailing = "不可用",
-                    showDivider = true,
-                    onClick = null,
-                )
-            }
+                    live -> "模糊卡片下的背景，玻璃更通透"
+                    // 低版本只糊背景图：色晕糊了也看不出来，如实说明
+                    else -> "模糊背景图，玻璃更通透 · 低版本由 RenderScript 计算"
+                },
+                checked = settings.glassBlur,
+                onCheckedChange = { v -> update { it.copy(glassBlur = v) } },
+            )
         }
     }
     /*

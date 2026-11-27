@@ -53,27 +53,36 @@ val LocalPerf = staticCompositionLocalOf { PerfProfiles.of(PerfMode.AUTO, com.ds
  *  - 关掉它零成本：没有额外 draw、没有 pointer 追踪、没有动画；
  *  - 打开它整机的胶囊、卡片、按钮一起变，不用逐个页面改。
  *
- * 为什么默认不是真的高斯模糊：本项目 minSdk 28，而 `Modifier.blur` / RenderEffect
- * 要 API 31 才生效，在 Android 9 的手表上会被静默忽略。RenderScript 早已废弃、
- * 且逐帧模糊一块 200×120dp 的区域在 512MB 内存的表上会直接掉帧。
- * 所以默认画的是「模糊的观感」——多层低对比渐变 + 边缘光，GPU 填充成本约等于
- * 几次纯色圆角矩形，比真模糊低一个数量级。
+ * 为什么默认不是真的高斯模糊：真模糊要么是 API 31+ 的 RenderEffect（整屏一次，
+ * 低端表上代价可观），要么是低版本上离线跑的 RenderScript（见 [RsBlur]，
+ * 只能糊背景图、糊不了色晕）。两者都不该成为默认路径 —— 默认画的是
+ * 「模糊的观感」：多层低对比渐变 + 边缘光，GPU 填充成本约等于几次纯色圆角矩形，
+ * 比真模糊低一个数量级，且在任何版本上完全一致。
  *
  * 用户可以在外观设置里打开真模糊（[LocalGlassBlur]）：那是显式选择，
- * 代价（API 31+、一次全屏 RenderEffect）由用户自己承担。
+ * 代价由用户自己承担。
  */
 val LocalGlass = staticCompositionLocalOf { false }
 
 /**
  * 玻璃是否叠在**真高斯模糊**的背景上。
  *
- * 默认 false：低端表上整屏 RenderEffect 的代价仍然可观，而且它只在
- * API 31+ 生效，不该成为默认路径。用户在外观设置里打开后为 true，
- * 两件事同时发生：
+ * 默认 false：整屏实时模糊在低端表上代价可观，不该成为默认路径。
+ * 用户在外观设置里打开后为 true，两件事同时发生：
  *
- *  1. 主题的背景层（照片 / 色晕）整体挂 `Modifier.blur`，玻璃透过去的是糊的底；
+ *  1. 背景层变糊 —— 具体走哪条路按系统版本分：
+ *     · API 31+：背景层整体挂 `Modifier.blur`，照片和色晕一起实时糊；
+ *     · API 26~30：背景图在解码时用 RenderScript 离线糊一次
+ *       （[RsBlur]），之后每帧只画一张已经糊好的图，运行时零成本。
  *  2. [com.dshwatch.ui.components.glassSurface] 的本体略微变薄 —— 不然那层
  *     0.68 的黑会把糊掉的底重新压成一块灰板，「通透」看不出任何变化。
+ *
+ * ## 低版本只糊照片，是有意的
+ *
+ * 色晕是几团半径 1.25 倍屏宽的低频渐变，本身就比任何高斯核都平滑；把它
+ * 再糊一遍，肉眼和像素都看不出差别，却要为此每帧多一张离屏位图。
+ * 所以低版本只处理有真实细节的那一层（背景图）。没有背景图时，
+ * 打开开关仍然会让玻璃变薄 —— 只是不会有「照片化开」的效果。
  *
  * 注意它和 [LocalGlass] 是两件事：后者决定「卡片是不是玻璃」，
  * 前者只决定「玻璃底下糊不糊」。所以 M3E 材质下它永远是 false。
@@ -92,11 +101,44 @@ internal val GLASS_BLUR_RADIUS = 22.dp
 /**
  * 真模糊的最低系统版本。
  *
- * `Modifier.blur` 走 RenderEffect，API 31 之前是**空操作** —— 不报错、
- * 不生效。所以开关在低版本上必须是不可用的，否则用户会点开、看不到变化，
- * 以为功能坏了。
+ * 26 = 本项目 minSdk，也是 RenderScript 兼容路径可用的下限
+ * （`ScriptIntrinsicBlur` 自 API 17 起就有）。所以这个判断在当前
+ * minSdk 下恒为 true —— 保留它是因为它是「功能可用性」的单一出处：
+ * 设置页据此决定画开关还是画说明行，主题据此决定要不要糊。
  */
-internal const val MIN_SDK_GLASS_BLUR = 31
+internal const val MIN_SDK_GLASS_BLUR = 26
+
+/**
+ * 实时模糊的最低系统版本。
+ *
+ * `Modifier.blur` 走 RenderEffect，API 31 之前是**空操作** —— 不报错、
+ * 不生效。低版本必须换 [RsBlur] 那条离线路径，否则用户会点开、
+ * 看不到变化，以为功能坏了。
+ */
+internal const val MIN_SDK_LIVE_BLUR = 31
+
+/**
+ * 离线模糊时背景图的读取宽度。
+ *
+ * 256 是三个约束的交点：
+ *
+ *  - 够大：糊完再放大到全屏，不会露出块状像素（120px 的虚化读法就会）；
+ *  - 够小：ARGB_8888 只有 256 KB，两张（进 / 出）也不到 1MB，
+ *    在 512MB 的表上安全；
+ *  - 半径合适：视觉上要等效于屏幕上的 22dp，而 22dp ≈ 屏宽的 5.3%
+ *    （412dp 的表），256 × 5.3% ≈ 13.6，正好落在 25 的硬上限以内，
+ *    不需要二次模糊。
+ */
+internal const val BLUR_READ_WIDTH = 256
+
+/**
+ * 离屏模糊的半径，占图宽的比例。
+ *
+ * 用比例而不是 dp：背景图读进来是 256px，屏幕是 400 多 dp，两者之间
+ * 差一个缩放。按比例算，模糊强度在任何屏幕、任何读取宽度下都保持
+ * 「屏宽的 5.3%」，和 31+ 上 [GLASS_BLUR_RADIUS] 的观感对齐。
+ */
+internal const val BLUR_RADIUS_FRACTION = 0.053f
 
 
 /**
@@ -235,8 +277,9 @@ fun DshWatchTheme(
     /**
      * 玻璃底是否叠真高斯模糊。
      *
-     * 只在「材质 = 玻璃」且 API 31+ 时生效，低版本会被静默降级成原来的
-     * 观感玻璃 —— 见 [LocalGlassBlur]。
+     * 只在「材质 = 玻璃」时生效。31+ 走实时 RenderEffect，26~30 走
+     * RenderScript 离线模糊背景图 —— 见 [LocalGlassBlur] 与 [RsBlur]。
+     * 低于 [MIN_SDK_GLASS_BLUR]（当前等于 minSdk）时降级成原来的观感玻璃。
      */
     glassBlur: Boolean = false,
     /**
@@ -315,6 +358,31 @@ fun DshWatchTheme(
     // 玻璃与莫奈取色互斥（见下方注释），预设色板仍然需要知道这条
     val useDynamic = monetSeed != null
 
+    // 玻璃背景需要一块**可透的底**：预设里 bg 若是透明（玻璃预设的默认做法，
+    // 让位给最底层的色晕），就得在这里补一块不透明的 surface；
+    // 若是实色（OLED、樱花…），直接用它自己的背景色，一像素都不改。
+
+    // 外观风格与色板分层之后，「是不是玻璃」只由 appearance 决定，
+    // 预设只管颜色 —— 于是「玻璃 + 樱花」「玻璃 + 深海」都是合法组合。
+    //
+    // 动态取色例外：它整块替换色板，色晕的主副色失去依据，
+    // 玻璃会变成「一块没有底色的灰玻璃」，所以此时强制退回 M3E。
+    val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
+
+    /*
+     * 真模糊只在「玻璃 + 用户打开 + 系统支持」三者同时成立时生效。
+     *
+     * 少了任何一条都退回原来的观感玻璃，而不是「开了但什么都没发生」。
+     *
+     * 两条实现路径按版本分：
+     *  · 31+：实时 RenderEffect，背景层整层挂 `Modifier.blur`，照片与色晕一起糊；
+     *  · 26~30：`Modifier.blur` 是空操作，改用 RenderScript 在解码阶段把
+     *    背景图糊一次（[RsBlur]）。色晕不处理 —— 它对低频渐变本就无感。
+     */
+    val blurBackdrop = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
+    val liveBlur = blurBackdrop && Build.VERSION.SDK_INT >= MIN_SDK_LIVE_BLUR
+    val photoBlur = blurBackdrop && !liveBlur
+
     /*
      * 背景图在**主题这一层**解码，而不是每页各读一遍。
      *
@@ -322,12 +390,24 @@ fun DshWatchTheme(
      * 这样冷启动不会因为「等一张照片」卡住首帧 —— 手表上首帧快慢的感知特别明显。
      *
      * key 里带 frost：切换虚化要重新解码（读的采样率不同），不是重新画一遍。
+     * 带 photoBlur：低版本上开关一开，图要重新读一遍并糊掉 —— 只重画是没用的，
+     * 糊过的像素已经不在手里了。
      */
-    val backdrop by produceState<ImageBitmap?>(null, customBackground, customBackgroundFrost) {
+    val backdrop by produceState<ImageBitmap?>(
+        null,
+        customBackground,
+        customBackgroundFrost,
+        photoBlur,
+    ) {
         value = if (customBackground.isBlank()) {
             null
         } else {
-            CustomBackground.load(context, customBackground, customBackgroundFrost)
+            CustomBackground.load(
+                context = context,
+                name = customBackground,
+                frost = customBackgroundFrost,
+                blurRadiusFraction = if (photoBlur) BLUR_RADIUS_FRACTION else 0f,
+            )
         }
     }
 
@@ -353,21 +433,6 @@ fun DshWatchTheme(
     // 让位给最底层的色晕），就得在这里补一块不透明的 surface；
     // 若是实色（OLED、樱花…），直接用它自己的背景色，一像素都不改。
     val glassBase = colorScheme.background
-
-    // 外观风格与色板分层之后，「是不是玻璃」只由 appearance 决定，
-    // 预设只管颜色 —— 于是「玻璃 + 樱花」「玻璃 + 深海」都是合法组合。
-    //
-    // 动态取色例外：它整块替换色板，色晕的主副色失去依据，
-    // 玻璃会变成「一块没有底色的灰玻璃」，所以此时强制退回 M3E。
-    val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
-
-    /*
-     * 真模糊只在「玻璃 + 用户打开 + 系统支持」三者同时成立时生效。
-     *
-     * 少了任何一条都退回原来的观感玻璃，而不是「开了但什么都没发生」：
-     * 开关在设置页里也是按同一条判据决定能不能点（见 SettingsGroupScreen）。
-     */
-    val blurBackdrop = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
 
     /*
      * 浅色底判定直接取主题的明暗，不再看 background 的亮度。
@@ -487,12 +552,15 @@ fun DshWatchTheme(
                      *
                      * 以前背景和内容在同一个 Box 里（drawBehind + content），
                      * 想糊背景就必然连内容一起糊，所以这个开关只能靠重构成两层来实现。
+                     *
+                     * 31+ 在这一层上实时糊；低版本的图在解码时就糊好了（见 backdrop），
+                     * 这里什么都不用做。
                      */
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .then(
-                                if (blurBackdrop) {
+                                if (liveBlur) {
                                     // Unbounded：默认的 Rectangle 会在四边做一圈渐隐，
                                     // 满屏铺开时就是一圈「暗边」，看着像屏幕漏光。
                                     // 半径按屏宽的一小段取，和弹窗的 18dp 同一量级。

@@ -592,12 +592,21 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.8",
+            date = "2026-11-27",
+            highlights = listOf(
+                "玻璃高斯模糊在 Android 12 以下改用 RenderScript 离线计算，低版本同样生效",
+                "设置页不再在低版本把高斯模糊标为不可用",
+                "模糊计算失败时自动退回未模糊的背景，不影响界面显示",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.7",
             date = "2026-11-27",
             highlights = listOf(
                 "外观设置新增「高斯模糊」开关，玻璃卡片下的背景可叠加真高斯模糊",
                 "开启后玻璃卡片本体变薄，背景纹理透出更明显",
-                "开关仅在玻璃材质与 Android 12 及以上系统中可用",
+                "开关仅在玻璃材质下显示，M3E 材质卡片不透明、效果不可见",
             ),
         ),
         ChangelogEntry(
