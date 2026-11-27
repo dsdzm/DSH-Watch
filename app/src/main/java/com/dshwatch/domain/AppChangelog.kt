@@ -592,6 +592,14 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.13",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修好「滚下去玻璃就不糊了」：卡片位置改为可触发重绘，滚动时糊影跟着走",
+                "坐标万一滞后会退回整图铺满，不再有一帧看起来像透明玻璃纸",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.12",
             date = "2026-11-27",
             highlights = listOf(

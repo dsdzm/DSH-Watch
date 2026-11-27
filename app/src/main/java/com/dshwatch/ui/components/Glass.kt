@@ -416,15 +416,27 @@ fun Modifier.glassSurface(
     }
 
     /*
-     * 卡片在屏幕上的位置。
+     * 卡片在屏幕上的位置。**必须是 state**。
      *
-     * 用一个**普通对象**而不是 state 存：滚动时这个值每帧都变，写成 state 会让
-     * 每张卡每帧重组一次。而绘制层本来就会跟着卡片一起平移，读到旧值也不会错位
-     * 到肉眼能看出来的程度（采样源是一张糊到没有细节的图）。
+     * 上一版存进了一个普通对象，理由是「滚动时每帧写 state 会重组」—— 那个
+     * 理由是错的，代价是功能直接失效：
+     *
+     *   LazyColumn 滚动用的是 `placeWithLayer`（RenderNode 平移），**卡片不重绘**。
+     *   `drawBehind` 里的 `origin` 于是永远是第一帧的值，整张采样图被按旧坐标
+     *   推到卡片外面 —— 卡片只剩一层白纱。用户看到的就是「滚到下面就没了」，
+     *   而调一下滑块会触发重组重绘，所以那一刻又糊回来一次。
+     *
+     * 写成 state 不会引起重组：读取发生在 `drawBehind` 的 draw 阶段，
+     * state 变化只会让**这一张卡** `invalidateDraw`（一次 drawImage 的代价），
+     * 不会经过组合。这是 Compose 里「布局阶段写、绘制阶段读」的标准组合。
      */
-    val origin = remember { OffsetHolder() }
+    val origin = remember { mutableStateOf(Offset.Zero) }
     if (sampleBackdrop) {
-        m = m.onGloballyPositioned { origin.value = it.positionInRoot() }
+        m = m.onGloballyPositioned { coords ->
+            val p = coords.positionInRoot()
+            // 1px 以内不写：亚像素抖动不该换来一次重绘
+            if ((p - origin.value).getDistanceSquared() >= 1f) origin.value = p
+        }
     }
 
     m = m
@@ -784,11 +796,14 @@ private fun DrawScope.drawEdge(corner: Float, w: Float, h: Float, alpha: Float, 
  * 一次 `drawImage` 就是全部成本：没有离屏层、没有逐帧卷积，
  * 图是几十张卡共用的一张，内存不随卡片数增长。
  *
- * ## 位置是「读的时候」拿的，不是「布局的时候」写进 state 的
+ * ## 位置必须跟着滚动更新，否则「滚下去就没了」
  *
- * 列表滚动时每张卡的坐标每帧都变。写进 state 就是每张卡每帧重组一次；
- * 而绘制层本来就会跟着卡片一起平移，采样源又是糊到没有细节的图，
- * 差几个像素肉眼无法分辨。所以用一个普通对象持有，只在真正重绘时读一次。
+ * 采样偏移 = 背景图里的位置 − 卡片在屏幕上的位置。滚动一次，后者变，前者不变，
+ * 所以偏移必须跟着变。而 LazyColumn 滚动是 RenderNode 平移，**不会触发重绘** ——
+ * 偏移不变，整张图就被推到卡片外面，卡片只剩白纱。
+ *
+ * 解法是调用方把坐标存进 state、在这里的 draw 阶段读：state 一变只会让这张卡
+ * `invalidateDraw`，不重组。详见 [glassSurface] 里 origin 的注释。
  */
 private fun DrawScope.drawFrostSlice(
     photo: ImageBitmap,
@@ -811,14 +826,47 @@ private fun DrawScope.drawFrostSlice(
         canvasHeight = rootSize.height.toFloat(),
     ) ?: return
 
+    val dx = (cover.left - origin.x).roundToInt()
+    val dy = (cover.top - origin.y).roundToInt()
+
+    /*
+     * 坐标过期时的兜底。
+     *
+     * 滚动中 layout 回调与绘制之间可能差一帧；乐观情况下看不出来，但如果某一帧
+     * 坐标彻底过期（整张图被推出卡片），卡片会只剩一层白纱 —— 就是用户说的
+     * 「滚下去就没模糊了」。这里检测「图和卡片完全不重叠」，退化成把整张糊图
+     * 铺满卡片：尺度不对，但质感还在，不会有任何一帧看起来像透明玻璃纸。
+     */
+    val overlaps = dx + cover.width > 0 &&
+        dx < size.width.roundToInt() &&
+        dy + cover.height > 0 &&
+        dy < size.height.roundToInt()
+    if (!overlaps) {
+        val w = size.width.roundToInt().coerceAtLeast(1)
+        val h = size.height.roundToInt().coerceAtLeast(1)
+        drawImage(
+            image = photo,
+            srcOffset = IntOffset.Zero,
+            srcSize = IntSize(photo.width, photo.height),
+            dstOffset = IntOffset.Zero,
+            dstSize = IntSize(w, h),
+            alpha = alpha,
+            filterQuality = FilterQuality.Low,
+        )
+        if (dim > 0.01f) {
+            drawRect(
+                color = if (dark) Color.Black else Color.White,
+                alpha = dim.coerceIn(0f, 0.9f),
+            )
+        }
+        return
+    }
+
     drawImage(
         image = photo,
         // 整张图平移过来：卡片自己的原点对应根布局的 (origin)，所以铺图的
         // 左上角要减去它。画到卡片外的部分由 clip(shape) 裁掉
-        dstOffset = IntOffset(
-            (cover.left - origin.x).roundToInt(),
-            (cover.top - origin.y).roundToInt(),
-        ),
+        dstOffset = IntOffset(dx, dy),
         dstSize = IntSize(cover.width, cover.height),
         alpha = alpha,
         // Low = 双线性：这张图本来就是「放大后发虚」，再贵的采样也看不出差别
@@ -832,7 +880,3 @@ private fun DrawScope.drawFrostSlice(
     }
 }
 
-/** 只用来放一个 Offset，不参与快照系统 —— 见 [drawFrostSlice] 的说明 */
-private class OffsetHolder {
-    var value: Offset = Offset.Zero
-}

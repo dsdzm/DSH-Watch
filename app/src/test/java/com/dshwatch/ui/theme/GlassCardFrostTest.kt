@@ -52,6 +52,16 @@ class GlassCardFrostTest {
         // 取样：位置 + 根尺寸 + 遮罩
         assertThat(body).contains("drawFrostSlice(")
         assertThat(body).contains("positionInRoot()")
+        /*
+         * 坐标必须进 state，并且只在 draw 阶段读。
+         *
+         * LazyColumn 滚动是 RenderNode 平移，**卡片不会重绘**：坐标若存在普通对象里，
+         * `drawBehind` 永远用第一帧的值，采样图会被推到卡片外面，卡片只剩白纱 ——
+         * 用户看到的就是「滚下去就没模糊了，只有调滑块才糊回来一次」。
+         * 写进 state 不会重组（读发生在 draw 阶段），只会让这张卡失效重绘。
+         */
+        assertThat(body).contains("remember { mutableStateOf(Offset.Zero) }")
+        assertThat(body).doesNotContain("class OffsetHolder")
         // 用同一个铺满算法，否则卡片里的糊影会和周围照片错开
         assertThat(body).contains("coverRect(")
         /*
