@@ -223,10 +223,24 @@ fun IconTap(
         return
     }
 
+    // 玻璃主题下图标要有一块自己的底：顶栏往往直接压在照片上，
+    // 一排裸图标在亮的地方根本看不清，也不成体系
+    val glass = com.dshwatch.ui.theme.LocalGlass.current
     Box(
         modifier = Modifier
             .size(WatchDimens.iconButton)
-            .clip(CircleShape)
+            .then(
+                if (glass) {
+                    Modifier.glassSurface(
+                        shape = CircleShape,
+                        cornerRadius = WatchDimens.iconButton / 2,
+                        // 轻量：顶栏一排六颗，用整层会被读成一排白扣子
+                        weight = 0.42f,
+                    )
+                } else {
+                    Modifier.clip(CircleShape)
+                },
+            )
             .tap(enabled = enabled, onClick = withHaptic(onClick)),
         contentAlignment = Alignment.Center,
     ) {
@@ -535,12 +549,28 @@ fun SegmentedRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            // 玻璃主题下用很淡的白：分段条本身是「凹槽」，不能和里面的选中块一样亮，
-            // 否则选中态分不出来
-            .background(
-                if (glass) Color.White.copy(alpha = 0.07f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh
+            .then(
+                if (glass) {
+                    /*
+                     * 凹槽也是一块玻璃，只是薄。
+                     *
+                     * 之前这里是 `Color.White.copy(0.07)` 的平涂 —— 没有边、没有顶光，
+                     * 在深色下就是一条看不清的灰带，被用户算作「部分控件没有做玻璃」。
+                     * 0.45 的分量：有边有顶光，又不会和里面那块选中玻璃一样亮。
+                     */
+                    Modifier.glassSurface(
+                        shape = RoundedCornerShape(14.dp),
+                        cornerRadius = 14.dp,
+                        weight = 0.45f,
+                        // 凹槽上不该有常驻光斑（那是「可点的卡片」的语言）。
+                        // 打开跟手就不画环境光，只有手指真的落上去才亮
+                        trackPointer = true,
+                    )
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                },
             )
             .padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -1162,6 +1192,17 @@ fun GlassSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Box(
         modifier = Modifier
             .size(width = trackWidth, height = trackHeight)
+            /*
+             * 关着的时候轨道要更暗，否则「关」和「开」只差滑块位置。
+             *
+             * 这一笔必须在 glassSurface **之前**：glassSurface 会画本体、颗粒和描边，
+             * 叠在它上面等于把描边一起压灰 —— 关掉的开关就成了一块没有边的灰片，
+             * 正是「控件没有做玻璃」的观感。
+             */
+            .then(
+                if (checked) Modifier
+                else Modifier.background(Color.Black.copy(alpha = 0.22f), CircleShape)
+            )
             .glassSurface(
                 shape = CircleShape,
                 tint = MaterialTheme.colorScheme.primary,
@@ -1173,13 +1214,7 @@ fun GlassSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
                 onClick = null,
                 trackPointer = true,
             )
-            .tap(quiet = true, interaction = src, onClick = withHaptic { onCheckedChange(!checked) })
-            // 关着的时候轨道要更淡：染色玻璃的 alpha 跟随状态，
-            // 否则「关」和「开」只差滑块位置，一眼看不出状态
-            .then(
-                if (checked) Modifier
-                else Modifier.background(Color.Black.copy(alpha = 0.18f), CircleShape)
-            ),
+            .tap(quiet = true, interaction = src, onClick = withHaptic { onCheckedChange(!checked) }),
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(

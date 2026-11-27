@@ -24,6 +24,9 @@ class AppSettingsCompatTest {
 
         assertThat(s.appearance).isEqualTo(Appearances.GLASS)
         assertThat(s.glassBlur).isFalse()
+        // 背景模糊是后加的：缺字段时落默认值（开）——老版本开玻璃模糊就是整层糊，
+        // 默认关掉反而会让升级后的观感突然变锐
+        assertThat(s.backgroundBlur).isTrue()
         // 其它默认值也应当还在（缺字段不是"整份重置"）
         assertThat(s.fishEnabled).isFalse()
         assertThat(s.uiStyle).isEqualTo(UiStyles.CLASSIC)
@@ -36,6 +39,15 @@ class AppSettingsCompatTest {
         val back = Jsonx.lenient.decodeFromString(AppSettings.serializer(), text)
         assertThat(back.glassBlur).isTrue()
         assertThat(back).isEqualTo(on)
+    }
+
+    @Test
+    fun `背景模糊开关能往返序列化`() {
+        val off = AppSettings(backgroundBlur = false)
+        val text = Jsonx.lenient.encodeToString(AppSettings.serializer(), off)
+        val back = Jsonx.lenient.decodeFromString(AppSettings.serializer(), text)
+        assertThat(back.backgroundBlur).isFalse()
+        assertThat(back).isEqualTo(off)
     }
 
     @Test

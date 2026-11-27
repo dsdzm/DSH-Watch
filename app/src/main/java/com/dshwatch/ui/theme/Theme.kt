@@ -275,6 +275,19 @@ fun DshWatchTheme(
     /** 背景是否虚化（读得粗 + 放大，见 [CustomBackground]） */
     customBackgroundFrost: Boolean = true,
     /**
+     * 背景层（照片与色晕）是否做真高斯模糊。
+     *
+     * 与 [glassBlur] 是**两件事**：
+     *
+     *  · 这一项是「壁纸本身柔不柔」，任何材质都生效（M3E 的不透明卡片下也有背景）；
+     *  · [glassBlur] 是「卡片这块玻璃磨不磨砂」—— 奶白、颗粒、更亮的描边。
+     *
+     * 上一版把两者绑在同一根线上（开玻璃模糊就整层糊掉），于是想「壁纸清晰的
+     * 清玻璃」根本调不出来。拆开之后：关掉这一项、只开玻璃磨砂，得到的是
+     * 一张清晰的壁纸配一块奶玻璃。
+     */
+    backgroundBlur: Boolean = true,
+    /**
      * 玻璃底是否叠真高斯模糊。
      *
      * 只在「材质 = 玻璃」时生效。31+ 走实时 RenderEffect，26~30 走
@@ -370,16 +383,19 @@ fun DshWatchTheme(
     val glass = com.dshwatch.domain.model.Appearances.isGlass(appearance) && !useDynamic
 
     /*
-     * 真模糊只在「玻璃 + 用户打开 + 系统支持」三者同时成立时生效。
-     *
-     * 少了任何一条都退回原来的观感玻璃，而不是「开了但什么都没发生」。
+     * 两条链路分开算：
+     *  · 背景层是否糊 → [backgroundBlur]，与材质无关；
+     *  · 玻璃是否磨砂 → [glassBlur] + 玻璃材质。
      *
      * 两条实现路径按版本分：
      *  · 31+：实时 RenderEffect，背景层整层挂 `Modifier.blur`，照片与色晕一起糊；
      *  · 26~30：`Modifier.blur` 是空操作，改用 RenderScript 在解码阶段把
      *    背景图糊一次（[RsBlur]）。色晕不处理 —— 它对低频渐变本就无感。
      */
-    val blurBackdrop = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
+    // 玻璃自己的磨砂（奶白 + 颗粒 + 亮边），只在玻璃材质且用户打开时成立
+    val glassFrost = glass && glassBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
+    // 背景层糊不糊：由「背景模糊」独立决定，与材质无关
+    val blurBackdrop = backgroundBlur && Build.VERSION.SDK_INT >= MIN_SDK_GLASS_BLUR
     val liveBlur = blurBackdrop && Build.VERSION.SDK_INT >= MIN_SDK_LIVE_BLUR
     val photoBlur = blurBackdrop && !liveBlur
 
@@ -511,7 +527,7 @@ fun DshWatchTheme(
         LocalContentColor provides colorScheme.onSurface,
         LocalStrings provides strings,
         LocalGlass provides glass,
-        LocalGlassBlur provides blurBackdrop,
+        LocalGlassBlur provides glassFrost,
         LocalDarkTheme provides dark,
         LocalUiStyle provides uiStyleNow,
     ) {

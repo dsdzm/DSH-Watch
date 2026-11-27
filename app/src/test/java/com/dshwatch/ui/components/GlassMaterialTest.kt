@@ -42,8 +42,8 @@ class GlassMaterialTest {
     fun `磨砂玻璃的边更亮，清玻璃保持克制`() {
         val body = code("ui/components/Glass.kt")
         // frosted 分支必须先于 dark/elevated 命中，否则磨砂的边拿不到高值
-        assertThat(body).contains("frosted && dark -> 0.78f")
-        assertThat(body).contains("frosted -> 0.86f")
+        assertThat(body).contains("frosted && dark -> 0.86f")
+        assertThat(body).contains("frosted -> 0.95f")
     }
 
     @Test
@@ -86,8 +86,8 @@ class GlassMaterialTest {
         // 换种子 = 每次启动颗粒都不一样，用户会觉得界面在闪
         assertThat(body).contains("Random(20261127L)")
         assertThat(body).contains("TileMode.Repeated")
-        // 颗粒量级：最大 12/255 ≈ 4.7%，再大人眼就读成噪点而不是磨砂
-        assertThat(body).contains("const val MAX_ALPHA = 12")
+        // 颗粒量级：最大 9/255 ≈ 3.5%，再大人眼就读成噪点而不是磨砂
+        assertThat(body).contains("const val MAX_ALPHA = 9")
         // 惰性：不进玻璃主题的用户一次都不建这张位图
         assertThat(body).contains("by lazy")
     }

@@ -114,6 +114,8 @@ class RenderScriptBlurTest {
         val body = code("ui/screens/settings/SettingsGroupScreen.kt")
         // 有兼容路径之后，不该再用「不可用」挡掉
         assertThat(body).doesNotContain("需要 Android 12 及以上系统")
-        assertThat(body).contains("低版本由 RenderScript 计算")
+        // 开关还在，只是文案不再按版本分叉
+        assertThat(body).contains("backgroundBlur = v")
+        assertThat(body).contains("磨砂玻璃")
     }
 }

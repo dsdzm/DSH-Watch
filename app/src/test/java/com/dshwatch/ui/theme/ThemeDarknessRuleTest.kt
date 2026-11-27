@@ -121,16 +121,16 @@ class ThemeDarknessRuleTest {
     @Test
     fun `压黑与压白都只在深色分支里`() {
         val glass = stripComments(src("ui/components/Glass.kt"))
-        val darkBranch = glass.indexOf("if (dark) {")
-        assertTrue("Glass.kt 里应当有 `if (dark) {` 分支", darkBranch > 0)
+        // 本体取色用 when 分派（dark / elevated / frosted / else），深色是第一个分支
+        val darkBranch = glass.indexOf("dark -> {")
+        assertTrue("Glass.kt 里应当有 `dark -> {` 分支", darkBranch > 0)
 
         val black = glass.indexOf("drawRoundRect(Color.Black", darkBranch)
-        val elseBranch = glass.indexOf("} else {", darkBranch)
+        val next = glass.indexOf("elevated -> {", darkBranch)
         assertTrue("深色分支里应当先压一层黑（v1.22.3）", black > darkBranch)
         assertTrue(
-            "压黑必须落在 `if (dark)` 与 `else` 之间 —— 跑到浅色分支就是" +
-                "「浅色模式变黑」那次事故",
-            elseBranch > 0 && black < elseBranch,
+            "压黑必须落在 dark 分支里 —— 跑到浅色分支就是「浅色模式变黑」那次事故",
+            next > 0 && black < next,
         )
     }
 

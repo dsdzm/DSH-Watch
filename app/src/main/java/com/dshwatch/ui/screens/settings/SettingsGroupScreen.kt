@@ -458,7 +458,9 @@ private fun AppearanceGroup(
         Text(
             text = "手机与手表为两套独立界面，主题、缩放与材质不互通。",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
+            // 深色下 outline 只有 #7A7A7A，压在新卡片（亮度 45）上读不出来；
+            // 说明文字用次级正文色，两套主题都能看见
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )
         Spacer(Modifier.height(10.dp))
@@ -521,28 +523,38 @@ private fun AppearanceGroup(
             onClick = { editingAppearance = true },
         )
         /*
-         * 高斯模糊：只在玻璃材质下出现。
+         * 背景模糊：**与材质无关**。
          *
-         * 不放进「外观风格」弹窗，是因为它是**日常会调**的一项（亮/暗、背景图
-         * 换一张，观感差别很大），而弹窗是「先定材质」的一次性选择。放在这里，
-         * 用户切完风格顺手就能试。
+         * 它只回答「壁纸本身柔不柔」。M3E 的不透明卡片下也有背景，
+         * 所以这一项不属于玻璃；对着照片当底的用户，无论用哪套材质都会想调它。
+         * 没有背景图时不出现 —— 色晕是低频渐变，模糊了肉眼也看不出差别。
+         */
+        if (settings.customBackground.isNotBlank()) {
+            SwitchRow(
+                title = "背景模糊",
+                subtitle = "柔化背景图与色晕，所有材质生效",
+                checked = settings.backgroundBlur,
+                onCheckedChange = { v -> update { it.copy(backgroundBlur = v) } },
+            )
+        }
+        /*
+         * 磨砂玻璃：只在玻璃材质下出现。
          *
-         * 两个系统区间都在这里给开关，只是副标题说清各自的实现：
-         *  · API 31+：实时 RenderEffect，照片和色晕一起糊；
-         *  · API 26~30：RenderScript 离线糊背景图（见 RsBlur），点开就能看到效果。
-         * 以前低版本画成「不可用」的说明行 —— 那是 `Modifier.blur` 静默失效时
-         * 的权宜做法，现在有兼容路径了，没必要再挡。
+         * 它管的是**卡片这块材质**（奶白 + 颗粒 + 更亮的描边），不再顺手把
+         * 整屏背景糊掉 —— 那件事归上面的「背景模糊」。上一版两者绑在一起，
+         * 用户想「清晰壁纸 + 清玻璃」时无路可走。
+         *
+         * 两个系统区间都能呈现，只是实现不同：
+         *  · API 31+：背糊由 RenderEffect 实时做；
+         *  · API 26~30：由 RenderScript 在解码阶段糊一次（见 RsBlur）。
          */
         if (Appearances.isGlass(settings.appearance)) {
-            val live = android.os.Build.VERSION.SDK_INT >= com.dshwatch.ui.theme.MIN_SDK_LIVE_BLUR
             SwitchRow(
-                title = "高斯模糊",
-                subtitle = when {
-                    com.dshwatch.domain.model.UiStyles.isM3e(settings.uiStyle) ->
-                        "模糊卡片下的背景 · M3E 卡片不透明，仅经典界面可见"
-                    live -> "模糊卡片下的背景，玻璃更通透"
-                    // 低版本只糊背景图：色晕糊了也看不出来，如实说明
-                    else -> "模糊背景图，玻璃更通透 · 低版本由 RenderScript 计算"
+                title = "磨砂玻璃",
+                subtitle = if (settings.backgroundBlur || settings.customBackground.isBlank()) {
+                    "卡片叠加奶白与颗粒，玻璃更厚实"
+                } else {
+                    "卡片叠加奶白与颗粒 · 背景未模糊时颗粒更明显"
                 },
                 checked = settings.glassBlur,
                 onCheckedChange = { v -> update { it.copy(glassBlur = v) } },

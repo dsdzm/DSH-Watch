@@ -592,6 +592,16 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.10",
+            date = "2026-11-27",
+            highlights = listOf(
+                "深色玻璃重做明暗配比，卡片透出背景色相，正文对比度提升到 4.9:1",
+                "浅色磨砂颗粒强度减到三分之一",
+                "背景模糊独立成开关，可与磨砂玻璃分开设置",
+                "分段条、顶栏图标与开关轨道接入玻璃，弹窗本体透出背后的模糊底",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.9",
             date = "2026-11-27",
             highlights = listOf(

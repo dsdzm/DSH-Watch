@@ -36,8 +36,13 @@ internal object GlassGrain {
 
     private const val SIZE = 64
 
-    /** 想让它「看得出毛」就调这个：最大 12/255 ≈ 4.7% */
-    private const val MAX_ALPHA = 12
+    /**
+     * 单像素最亮档。
+     *
+     * 从 12 收到 9：12/255 在浅色白面上会被读成一层脏点（放大看就是「颗粒感大」）。
+     * 9 之后再乘绘制时的 0.45，实际差约 4/255 —— 看得出毛面，看不出噪点。
+     */
+    private const val MAX_ALPHA = 9
 
     /**
      * 惰性构建：不进玻璃主题的用户一次都不会创建这张位图。

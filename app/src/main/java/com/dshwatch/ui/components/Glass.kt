@@ -140,6 +140,14 @@ fun Modifier.glassSurface(
      */
     interaction: MutableInteractionSource? = null,
     /**
+     * 玻璃的「分量」，1.0 = 完整的一层，0.4~0.6 = 轻量控件（图标按钮、分段条的凹槽）。
+     *
+     * 只乘最终 alpha，不动颜色配比 —— 整层按同一比例变淡，看上去是「同一块玻璃，
+     * 只是薄一点」。顶栏图标、开关轨道这类面积小、数量多的控件，用整层会被
+     * 读成一排白扣子，压到一半才像控件自己的底。
+     */
+    weight: Float = 1f,
+    /**
      * 是否跟踪手指位置，让光斑**跟手**。
      *
      * 默认跟着 [onClick]：能点的玻璃本来就应该跟手。
@@ -242,33 +250,35 @@ fun Modifier.glassSurface(
         Brush.verticalGradient(
             0f to Color.White.copy(
                 alpha = when {
-                    frosted && dark -> 0.78f
-                    frosted -> 0.86f
+                    frosted && dark -> 0.86f
+                    frosted -> 0.95f
                     // 深色弹窗：本体压暗之后，这条边成了「弹窗从背景里切出来」
                     // 的唯一信号，必须够亮
-                    dark && elevated -> 0.62f
-                    elevated -> 0.50f
-                    dark -> 0.36f
-                    else -> 0.44f
+                    dark && elevated -> 0.70f
+                    // 浅色弹窗是近白的面，白边本来就看不出，靠更亮的顶边 + 下面那道
+                    // 正文色内描边一起成形
+                    elevated -> 0.92f
+                    dark -> 0.52f
+                    else -> 0.62f
                 },
             ),
             // 中段不能太亮：整圈都亮就成了描边色块。
             // 深色弹窗的中段略提，让侧边有厚度但不喧宾夺主
             0.34f to Color.White.copy(
                 alpha = when {
-                    frosted && dark -> 0.26f
-                    frosted -> 0.30f
-                    dark && elevated -> 0.22f
-                    dark -> 0.12f
-                    else -> 0.24f
+                    frosted && dark -> 0.30f
+                    frosted -> 0.34f
+                    dark && elevated -> 0.24f
+                    dark -> 0.16f
+                    else -> 0.22f
                 },
             ),
             // 右下角：深色弹窗收到 0.02。玻璃越薄，下沿那道暗越像「脏边」
             1f to Color.White.copy(
                 alpha = when {
-                    frosted -> 0.10f
-                    dark && elevated -> 0.02f
-                    dark -> 0.05f
+                    frosted -> 0.12f
+                    dark && elevated -> 0.04f
+                    dark -> 0.06f
                     else -> 0.10f
                 },
             ),
@@ -291,9 +301,10 @@ fun Modifier.glassSurface(
             0f to Color.White.copy(
                 alpha = when {
                     solid -> 0.18f
-                    frosted -> 0.10f
-                    dark -> 0.05f
-                    else -> 0.05f
+                    frosted && dark -> 0.09f
+                    frosted -> 0.15f
+                    dark -> 0.06f
+                    else -> 0.06f
                 },
             ),
             0.26f to Color.White.copy(alpha = 0f),
@@ -406,7 +417,7 @@ fun Modifier.glassSurface(
                 } * (if (solid) 0.5f else 1f),
                 solid = solid,
                 elevated = elevated,
-                alpha = if (enabled) 1f else 0.45f,
+                alpha = (if (enabled) 1f else 0.45f) * weight,
                 bottomBrush = bottomBrush,
                 edgeBrush = edgeBrush,
                 glossBrush = glossBrush,
@@ -475,125 +486,60 @@ private fun DrawScope.drawGlassPanel(
         drawRoundRect(tint.copy(alpha = 0.42f), cornerRadius = r, alpha = alpha)
         drawBottomShade(r, shadeBrush, alpha)
     } else {
-        // 中性玻璃：白 0.24。
-        //
-        // 这个数字是量出来的，不是猜的：参考应用的玻璃亮度与背景之比约 1.45，
-        // 换算成叠加就是 0.30 左右的白。一开始我用了 0.075，只提亮 7%，
-        // 玻璃看上去跟纯黑贴纸没有区别 —— 因为它下面那层颜色根本没被抬起来。
-        val body = when {
-            // 深色弹窗 0.34 — 上一版压到 0.16，现在调回来。
-            //
-            // 那一版是基于一个错误的前提：我以为「暗」是卡片太灰，
-            // 于是把本体压到 0.16、从背景透上来找色相。其实卡片灰是因为
-            // **它背后那层被遮罩压黑了**，玻璃透过去的只有 55 的亮度。
-            //
-            // 现在遮罩改成「只糊不暗」（模糊由页面层的 GlassBackdropHost 负责），
-            // 背后回到 76~80，本体就该回到 0.34 —— 这时候透上来的是
-            // 还亮着的背景，卡片才是「玻璃」而不是「灰板」。
-            //
-            // 一句话：本体的透明度要和「底有多亮」配对。底被压暗时抬本体，
-            // 底亮起来就该放回去。之前是拿本体去补遮罩的账，补不平。
-            // 浅色底：玻璃必须「往下沉」，而不是「往上提」。
-            //
-            // 这是 v1.15 第三次重发里最要命的一条。玻璃本体一直是
-            // 「叠一层白 α」——这个公式只在深色底上成立：底越亮，叠白越看不出东西，
-            // 白底上叠 0.92 的白等于直接消失，卡片看起来就是「没有卡片」。
-            // 用户说的「纯白色背景无法体现出玻璃的透明」正是这个：
-            // 透明感的来源不是「变亮」，是**卡片与底之间有差**。
-            //
-            // 白底上的玻璃在现实里是：透过去的白比周围略暗一点（玻璃有折射损耗）、
-            // 上沿一道高光、下沿一道暗边 —— 全靠「压一点」来成形。
-            // 所以浅色下改成叠**极淡的暗**（surface 的正文色，0.06~0.10），
-            // 再配原本就有的顶边高光。看着像玻璃，而不是像一张白纸。
-            // ---- 弹窗（elevated）：它背后现在**已经被糊掉了**，所以不能太实 ----
-            //
-            // 用户的最新反馈：「OLED 黑和其他主题色的弹窗太透明了，没有给弹窗背景做模糊」。
-            // 前半句和后半句是同一件事：因为背后没糊，透出来的是一页清清楚楚的字，
-            // 于是「透」在观感上等于「看得见后面的内容」，卡片再实也像没盖住。
-            //
-            // 现在背后由宿主统一糊掉（Backdrop.kt），卡片就可以回到「玻璃该有的透」：
-            // 透过去的是一团模糊的色块，读不出字，这才像毛玻璃。
-            // 所以这里把弹窗本体从 0.34 收到 0.26 —— 不是为了更透，是为了让「糊」看得见。
-            // 0.26 → 0.12：底下多了那层暗底（见下面 dark 分支），白色只是「光泽」，
-            // 不再是「亮度来源」。两笔加起来才是最后那张面。
-            elevated && dark -> 0.12f
-            // 浅色弹窗：0.92 → 0.56。
-            // 浅底上叠白本来就是「看不见」的方向（见下面浅色分支的说明），
-            // 靠 0.92 的白硬盖在观感上是一块白板；背后糊掉之后，
-            // 0.56 的白 + 上沿高光 + 下沿厚度才是「一块毛玻璃」。
-            elevated -> 0.56f
-            /*
-             * 普通卡片（非弹窗）。开了真模糊时本体薄一档：
-             *
-             * 那层 0.68 的黑是为「背景清晰」准备的 —— 它把底下压成一块均匀的灰，
-             * 文字才有地方站。但底一旦是糊的，就没有「细节」需要压了，
-             * 继续压 0.68 只会把模糊也一起吃掉，用户点开开关看不到任何变化。
-             *
-             * 所以糊的时候把黑收到 0.56、白收到 0.18：平均亮度几乎不变
-             * （文字对比度不掉），透上来的却是**有纹理**的底色 —— 这就是「通透」。
-             */
-            dark -> if (frosted) 0.18f else 0.24f
-            else -> if (frosted) 0.48f else 0.55f
-        }
-        if (dark) {
-            /*
-             * 深色弹窗：先压一层暗，再叠白。
-             *
-             * 这一笔是 v1.22.3 加的，起因是用户一句「文字和控件跟背景几乎融为一体，
-             * 看都看不出来」。量一下当时的样子就明白为什么：
-             *
-             *   模糊后的背景 ≈ RGB 55
-             *   弹窗本体     = 白 0.26 叠上去 → 107
-             *   正文色       ≈ 230
-             *   对比度       = (230+5)/(107+5) ≈ 2.1:1
-             *
-             * 正文要 4.5:1 才够读，2.1 就是「能看见有字，但读起来费劲」。
-             * 而且**加白救不了** —— 白字配越亮的底，对比只会更低。
-             * 唯一的方向是把底压暗，让白字重新有地方站。
-             *
-             * 0.68 的暗底把 55 压到 18，再叠 0.12 的白回到 46，
-             * 对比度 (230+5)/(46+5) ≈ 4.6:1 —— 过线，同时还剩 32% 的背景
-             * 透上来，仍然是玻璃，不是一块实心板。
-             */
-            /*
-             * 弹窗不动这一笔（0.68）：它背后由宿主糊到 18dp，文字本来就站在
-             * 一团看不出细节的底上，再放低只会把已经调好的 4.6:1 对比度拉回去。
-             * 只有**普通卡片**在真模糊下降一档，见上面 body 的注释。
-             */
-            drawRoundRect(Color.Black, cornerRadius = r, alpha = (if (frosted && !elevated) 0.56f else 0.68f) * alpha)
-            drawRoundRect(Color.White, cornerRadius = r, alpha = body * alpha)
-        } else if (elevated) {
-            /*
-             * 浅色弹窗：**一层真的磨砂白**。
-             *
-             * 这一笔是 v1.22.5 改的。之前的浅色弹窗只叠了 10% 的正文色 ——
-             * 在算数上「文字 / 卡片」的对比度是够的（≈12:1），但那是**假设
-             * 卡片底就是纯白**。实际上卡片 90% 是透明的，背后是滚动中的聊天页：
-             * 一屏字、气泡、图片都在，文字压在这些东西上面，读起来像隔着一层脏玻璃。
-             *
-             * 参考用户给的另一个应用：它的弹窗是「磨砂白卡片 + 压暗的背景」。
-             * 所以这里补上 0.80 的白 —— 透过去只剩 20%，能看出背后是模糊的色块，
-             * 但读不出任何内容。这才是毛玻璃该有的样子：**透，但不可读**。
-             *
-             * 再叠 0.05 的正文色压痕，让卡片不至于白得发飘（白纸感），
-             * 并且和下面那层白遮罩拉开一点层次。
-             */
-            drawRoundRect(Color.White, cornerRadius = r, alpha = 0.80f * alpha)
-            drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.05f * alpha)
-        } else {
-            // 普通浅色卡片：仍然只压一点正文色。列表卡片要「贴」在背景上，
-            // 做成磨砂白会和背景断开，一整屏变成白色方块
-            //
-            // 磨砂时补一层 0.10 的白：浅色底上「糊」几乎看不出来（白底糊了还是白），
-            // 唯一能表达「这块是磨砂」的就是这点奶白。深色文字压上去反而更清楚，
-            // 所以这一笔不吃对比度。
-            drawRoundRect(
-                color = bodyTint,
-                cornerRadius = r,
-                alpha = (if (frosted) 0.055f else 0.085f) * alpha,
-            )
-            if (frosted) {
-                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.10f * alpha)
+        /*
+         * 面 = 一层压暗 + 一层白（深色）/ 一层奶白 + 一点正文色（浅色）。
+         *
+         * ## 深色为什么从 0.68 收到 0.55
+         *
+         * 0.68 的黑配 0.24 的白，合起来是 **83% 不透明**：底被压成一块均匀的灰，
+         * 卡片也就成了灰板 —— 透不出色相，也没有背景的明暗。量一下就知道有多糟：
+         *
+         *   底 55 → 压黑 0.68 = 17.6 → 叠白 0.24 = 74.6
+         *   正文 242 压上去 → 对比度 (247)/(79.6) ≈ 3.1:1，低于 4.5 的及格线
+         *
+         * 又灰又读不清，正是「深色模式下表现不好」。现在改成 0.55 / 0.09：
+         *
+         *   底 55 → 24.75 → 45.5，正文对比度 ≈ 4.9:1，同时还有 40% 的背景透上来。
+         *
+         * 卡片会比背景略暗 —— 深色玻璃本该如此（烟熏玻璃），形状靠 1dp 的上沿
+         * 高光说出来，比「一块比背景亮的灰」干净得多。
+         *
+         * ## 浅色为什么不再只压一层极淡的暗
+         *
+         * 清玻璃在浅色下是**沉下去**的，只叠 0.085 的正文色，透出来就是照片本身。
+         * 磨砂开启后底已经糊了，再只压一点暗，卡片就没有「毛」的质感 ——
+         * 0.26 奶白 + 0.045 正文色是「奶玻璃」：糊掉的底被提亮一档，
+         * 深色文字压上去仍有 6:1 以上。
+         */
+        when {
+            dark -> {
+                // 弹窗要盖住下面那一层，压得更实
+                val scrim = when {
+                    elevated -> 0.74f
+                    frosted -> 0.60f
+                    else -> 0.55f
+                }
+                val film = when {
+                    elevated -> 0.10f
+                    frosted -> 0.10f
+                    else -> 0.09f
+                }
+                drawRoundRect(Color.Black, cornerRadius = r, alpha = scrim * alpha)
+                drawRoundRect(Color.White, cornerRadius = r, alpha = film * alpha)
+            }
+            elevated -> {
+                // 浅色弹窗：0.80 的白在观感上就是一块白板（背后糊成什么样都看不见）。
+                // 0.52 才让「底下是糊的」成立，正文仍有 7:1 以上
+                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.52f * alpha)
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.05f * alpha)
+            }
+            frosted -> {
+                drawRoundRect(Color.White, cornerRadius = r, alpha = 0.26f * alpha)
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.045f * alpha)
+            }
+            else -> {
+                // 清玻璃：不叠白，只压一点正文色 —— 卡片与底之间靠「略暗」分开
+                drawRoundRect(bodyTint, cornerRadius = r, alpha = 0.085f * alpha)
             }
         }
         drawBottomShade(r, shadeBrush, alpha)
@@ -610,10 +556,17 @@ private fun DrawScope.drawGlassPanel(
     // 只在「底下真的糊了」时才铺。清玻璃是光滑面，铺颗粒等于给镜片打毛，
     // 和它的通透感自相矛盾。
     //
-    // alpha 0.9 而不是 1.0：颗粒图里的最亮档是 12/255，再乘 0.9 之后
-    // 单像素差约 4/255 —— 正好落在「看得出是磨砂、看不出是噪点」的区间。
+    // 颗粒图里最亮档 9/255（见 GlassGrain.MAX_ALPHA），再乘 0.32~0.45：
+    // 单像素差只有 2~4/255，落在「看得出是磨砂、看不出是噪点」的区间。
+    // 上一版是 12 × 0.9 ≈ 11/255，浅色白面上被读成一层脏点 —— 用户那句
+    // 「浅色模式下颗粒感有点大」就是这个。
     if (frosted) {
-        drawRoundRect(brush = GlassGrain.brush, cornerRadius = r, alpha = 0.9f * alpha)
+        // 浅色要更淡：白面上 12/255 的噪点会被读成「脏」，深色底上同样的值只是「毛」
+        drawRoundRect(
+            brush = GlassGrain.brush,
+            cornerRadius = r,
+            alpha = (if (dark) 0.32f else 0.45f) * alpha,
+        )
     }
 
     // ---- 2) 边 ----
@@ -627,12 +580,13 @@ private fun DrawScope.drawGlassPanel(
     /*
      * 浅色弹窗再补一道 1dp 的正文色内描边。
      *
-     * 浅色主题的页面本来就是近白的，卡片 0.80 的白和页面只差 8/255 ——
-     * 高光那条边又是白的，等于没有边界。用户看到的会是一块「没有形状的白」。
-     * 这一道 0.12 的暗线才是「卡片到这里为止」的信号。
+     * 浅色主题的页面本来就是近白的，卡片 0.52 的白叠在糊掉的白底上，和页面
+     * 只差十几级 —— 高光那条边又是白的，等于没有边界。用户看到的会是一块
+     * 「没有形状的白」，这也是「弹窗没有做玻璃」的一部分：玻璃得先有形状。
+     * 这一道暗线才是「卡片到这里为止」的信号。
      */
     if (!dark && elevated) {
-        drawEdge(corner, w, h, alpha * 0.12f, SolidColor(bodyTint))
+        drawEdge(corner, w, h, alpha * 0.14f, SolidColor(bodyTint))
     }
 
     // ---- 3) 光 ----
