@@ -3,6 +3,7 @@ package com.dshwatch.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -373,6 +374,20 @@ fun DshWatchTheme(
         LocalDeviceProfile provides scaledProfile,
         LocalUiScale provides uiScale,
         LocalUiScaleRecommended provides uiScaleRecommended,
+        /*
+         * 正文色必须在这里给一次，不能指望每个 `Text` 自己写。
+         *
+         * Compose 里 `Text` 不传 `color` 时读的是 `LocalContentColor`，而这个
+         * 局部值的**默认实现是黑色**（`Color.Black`），不是主题色。整个 App
+         * 没有用 `Surface` 包页面（玻璃 / Wear 都是自绘底色），于是没有任何
+         * 一层把它换成 `onSurface` —— 浅色下看不出来（黑字本来就对），
+         * 深色下这些字就留在黑色上：用户看到的是「深色模式里字体颜色没变」。
+         *
+         * 这类漏写在 UI 里有四百多处（`Text(text = …, style = …)`），逐个补
+         * `color =` 既补不完、也会在下次新增页面时再漏。在根部按 Material 的
+         * 语义给一次（正文色 = onSurface），所有未指定的文字随主题走。
+         */
+        LocalContentColor provides colorScheme.onSurface,
         LocalStrings provides strings,
         LocalGlass provides glass,
         LocalDarkTheme provides dark,

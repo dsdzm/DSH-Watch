@@ -592,6 +592,15 @@ object AppChangelog {
      */
     val betaEntries: List<ChangelogEntry> = listOf(
         ChangelogEntry(
+            version = "1.24.2-beta.6",
+            date = "2026-11-27",
+            highlights = listOf(
+                "修复深色模式下部分页面与弹窗文字颜色不随主题变化的问题",
+                "确认弹窗与动态页正文按主题层级取色",
+                "图标默认色统一跟随当前主题",
+            ),
+        ),
+        ChangelogEntry(
             version = "1.24.2-beta.5",
             date = "2026-11-27",
             highlights = listOf(

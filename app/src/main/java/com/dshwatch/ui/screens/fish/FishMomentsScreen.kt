@@ -113,6 +113,7 @@ fun FishMomentsScreen(
                         Text(
                             text = "她还没写过什么。",
                             style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             text = "等今天聊过几句，她会自己记一条。",
@@ -183,6 +184,7 @@ private fun MomentCard(m: FishMoment) {
             Text(
                 text = m.text,
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             )
         }

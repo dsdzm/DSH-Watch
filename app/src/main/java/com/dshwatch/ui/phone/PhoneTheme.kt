@@ -1,6 +1,7 @@
 package com.dshwatch.ui.phone
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -143,6 +144,9 @@ fun PhoneTheme(
         LocalDarkTheme provides dark,
         LocalUiStyle provides UiStyles.CLASSIC,
         LocalPhoneUi provides true,
+        // 同手表主题：`Text` 的默认色是 `LocalContentColor`，而它是黑。
+        // 不在这里换成 onSurface，深色模式下没写 color 的字就一直是黑的。
+        LocalContentColor provides scheme.onSurface,
     ) {
         MaterialTheme(
             colorScheme = scheme,

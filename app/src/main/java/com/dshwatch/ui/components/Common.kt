@@ -872,7 +872,20 @@ fun ConfirmDialog(
     GlassDialog(
         onDismissRequest = onDismiss,
         title = title,
-        content = { Text(text = text, style = MaterialTheme.typography.bodySmall) },
+        /*
+         * 正文色显式给。
+         *
+         * 原来这里只写了 `style`，颜色落到 `LocalContentColor` 的默认值（黑）——
+         * 浅色下恰好对，深色下就是「弹窗里的说明还是黑字」。根主题现在统一提供
+         * 了 onSurface，这里再按层级降到 onSurfaceVariant：标题是一级，说明是二级。
+         */
+        content = {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
         buttons = {
             TextButton(onClick = onDismiss) { Text(s.cancel) }
             TextButton(onClick = onConfirm) {
