@@ -440,8 +440,11 @@ class CommunityApi(
         /**
          * 社区服务器地址。
          *
-         * 走 https：主机上装的是 ZeroSSL 签的 `dshwatch.vxni.ink` 单域名证书，
-         * 证书链完整（叶证书 + ZeroSSL RSA DV SSL CA 2），系统信任库能直接验。
+         * 走 https：主机上装的是 ZeroSSL 签的 `dshwatch.vxni.ink` 单域名证书。
+         * 证书链是 叶子 <- ZeroSSL RSA DV SSL CA 2 <- Sectigo R46 —— R46 是新根，
+         * 老手表/老手机的系统 CA 库里没有，会报 Trust anchor not found；
+         * 所以包里内置了 R46（res/raw/sectigo_r46.crt），在
+         * network_security_config.xml 里作为附加信任锚，见该文件注释。
          * 登录和投稿都会带 token，明文 HTTP 等于把 token 写在明信片上寄出去。
          */
         const val BASE_URL = "https://dshwatch.vxni.ink/api/"

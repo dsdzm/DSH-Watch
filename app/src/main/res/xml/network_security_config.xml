@@ -1,20 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  允许明文 HTTP。
+  允许明文 HTTP，并额外信任一张内置根证书。
 
-  为什么必须开：DSH 服务器模式要连你电脑上跑的 dsh-workspace，典型地址就是
+  一、为什么必须允许明文：
+  DSH 服务器模式要连你电脑上跑的 dsh-workspace，典型地址就是
   http://192.168.1.20:3090 —— 局域网内一般没有证书。
-
   targetSdk >= 28 时系统默认禁止明文，如果不声明这一条，
   连 http:// 地址会直接抛 IOException（表现为「网络请求失败」），而且报错信息很难懂。
 
-  安全边界：本 App 只访问你自己配置的地址，不做任何第三方上报。
+  二、为什么内置 Sectigo R46 根证书（@raw/sectigo_r46）：
+  社区服务器 dshwatch.vxni.ink 用的是 ZeroSSL 证书，其证书链是
+    叶子 <- ZeroSSL RSA DV SSL CA 2 <- Sectigo Public Server Authentication Root R46
+  R46 是 2021 年前后才加入各系统信任库的新根。很多手表/老手机的固件
+  CA 库多年不更新，系统里没有 R46，握手时会报
+    CertPathValidatorException: Trust anchor not found for certification path
+  （桌面浏览器正常、手机报错，就是它）。把 R46 打进包里作为附加信任锚，
+  老设备也能直接信任这条链，不依赖系统 CA 更新。
+
+  安全边界：内置的只是 Sectigo 官方根证书（2046 年过期），不是自签白名单；
+  本 App 只访问你自己配置的地址，不做任何第三方上报。
   跨公网请务必使用 https:// 或 Tailscale/WireGuard。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
+            <certificates src="@raw/sectigo_r46" />
         </trust-anchors>
     </base-config>
 </network-security-config>
