@@ -210,4 +210,132 @@ class CommunityApiTest {
 
         assertThat(err).isInstanceOf(CommunityException::class.java)
     }
+
+    @Test
+    fun `线上地址必须是 https`() {
+        // 登录和投稿都带 Bearer token，走明文等于把 token 抄在明信片上。
+        // 证书已经装好（ZeroSSL，链完整），没有任何理由再退回 http。
+        assertThat(CommunityApi.BASE_URL).startsWith("https://")
+        assertThat(CommunityApi.BASE_URL).contains("dshwatch.vxni.ink")
+        assertThat(CommunityApi.BASE_URL).doesNotContain("http://")
+    }
+
+    // ------------------------------------------------------ 评论 / 评分 / 举报
+
+    @Test
+    fun `评论列表解析作者与正文`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"items":[{"id":3,"author":"阿糖","body":"写得好","createdAt":1795847119}],"page":0,"hasMore":false}"""
+            )
+        )
+
+        val p = api.comments(4)
+
+        assertThat(p.items).hasSize(1)
+        assertThat(p.items[0].author).isEqualTo("阿糖")
+        assertThat(p.items[0].body).isEqualTo("写得好")
+        assertThat(p.hasMore).isFalse()
+        assertThat(server.takeRequest().path).contains("a=comments")
+    }
+
+    @Test
+    fun `发评论带上卡片 id 和正文`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"comment":{"id":9,"author":"阿糖","body":"不错","createdAt":1795847119}}"""
+            )
+        )
+
+        val c = api.postComment("tok", 4, "  不错  ")
+
+        assertThat(c.id).isEqualTo(9L)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"id\":4")
+        // 前后空格在这里没意义，服务端也会 trim，客户端先做掉省一次往返
+        assertThat(body).contains("\"body\":\"不错\"")
+    }
+
+    @Test
+    fun `评分返回新的均分与人数`() = runTest {
+        server.enqueue(
+            MockResponse().setBody("""{"ok":true,"rating":4.5,"ratingCount":2,"myScore":5}""")
+        )
+
+        val r = api.rate("tok", 4, 5)
+
+        assertThat(r.rating).isEqualTo(4.5)
+        assertThat(r.count).isEqualTo(2)
+        assertThat(r.myScore).isEqualTo(5)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"score\":5")
+    }
+
+    @Test
+    fun `评分越界会被夹到 1 到 5`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"rating":5,"ratingCount":1,"myScore":5}"""))
+
+        api.rate("tok", 4, 99)
+
+        assertThat(server.takeRequest().body.readUtf8()).contains("\"score\":5")
+    }
+
+    @Test
+    fun `详情带 token 时读得到我的评分与作者标记`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"item":{"id":4,"kind":"tavern","name":"鲸鱼娘","downloads":1,"likes":2,
+                   "rating":4.5,"ratingCount":2,"commentCount":3,"createdAt":1,"updatedAt":1,
+                   "myScore":4,"mine":true,"card":{"kind":"tavern","name":"鲸鱼娘","persona":"你是鲸鱼娘"}}}"""
+            )
+        )
+
+        val d = api.detail(4, token = "tok")
+
+        assertThat(d.myScore).isEqualTo(4)
+        assertThat(d.mine).isTrue()
+        assertThat(d.meta.rating).isEqualTo(4.5)
+        assertThat(d.meta.commentCount).isEqualTo(3)
+        assertThat(server.takeRequest().getHeader("Authorization")).isEqualTo("Bearer tok")
+    }
+
+    @Test
+    fun `不登录看详情时评分与作者标记是默认值`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"item":{"id":4,"kind":"tavern","name":"x","downloads":0,"likes":0,"createdAt":1,"updatedAt":1,
+                   "card":{"kind":"tavern","name":"x","persona":"p"}}}"""
+            )
+        )
+
+        val d = api.detail(4)
+
+        assertThat(d.myScore).isEqualTo(0)
+        assertThat(d.mine).isFalse()
+        assertThat(d.meta.rating).isEqualTo(0.0)
+        assertThat(server.takeRequest().getHeader("Authorization")).isNull()
+    }
+
+    @Test
+    fun `举报只发理由，不把补充说明塞成空串`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"reported":true}"""))
+
+        api.report("tok", 4, "内容不适")
+
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"reason\":\"内容不适\"")
+        assertThat(body).doesNotContain("\"detail\"")
+    }
+
+    @Test
+    fun `撤回投稿是一个带 id 的 POST`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"deleted":true}"""))
+
+        api.deleteOwn("tok", 7)
+
+        val req = server.takeRequest()
+        assertThat(req.method).isEqualTo("POST")
+        assertThat(req.path).contains("a=delete")
+        assertThat(req.body.readUtf8()).contains("\"id\":7")
+    }
 }

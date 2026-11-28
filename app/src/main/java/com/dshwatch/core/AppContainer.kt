@@ -85,6 +85,17 @@ class AppContainer(private val app: Context) {
      */
     val communityApi = com.dshwatch.data.community.CommunityApi(json)
 
+    /**
+     * 社区数据缓存（列表 + 详情，内存 + 磁盘）。
+     *
+     * 构造时同步读一次盘，让列表页第一帧就有内容；具体理由写在类上。
+     * 和 [communityAccount] 用同一个 `community/` 目录，但文件名不同，互不干扰。
+     */
+    val communityCache = com.dshwatch.data.community.CommunityCache(
+        dir = File(app.filesDir, "community"),
+        json = json,
+    )
+
     val communityAccount = com.dshwatch.data.community.CommunityAccount(
         keyStore = keyStore,
         dir = File(app.filesDir, "community"),

@@ -175,6 +175,8 @@ fun CardEditScreen(
                 )
             }.onSuccess { id ->
                 container.communityAccount.rememberSubmission(saved.id, id)
+                // 刚投完稿，「我的投稿」里的旧列表已经没有意义了
+                container.communityCache.dropMine()
                 shareFailed = false
                 shareNotice = if (remote > 0) {
                     "已更新，会重新走一遍审核"

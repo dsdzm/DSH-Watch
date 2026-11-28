@@ -121,12 +121,16 @@ class WatchNavigatorTest {
             Screen.CommunityCard(7L),
             Screen.CommunityAuth,
             Screen.CommunityMine,
+            Screen.CommunityComments(7L),
         )
         assertEquals(
-            listOf("chat", "community", "ccard|7", "cauth", "cmine"),
+            listOf("chat", "community", "ccard|7", "cauth", "cmine", "ccomm|7"),
             save(pages),
         )
-        assertEquals(pages, restore("chat", "community", "ccard|7", "cauth", "cmine"))
+        assertEquals(
+            pages,
+            restore("chat", "community", "ccard|7", "cauth", "cmine", "ccomm|7"),
+        )
     }
 
     @Test

@@ -96,6 +96,9 @@ sealed interface Screen {
     /** 我的投稿：审核状态与拒绝理由 */
     data object CommunityMine : Screen
 
+    /** 某张卡的评论区（列表 + 发评论） */
+    data class CommunityComments(val id: Long) : Screen
+
     /** 长期记忆文档的只读预览 */
     data class MemoryDoc(val cardId: String) : Screen
 
@@ -210,6 +213,7 @@ class WatchNavigator internal constructor(
         private const val COMMUNITY_CARD = "ccard"
         private const val COMMUNITY_AUTH = "cauth"
         private const val COMMUNITY_MINE = "cmine"
+        private const val COMMUNITY_COMMENTS = "ccomm"
 
         private fun encode(screen: Screen): String = when (screen) {
             Screen.Chat -> "chat"
@@ -249,6 +253,7 @@ class WatchNavigator internal constructor(
             is Screen.CommunityCard -> "$COMMUNITY_CARD$SEP${screen.id}"
             Screen.CommunityAuth -> COMMUNITY_AUTH
             Screen.CommunityMine -> COMMUNITY_MINE
+            is Screen.CommunityComments -> "$COMMUNITY_COMMENTS$SEP${screen.id}"
             // 记忆文档是只读预览，恢复到根屏没有损失，也不必重建上下文
             is Screen.MemoryDoc -> UNRESTORABLE
             Screen.FishSettings -> UNRESTORABLE
@@ -304,6 +309,10 @@ class WatchNavigator internal constructor(
                     ?: Screen.Community
                 COMMUNITY_AUTH -> Screen.CommunityAuth
                 COMMUNITY_MINE -> Screen.CommunityMine
+                COMMUNITY_COMMENTS -> parts.getOrNull(1)?.toLongOrNull()
+                    ?.takeIf { it > 0 }
+                    ?.let { Screen.CommunityComments(it) }
+                    ?: Screen.Community
                 UNRESTORABLE -> Screen.Chat
                 else -> Screen.Chat
             }

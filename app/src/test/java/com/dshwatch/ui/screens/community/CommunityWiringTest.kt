@@ -88,4 +88,45 @@ class CommunityWiringTest {
         assertTrue(src.contains("communityApi.mine("))
         assertTrue(src.contains("card.reason"))
     }
+
+    @Test
+    fun `评论页在 ScreenHost 里分发且真的调接口`() {
+        val appRoot = read("ui/AppRoot.kt")
+        assertTrue(appRoot.contains("CommunityCommentsScreen("))
+        assertTrue(appRoot.contains("is Screen.CommunityComments ->"))
+
+        val src = read("ui/screens/community/CommunityCommentsScreen.kt")
+        assertTrue(src.contains("communityApi.comments("))
+        assertTrue(src.contains("communityApi.postComment("))
+        // 未登录要能去登录，而不是让输入框白写一通
+        assertTrue(src.contains("Screen.CommunityAuth"))
+    }
+
+    @Test
+    fun `评分 举报 撤回三个动作都接在详情页`() {
+        val src = read("ui/screens/community/CommunityCardScreen.kt")
+        assertTrue(src.contains("communityApi.rate("))
+        assertTrue(src.contains("communityApi.report("))
+        assertTrue(src.contains("communityApi.deleteOwn("))
+        // 撤回是破坏性操作，必须先确认再发请求
+        assertTrue(src.contains("confirmDelete"))
+        // 报告入口只在非作者身上显示：作者自己举报自己没意义
+        assertTrue(src.contains("detail?.mine != true"))
+        // 评分要能看出"我打了几分"，否则连点两次不知道生效没有
+        assertTrue(src.contains("myScore"))
+    }
+
+    @Test
+    fun `列表与详情都先读缓存再决定要不要发请求`() {
+        // 这条守的是"每次进去都转圈"：只要有人把 LaunchedEffect 改回无条件 load，
+        // 这两个断言就会挂
+        val list = read("ui/screens/community/CommunityScreen.kt")
+        assertTrue(list.contains("communityCache.page("))
+        assertTrue(list.contains("CommunityCache.LIST_TTL"))
+        assertTrue(list.contains("load(reset = true, silent ="))
+
+        val detail = read("ui/screens/community/CommunityCardScreen.kt")
+        assertTrue(detail.contains("communityCache.detail("))
+        assertTrue(detail.contains("CommunityCache.DETAIL_TTL"))
+    }
 }

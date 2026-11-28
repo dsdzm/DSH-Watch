@@ -8,6 +8,7 @@ import com.dshwatch.domain.roleplay.RoleCard
 import com.dshwatch.domain.roleplay.Scenes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -17,6 +18,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -139,13 +141,19 @@ class CommunityApi(
      * [download] 为 true 时服务端顺手给下载数 +1 —— 只在**真的导入**时传，
      * 光点开看一眼不该算一次下载。
      */
-    suspend fun detail(id: Long, download: Boolean = false): CommunityDetail {
+    suspend fun detail(id: Long, download: Boolean = false, token: String? = null): CommunityDetail {
         val url = "?a=card&id=$id" + if (download) "&download=1" else ""
-        val obj = get(url, token = null)
+        // 不带 token 也能看；带了才知道「我打了几分」「这张卡是不是我投的」
+        val obj = get(url, token?.takeIf { it.isNotBlank() })
         val item = obj["item"]?.jsonObject ?: throw CommunityException("这张卡已经不在了")
         val meta = readMeta(item)
         val payload = item["card"]?.jsonObject ?: JsonObject(emptyMap())
-        return CommunityDetail(meta = meta, card = toRoleCard(payload, meta))
+        return CommunityDetail(
+            meta = meta,
+            card = toRoleCard(payload, meta),
+            myScore = item["myScore"]?.jsonPrimitive?.intOrNull ?: 0,
+            mine = item["mine"]?.jsonPrimitive?.booleanOrNull == true,
+        )
     }
 
     suspend fun mine(token: String): List<CommunityCard> {
@@ -158,6 +166,75 @@ class CommunityApi(
         val obj = post("like", buildJsonObject { put("id", id) }, token)
         return obj["likes"]?.jsonPrimitive?.intOrNull ?: 0
     }
+
+    // ---------------- 评论 / 评分 / 举报 ----------------
+
+    /** 一张卡的评论，最新在前 */
+    suspend fun comments(cardId: Long, page: Int = 0, size: Int = 20): CommentPage {
+        val obj = get("?a=comments&id=$cardId&page=$page&size=$size", token = null)
+        val raw = obj["items"]?.jsonArray ?: JsonArray(emptyList())
+        return CommentPage(
+            items = raw.mapNotNull { it as? JsonObject }.map(::readComment),
+            hasMore = obj["hasMore"]?.jsonPrimitive?.booleanOrNull == true,
+        )
+    }
+
+    suspend fun postComment(token: String, cardId: Long, body: String): CommunityComment {
+        val obj = post(
+            "comment",
+            buildJsonObject {
+                put("id", cardId)
+                put("body", body.trim())
+            },
+            token,
+        )
+        val c = obj["comment"]?.jsonObject ?: throw CommunityException("评论没发出去，再试一次")
+        return readComment(c)
+    }
+
+    /**
+     * 打分。一人一卡一分，重复调用就是改分 —— 服务端是 upsert，
+     * 这里不需要先查「我打过没有」。
+     */
+    suspend fun rate(token: String, cardId: Long, score: Int): RatingResult {
+        val obj = post(
+            "rate",
+            buildJsonObject {
+                put("id", cardId)
+                put("score", score.coerceIn(1, 5))
+            },
+            token,
+        )
+        return RatingResult(
+            rating = obj["rating"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+            count = obj["ratingCount"]?.jsonPrimitive?.intOrNull ?: 0,
+            myScore = obj["myScore"]?.jsonPrimitive?.intOrNull ?: score,
+        )
+    }
+
+    /** 作者撤回自己的投稿。服务端会校验 user_id，别人删不动 */
+    suspend fun deleteOwn(token: String, cardId: Long) {
+        post("delete", buildJsonObject { put("id", cardId) }, token)
+    }
+
+    suspend fun report(token: String, cardId: Long, reason: String, detail: String = "") {
+        post(
+            "report",
+            buildJsonObject {
+                put("id", cardId)
+                put("reason", reason)
+                if (detail.isNotBlank()) put("detail", detail)
+            },
+            token,
+        )
+    }
+
+    private fun readComment(o: JsonObject): CommunityComment = CommunityComment(
+        id = o["id"]?.jsonPrimitive?.longOrNull ?: 0L,
+        author = o["author"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        body = o["body"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        createdAt = o["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+    )
 
     // ---------------- 投稿 ----------------
 
@@ -187,6 +264,9 @@ class CommunityApi(
         author = o["author"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         downloads = o["downloads"]?.jsonPrimitive?.intOrNull ?: 0,
         likes = o["likes"]?.jsonPrimitive?.intOrNull ?: 0,
+        rating = o["rating"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+        ratingCount = o["ratingCount"]?.jsonPrimitive?.intOrNull ?: 0,
+        commentCount = o["commentCount"]?.jsonPrimitive?.intOrNull ?: 0,
         createdAt = o["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
         status = o["status"]?.jsonPrimitive?.contentOrNull
             ?: CommunityCard.STATUS_APPROVED,
@@ -360,11 +440,11 @@ class CommunityApi(
         /**
          * 社区服务器地址。
          *
-         * 现在还是 http：主机的 SSL 证书没装好（面板自带那张是
-         * aspanel.starzv.com 的，且已过期）。装好之后把这里换成 https 即可，
-         * App 的 network_security_config 两种都允许。
+         * 走 https：主机上装的是 ZeroSSL 签的 `dshwatch.vxni.ink` 单域名证书，
+         * 证书链完整（叶证书 + ZeroSSL RSA DV SSL CA 2），系统信任库能直接验。
+         * 登录和投稿都会带 token，明文 HTTP 等于把 token 写在明信片上寄出去。
          */
-        const val BASE_URL = "http://dshwatch.vxni.ink/api/"
+        const val BASE_URL = "https://dshwatch.vxni.ink/api/"
 
         /** `?a=list` 后面那串固定部分，和 [list] 里拼参数的地方对应 */
         private const val BASE_TAIL_LIST = "?a=list"
@@ -382,8 +462,31 @@ data class Auth(val token: String, val username: String)
 /** 一页社区列表 */
 data class Page(val items: List<CommunityCard>, val hasMore: Boolean)
 
-/** 详情：元信息 + 可直接入库的本地卡 */
-data class CommunityDetail(val meta: CommunityCard, val card: RoleCard)
+/**
+ * 详情：元信息 + 可直接入库的本地卡。
+ *
+ * [myScore] / [mine] 只有带着 token 请求时才有意义 —— 没登录时是 0 / false，
+ * 界面上就是不显示"我的评分"和删除按钮，正好。
+ */
+data class CommunityDetail(
+    val meta: CommunityCard,
+    val card: RoleCard,
+    val myScore: Int = 0,
+    val mine: Boolean = false,
+)
+
+/** 评论列表的一页 */
+data class CommentPage(val items: List<CommunityComment>, val hasMore: Boolean)
+
+data class CommunityComment(
+    val id: Long,
+    val author: String,
+    val body: String,
+    val createdAt: Long,
+)
+
+/** 打分后的回执：新的均分、评分人数、我打了几分 */
+data class RatingResult(val rating: Double, val count: Int, val myScore: Int)
 
 /**
  * 社区列表里的一行。
@@ -392,6 +495,7 @@ data class CommunityDetail(val meta: CommunityCard, val card: RoleCard)
  * 用同一个结构而不是两个类：列表页和「我的投稿」长得几乎一样，
  * 分开写等于把状态渲染复制一遍。
  */
+@Serializable
 data class CommunityCard(
     val id: Long,
     val kind: String,
@@ -400,6 +504,10 @@ data class CommunityCard(
     val author: String,
     val downloads: Int,
     val likes: Int,
+    /** 平均分，一位小数；没人评分时是 0 */
+    val rating: Double = 0.0,
+    val ratingCount: Int = 0,
+    val commentCount: Int = 0,
     val createdAt: Long,
     val status: String = STATUS_APPROVED,
     val reason: String = "",

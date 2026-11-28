@@ -39,7 +39,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.data.community.CachedPage
 import com.dshwatch.data.community.CommunityApi
+import com.dshwatch.data.community.CommunityCache
 import com.dshwatch.data.community.CommunityCard
 import com.dshwatch.data.community.CommunityException
 import com.dshwatch.domain.roleplay.Scenes
@@ -84,12 +86,25 @@ fun CommunityScreen(
     var kind by remember { mutableStateOf<String?>(null) }
     var hot by remember { mutableStateOf(false) }
 
-    var items by remember { mutableStateOf<List<CommunityCard>>(emptyList()) }
-    var hasMore by remember { mutableStateOf(false) }
-    var page by remember { mutableStateOf(0) }
-    var loading by remember { mutableStateOf(false) }
-    var loadedOnce by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val sort = if (hot) CommunityApi.SORT_HOT else CommunityApi.SORT_NEW
+    val key = CommunityCache.listKey(kind, sort)
+
+    /*
+     * 每个筛选组合各自一套状态，初值来自缓存。
+     *
+     * `remember(key)`：切到「写作」再切回「全部」，回到的是「全部」上次那一份，
+     * 而不是从空列表重新拉。内存里的缓存读是 O(1)，所以这一帧就是完整列表，
+     * 中间不会闪一下"正在取卡"。
+     */
+    val cached = remember(key) { container.communityCache.page(key) }
+    var items by remember(key) { mutableStateOf(cached?.items.orEmpty()) }
+    var hasMore by remember(key) { mutableStateOf(cached?.hasMore ?: false) }
+    /** 已加载到第几页（0 起）；-1 表示一页都没拉过 */
+    var pages by remember(key) { mutableStateOf(cached?.pages ?: -1) }
+    var loading by remember(key) { mutableStateOf(false) }
+    var loadedOnce by remember(key) { mutableStateOf(cached != null) }
+    var error by remember(key) { mutableStateOf<String?>(null) }
+    var updatedAt by remember(key) { mutableStateOf(cached?.at ?: 0L) }
 
     /*
      * 请求代次。
@@ -101,33 +116,50 @@ fun CommunityScreen(
      */
     var generation by remember { mutableIntStateOf(0) }
 
-    suspend fun load(reset: Boolean) {
+    /**
+     * @param silent 后台刷新：不显示"正在取卡"、失败也不弹红字（屏幕上已有内容，
+     *   把用户好不容易看到的东西换成错误提示没有意义）
+     */
+    suspend fun load(reset: Boolean, silent: Boolean = false) {
         val mine = ++generation
-        loading = true
+        if (!silent) loading = true
         if (reset) error = null
-        val next = if (reset) 0 else page + 1
+        val next = if (reset) 0 else pages + 1
         val result = runCatching {
             container.communityApi.list(
                 page = next,
                 kind = kind,
-                sort = if (hot) CommunityApi.SORT_HOT else CommunityApi.SORT_NEW,
+                sort = sort,
             )
         }
         // 过期响应：已经有更新的请求在路上（或已经回来），这一份的 items 是旧筛选的
         if (mine != generation) return
         result.onSuccess { p ->
-            items = if (reset) p.items else items + p.items
+            val merged = if (reset) p.items else items + p.items
+            items = merged
             hasMore = p.hasMore
-            page = next
+            pages = next
+            updatedAt = System.currentTimeMillis()
+            // 落盘：下次冷启动、或者用户切回这个筛选，直接用这份
+            container.communityCache.putPage(
+                key,
+                CachedPage(at = updatedAt, hasMore = p.hasMore, items = merged, pages = next),
+            )
         }.onFailure { e ->
-            error = e.message ?: "加载失败"
+            if (!silent || items.isEmpty()) error = e.message ?: "加载失败"
         }
         // 首次失败也要把 loadedOnce 立起来，否则界面永远停在"加载中"
         loadedOnce = true
         loading = false
     }
 
-    LaunchedEffect(kind, hot) { load(reset = true) }
+    LaunchedEffect(key) {
+        // 缓存还新鲜就一个请求都不发 —— 社区审核是人工的，五分钟内不会有新卡
+        val fresh = cached != null && container.communityCache.isFresh(cached.at, CommunityCache.LIST_TTL)
+        if (fresh) return@LaunchedEffect
+        // 有过期缓存：先让屏幕上的旧内容留着，后台悄悄换新的
+        load(reset = true, silent = cached != null)
+    }
 
     WatchScaffold(
         title = "社区",
@@ -203,6 +235,19 @@ fun CommunityScreen(
             }
             if (items.isNotEmpty()) {
                 HintText("点一张卡看全文，喜欢就导入到自己的酒馆")
+                // 缓存是"先给你看，再偷偷换"，得让用户知道屏幕上这份是什么时候的，
+                // 否则会以为社区就这几张卡。要最新的有下面这颗按钮。
+                Text(
+                    text = "上次更新 · " + relativeTime(updatedAt / 1000).ifBlank { "刚刚" },
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                WatchGhostButton(
+                    text = if (loading) "正在刷新…" else "刷新列表",
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading,
+                ) { scope.launch { load(reset = true) } }
             }
         }
     }

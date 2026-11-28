@@ -42,13 +42,14 @@ GitHub 账号曾因推送过于频繁被封。以下规则优先于任何「顺�
 ## 当前计数
 
 - 上次推送基线：`versionCode 170` / `1.24.2-beta.20`（已推源码，计数清零）
-- 已攒 beta 次数：**1 / 5**（① 酒馆社区 App 侧：注册登录 / 浏览下载 / 导入 / 投稿 /
-  我的投稿；同轮的 beta.20 把社区入口放在圆屏顶栏，标题被压成省略号，
-  beta.21 挪到列表末尾）
-- 当前本地：`versionCode 171` / `1.24.2-beta.21`
-- 下一个 beta：`versionCode 172` / `1.24.2-beta.22`
+- 已攒 beta 次数：**2 / 5**（① 171：社区入口挪出圆屏顶栏、筛选切换的过期响应；
+  ② 172：社区本地缓存 + 全站 HTTPS + 评论 / 评分 / 作者撤回 / 举报）
+- 当前本地：`versionCode 172` / `1.24.2-beta.22`
+- 下一个 beta：`versionCode 173` / `1.24.2-beta.23`
 - 下次源码推送：`versionCode 175` 时
 
-> 170 / 171 这两版是**酒馆社区**：服务端在 `dshwatch.vxni.ink`（PHP + MySQL，
-> 源码另存 `/workspace/dshwatch-ugc/wwwroot/`）。上一轮攒的 5 次（164→169）
-> 连同社区一起推了，所以基线是 170。
+> 170 起是**酒馆社区**：服务端在 `dshwatch.vxni.ink`（PHP + MySQL，
+> 源码另存 `/workspace/dshwatch-ugc/wwwroot/`）。172 这一版给站点装上了
+> ZeroSSL 证书（`dshwatch.vxni.ink`，2027-02-26 到期，**到期前要续**），
+> App 的 `CommunityApi.BASE_URL` 随之改成 https。服务端新增
+> comments / ratings / reports 三张表与对应接口，后台多了评论与举报两个 tab。

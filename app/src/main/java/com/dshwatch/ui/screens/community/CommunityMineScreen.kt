@@ -14,7 +14,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -25,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
+import com.dshwatch.data.community.CachedPage
+import com.dshwatch.data.community.CommunityCache
 import com.dshwatch.data.community.CommunityCard
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
@@ -55,27 +56,47 @@ fun CommunityMineScreen(
     val scope = rememberCoroutineScope()
     val account by container.communityAccount.state.collectAsStateWithLifecycle()
 
-    var items by remember { mutableStateOf<List<CommunityCard>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var loadedOnce by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    /** 计数器：点刷新、或者从详情页返回时重拉 */
-    var tick by remember { mutableIntStateOf(0) }
+    /*
+     * 和社区列表共用一套缓存，只是 key 前缀不同。
+     *
+     * 这一页以前是「depth 一变就重拉」—— 从详情页退回来也要转一次圈，
+     * 而那次返回 99% 什么都没变。现在 60 秒内直接用缓存，要最新的点「刷新」。
+     */
+    val cacheKey = CommunityCache.mineKey(account.username)
+    val cached = remember(cacheKey) { container.communityCache.page(cacheKey) }
+    var items by remember(cacheKey) { mutableStateOf(cached?.items.orEmpty()) }
+    var loading by remember(cacheKey) { mutableStateOf(false) }
+    var loadedOnce by remember(cacheKey) { mutableStateOf(cached != null) }
+    var error by remember(cacheKey) { mutableStateOf<String?>(null) }
     val depth = nav.depth
 
-    LaunchedEffect(tick, depth, account.signedIn) {
+    suspend fun load(force: Boolean) {
         if (!account.signedIn) {
             loadedOnce = true
-            return@LaunchedEffect
+            return
         }
-        loading = true
-        error = null
+        val c = container.communityCache.page(cacheKey)
+        if (!force && c != null && container.communityCache.isFresh(c.at, CommunityCache.MINE_TTL)) {
+            return
+        }
+        if (c == null && items.isEmpty()) loading = true
         runCatching { container.communityApi.mine(container.communityAccount.token) }
-            .onSuccess { items = it }
-            .onFailure { error = describeError(it) }
+            .onSuccess { list ->
+                items = list
+                error = null
+                container.communityCache.putPage(
+                    cacheKey,
+                    CachedPage(at = System.currentTimeMillis(), hasMore = false, items = list, pages = 0),
+                )
+            }
+            .onFailure { e ->
+                if (c == null && items.isEmpty()) error = describeError(e)
+            }
         loadedOnce = true
         loading = false
     }
+
+    LaunchedEffect(cacheKey, depth, account.signedIn) { load(force = false) }
 
     WatchScaffold(
         title = "我的投稿",
@@ -103,7 +124,9 @@ fun CommunityMineScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                WatchGhostButton(text = "重试", modifier = Modifier.fillMaxWidth()) { tick++ }
+                WatchGhostButton(text = "重试", modifier = Modifier.fillMaxWidth()) {
+                    scope.launch { load(force = true) }
+                }
             }
 
             if (loadedOnce && !loading && items.isEmpty() && error == null) {
@@ -128,7 +151,9 @@ fun CommunityMineScreen(
 
             if (items.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                WatchGhostButton(text = "刷新", modifier = Modifier.fillMaxWidth()) { tick++ }
+                WatchGhostButton(text = "刷新", modifier = Modifier.fillMaxWidth()) {
+                    scope.launch { load(force = true) }
+                }
             }
         }
     }
