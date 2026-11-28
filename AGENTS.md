@@ -234,9 +234,11 @@ POST ?a=register ?a=login ?a=logout ?a=me ?a=submit ?a=like ?a=comment
 GitHub 账号曾因推送过于频繁被封过。**源码每 5 次 beta 才 push 一次**，
 beta Release 每版都发（`publish_update.py` 只调 Release API，不算推送）。
 
-- 计数：`git log -1 origin/main -- app/build.gradle.kts` 的 versionCode 与本地当前值比，
-  差到 5 才推。
+- 计数：`git log -1 origin/main -- app/build.gradle.kts` 取远端 versionCode，
+  与本地当前值相减，**差到 5 才推**。
 - 断点：`git log --oneline origin/main..HEAD` 看攒了几条。
+- **当前基线：远端 174**（2026-11-28 推送，含全部社区相关提交）。计数 0 / 5，
+  下一个该推的点是 `versionCode 179`。
 
 ### 5.3 beta 发布清单
 
@@ -341,11 +343,9 @@ curl -s https://api.github.com/repos/dsdzm/DSH-Watch/releases/latest | grep brow
 - 版本：`1.24.2-beta.24`（versionCode 174），测试通道已发
 - 线上：`?a=stats` → 2 卡 / 4 用户 / 0 待处理举报
 - 单测：1697 通过（4 skip）
-- **推送计数：4 / 5**（上次推送基线 `versionCode 170`）。已攒：
-  ① 171 社区入口挪出圆屏顶栏、筛选切换的过期响应；② 172 本地缓存 + HTTPS +
-  评论/评分/撤回/举报；③ 173 内置 R46 根证书；④ 174 详情页卡片化 + 内嵌评论 +
-  一次性评分点赞 + 注册邮箱 + 个人中心消息。
-  本地已 commit 的还有 `0edba98`…`1b280c3` 共 11 条，**都没推**。
+- **推送计数：0 / 5**。远端基线 `versionCode 174` / `1.24.2-beta.24`，
+  本地与远端已同步（`git rev-list --left-right --count origin/main...HEAD` → `0 0`）。
+  上一个五轮（170→174）已随 2026-11-28 那次推送清零。
 
 ### 7.2 待办
 
