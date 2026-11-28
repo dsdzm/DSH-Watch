@@ -10,7 +10,7 @@
   <a href="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml"><img src="https://github.com/dsdzm/DSH-Watch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/dsdzm/DSH-Watch/releases"><img src="https://img.shields.io/github/v/release/dsdzm/DSH-Watch?display_name=tag" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
-  <img src="https://img.shields.io/badge/minSdk-28-3ddc84" alt="minSdk 28">
+  <img src="https://img.shields.io/badge/minSdk-26-3ddc84" alt="minSdk 26">
   <img src="https://img.shields.io/badge/Kotlin-2.0.21-7f52ff" alt="Kotlin">
   <img src="https://img.shields.io/badge/APK-12%20MB-lightgrey" alt="APK 12 MB">
 </p>
@@ -270,7 +270,7 @@ adb install -r DSH-Watch-v1.24.0.apk
 | AGP | 8.7.3 |
 | Gradle | 8.11.1（wrapper 已附带） |
 | Kotlin | 2.0.21 |
-| minSdk / targetSdk / compileSdk | 28 / 34 / 35 |
+| minSdk / targetSdk / compileSdk | 26 / 34 / 35 |
 
 ```bash
 # 调试包
@@ -347,6 +347,8 @@ app/src/main/java/com/dshwatch/
 | [docs/releases/](docs/releases/) | 各版本发布说明与根因分析 |
 | [docs/HISTORY.md](docs/HISTORY.md) | 早期开发日志存档（v1.0–v1.4） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 构建、测试、提交与 PR 约定 |
+| [AGENTS.md](AGENTS.md) | 项目地图、网络结构、密钥清单、发版硬约束、踩坑记录 |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | 换环境交接：从零重建、迁移清单、故障速查 |
 
 ## 参与贡献
 
