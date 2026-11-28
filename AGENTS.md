@@ -113,7 +113,9 @@ README.md         部署、备份、HTTPS 续期、接口表
 解析   starzv 香港多线，A 记录 → 149.104.21.22 ~ .26（多 IP 轮询）
 主机   星辰云虚拟主机（Kangle），面板 https://aspanel.starzv.com/vhost/
 站点根 /wwwroot/        数据库 localhost / MySQL / utf8mb4
-PHP    单文件路由，PDO 预处理，无框架、无 Composer
+PHP    7.2，单文件路由，PDO 预处理，无框架、无 Composer、无定时任务
+配额   128 MB 空间 / **32 MB 数据库** / 24 G 月流量 / 4 Mbps
+       —— 库很小，加字段可以，加表要想清楚；别存图片和附件
 证书   ZeroSSL RSA DV SSL CA 2 签发，2026-11-28 ~ 2027-02-26
        面板读的是根目录 ssl.crt / ssl.key（不是 certs/ 里的文件名）
 ```
@@ -140,6 +142,9 @@ GET  ?a=ping ?a=stats ?a=list ?a=card&id= ?a=comments&id=&page= ?a=mine
 POST ?a=register ?a=login ?a=logout ?a=me ?a=submit ?a=like ?a=comment
      ?a=clike ?a=rate ?a=delete ?a=report ?a=notices ?a=notice_read
 ```
+
+**PHP 7.2 是硬约束**：不能用箭头函数（7.4）、`str_contains` / `match`（8.0）、
+命名参数、`?->`。本地 `php -l` 只能查语法，跑不起 7.2 的运行时差异 —— 改完直接传线上验。
 
 约定：
 - 成功 `{"ok":true, ...}`，失败 `{"ok":false,"error":"中文人话"}` + 4xx；
