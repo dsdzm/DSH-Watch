@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -127,6 +128,11 @@ fun TavernScreen(
     WatchScaffold(
         title = "酒馆",
         actions = {
+            // 社区入口。放在场景胶囊和齿轮之间：这三颗里只有它是"去别处看看"，
+            // 另外两颗管的是当前页（切模式）和全局（设置）。
+            IconTap(Icons.Outlined.Public, "社区") {
+                nav.push(Screen.Community)
+            }
             ScenePill(Scenes.TAVERN) { showPicker = true }
             // 设置入口。这三个场景页原先把「切换模式」放在了顶栏，却忘了设置 ——
             // 结果是进了酒馆就出不去设置，只能先切回编程模式。设置是全局的

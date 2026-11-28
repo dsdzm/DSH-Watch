@@ -113,6 +113,29 @@ class WatchNavigatorTest {
         assertEquals(1, nav.depth)
     }
 
+    @Test
+    fun `社区页各自恢复成自己`() {
+        val pages = listOf(
+            Screen.Chat,
+            Screen.Community,
+            Screen.CommunityCard(7L),
+            Screen.CommunityAuth,
+            Screen.CommunityMine,
+        )
+        assertEquals(
+            listOf("chat", "community", "ccard|7", "cauth", "cmine"),
+            save(pages),
+        )
+        assertEquals(pages, restore("chat", "community", "ccard|7", "cauth", "cmine"))
+    }
+
+    @Test
+    fun `社区详情 id 丢了退回列表而不是空白页`() {
+        // 详情页拿到 0 会显示「这张卡已经不在了」，而用户其实只是想回社区看看
+        assertEquals(Screen.Community, restore("chat", "ccard").last())
+        assertEquals(Screen.Community, restore("chat", "ccard|notanumber").last())
+    }
+
     private object StubScope : SaverScope {
         override fun canBeSaved(value: Any): Boolean = true
     }

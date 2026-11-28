@@ -76,6 +76,21 @@ class AppContainer(private val app: Context) {
      */
     val roleCardStore = com.dshwatch.data.store.RoleCardStore(File(app.filesDir, "rolecards"), json)
 
+    /**
+     * 酒馆社区（UGC）。
+     *
+     * [communityApi] 打的是我们自己的那台虚拟主机，和聊天后端没有任何关系；
+     * [communityAccount] 只管登录态与 token，两者都无状态，谁先构造都行。
+     * 但 account 要读 [keyStore]，所以只能排它后面。
+     */
+    val communityApi = com.dshwatch.data.community.CommunityApi(json)
+
+    val communityAccount = com.dshwatch.data.community.CommunityAccount(
+        keyStore = keyStore,
+        dir = File(app.filesDir, "community"),
+        json = json,
+    )
+
 
     /** 工作空间默认放应用内部私有目录 */
     private val internalWorkspace = File(app.filesDir, "workspace")

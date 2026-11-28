@@ -448,5 +448,24 @@ internal fun ScreenHost(
             cardId = page.cardId,
             nav = nav,
         )
+
+        // ---------------- 社区（v1.24） ----------------
+        Screen.Community -> com.dshwatch.ui.screens.community.CommunityScreen(
+            container = container,
+            nav = nav,
+        )
+        is Screen.CommunityCard -> com.dshwatch.ui.screens.community.CommunityCardScreen(
+            container = container,
+            nav = nav,
+            id = page.id,
+        )
+        Screen.CommunityAuth -> com.dshwatch.ui.screens.community.CommunityAuthScreen(
+            container = container,
+            nav = nav,
+        )
+        Screen.CommunityMine -> com.dshwatch.ui.screens.community.CommunityMineScreen(
+            container = container,
+            nav = nav,
+        )
     }
 }

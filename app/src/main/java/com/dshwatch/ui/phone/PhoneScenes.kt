@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -329,6 +330,11 @@ private fun PhoneRoleList(
                             onClick = { nav.open(Screen.CardEdit(scene, "")) },
                             shape = RoundedCornerShape(24.dp),
                         ) { Text(createLabel) }
+                        // 一张卡都没有的时候，最实际的出路往往是"先用别人的"——
+                        // 这里不给入口，用户就得自己猜社区藏在哪
+                        TextButton(onClick = { nav.open(Screen.Community) }) {
+                            Text("去社区看看别人写的")
+                        }
                     }
                 }
                 return@Column
@@ -339,6 +345,31 @@ private fun PhoneRoleList(
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                /*
+                 * 社区入口放在列表最上面一行。
+                 *
+                 * 手机上顶栏已经很挤（菜单 / 标题 / 模型 / 新建），再塞一颗图标
+                 * 就会挤掉标题。而"我卡不够用、去看看别人的"恰恰是打开这一页
+                 * 却发现自己只有一两张卡时最想做的事，所以让它占一整行、写得清楚。
+                 */
+                item(key = "__community__") {
+                    OutlinedButton(
+                        onClick = { nav.open(Screen.Community) },
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Public,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (scene == Scenes.TAVERN) "社区 · 看看别人写的角色"
+                            else "社区 · 看看别人写的设定"
+                        )
+                    }
+                }
                 items(cards, key = { it.id }) { card ->
                     PhoneRoleCard(
                         card = card,

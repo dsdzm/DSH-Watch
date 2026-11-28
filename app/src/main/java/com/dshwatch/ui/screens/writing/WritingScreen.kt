@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -132,6 +133,10 @@ fun WritingScreen(
     WatchScaffold(
         title = "写作",
         actions = {
+            // 社区里也有写作设定（世界、人物、文风），入口和酒馆保持一致
+            IconTap(Icons.Outlined.Public, "社区") {
+                nav.push(Screen.Community)
+            }
             ScenePill(Scenes.WRITING) { showPicker = true }
             // 与酒馆页同理：场景根页面必须能直达设置，否则用户得先切回编程模式。
             IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {

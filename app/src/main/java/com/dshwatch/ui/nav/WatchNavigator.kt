@@ -79,6 +79,23 @@ sealed interface Screen {
     /** 卡编辑：kind = tavern / writing，cardId 为空表示新建 */
     data class CardEdit(val kind: String, val cardId: String) : Screen
 
+    /**
+     * 社区：大家投稿并通过审核的卡。
+     *
+     * 挂在酒馆下面而不是设置里——用户想找新角色的时候在酒馆，
+     * 不会想到「设置」里去看有没有别人写的卡。
+     */
+    data object Community : Screen
+
+    /** 社区某张卡的详情（含导入按钮） */
+    data class CommunityCard(val id: Long) : Screen
+
+    /** 社区账号：登录 / 注册 / 退出 */
+    data object CommunityAuth : Screen
+
+    /** 我的投稿：审核状态与拒绝理由 */
+    data object CommunityMine : Screen
+
     /** 长期记忆文档的只读预览 */
     data class MemoryDoc(val cardId: String) : Screen
 
@@ -184,6 +201,16 @@ class WatchNavigator internal constructor(
         private const val CARD_EDIT = "cardedit"
         private const val SCENE_SESSIONS = "scenesess"
 
+        /*
+         * 社区页（v1.24）：列表 / 我的投稿 / 登录页都是「看一眼就走」的页面，
+         * 被系统回收后落回根屏没有损失（登录态在 Keystore 里，重新点进来还在）。
+         * 只有详情页要带 id —— 用户从通知或习惯性返回时，看到的是同一张卡。
+         */
+        private const val COMMUNITY = "community"
+        private const val COMMUNITY_CARD = "ccard"
+        private const val COMMUNITY_AUTH = "cauth"
+        private const val COMMUNITY_MINE = "cmine"
+
         private fun encode(screen: Screen): String = when (screen) {
             Screen.Chat -> "chat"
             Screen.Sessions -> "sessions"
@@ -218,6 +245,10 @@ class WatchNavigator internal constructor(
             // 卡编辑页要带 kind 与 cardId：新建卡（cardId 为空）恢复后就是空表单，
             // 不丢用户已经输入的内容 —— 因为内容此刻还在内存里，没被系统回收。
             is Screen.CardEdit -> "$CARD_EDIT$SEP${screen.kind}$SEP${screen.cardId}"
+            Screen.Community -> COMMUNITY
+            is Screen.CommunityCard -> "$COMMUNITY_CARD$SEP${screen.id}"
+            Screen.CommunityAuth -> COMMUNITY_AUTH
+            Screen.CommunityMine -> COMMUNITY_MINE
             // 记忆文档是只读预览，恢复到根屏没有损失，也不必重建上下文
             is Screen.MemoryDoc -> UNRESTORABLE
             Screen.FishSettings -> UNRESTORABLE
@@ -264,6 +295,15 @@ class WatchNavigator internal constructor(
                     kind = com.dshwatch.domain.roleplay.Scenes.of(parts.getOrNull(1)),
                     cardId = parts.getOrNull(2).orEmpty(),
                 )
+                // id 丢了就退回列表：详情页拿到 0 会显示「这张卡已经不在了」，
+                // 而用户其实只是想回到社区看看 —— 列表比一页错误有用
+                COMMUNITY -> Screen.Community
+                COMMUNITY_CARD -> parts.getOrNull(1)?.toLongOrNull()
+                    ?.takeIf { it > 0 }
+                    ?.let { Screen.CommunityCard(it) }
+                    ?: Screen.Community
+                COMMUNITY_AUTH -> Screen.CommunityAuth
+                COMMUNITY_MINE -> Screen.CommunityMine
                 UNRESTORABLE -> Screen.Chat
                 else -> Screen.Chat
             }

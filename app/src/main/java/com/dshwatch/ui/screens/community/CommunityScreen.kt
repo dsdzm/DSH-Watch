@@ -1,0 +1,276 @@
+package com.dshwatch.ui.screens.community
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dshwatch.core.AppContainer
+import com.dshwatch.data.community.CommunityApi
+import com.dshwatch.data.community.CommunityCard
+import com.dshwatch.data.community.CommunityException
+import com.dshwatch.domain.roleplay.Scenes
+import com.dshwatch.ui.components.Chip
+import com.dshwatch.ui.components.EmptyState
+import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.IconTap
+import com.dshwatch.ui.components.WatchGhostButton
+import com.dshwatch.ui.components.WatchScaffold
+import com.dshwatch.ui.components.glassSurface
+import com.dshwatch.ui.components.tap
+import com.dshwatch.ui.components.withHaptic
+import com.dshwatch.ui.nav.Screen
+import com.dshwatch.ui.nav.WatchNavigator
+import com.dshwatch.ui.wear.wearVerticalScroll
+import kotlinx.coroutines.launch
+
+/**
+ * 社区：别人投稿、通过审核的角色卡 / 写作设定。
+ *
+ * ## 为什么在酒馆下面而不是设置里
+ *
+ * 用户"想找个新角色聊聊"的时候人在酒馆。放到设置里，等于让他先想到
+ * 「有没有社区」再去翻 —— 大多数人是不会翻的。
+ *
+ * ## 分页为什么是手动「加载更多」
+ *
+ * 手表上滚动到底再自动拉下一页，很难判断用户是真的到底了还是手指抖了一下；
+ * 而且社区主机在境外，一次多拉 20 条比来回三次更省时间。给一颗明确的按钮，
+ * 用户知道自己在等什么。
+ */
+@Composable
+fun CommunityScreen(
+    container: AppContainer,
+    nav: WatchNavigator,
+) {
+    val scope = rememberCoroutineScope()
+    val account by container.communityAccount.state.collectAsStateWithLifecycle()
+
+    /** null = 全部；否则是 tavern / writing */
+    var kind by remember { mutableStateOf<String?>(null) }
+    var hot by remember { mutableStateOf(false) }
+
+    var items by remember { mutableStateOf<List<CommunityCard>>(emptyList()) }
+    var hasMore by remember { mutableStateOf(false) }
+    var page by remember { mutableStateOf(0) }
+    var loading by remember { mutableStateOf(false) }
+    var loadedOnce by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    suspend fun load(reset: Boolean) {
+        if (loading) return
+        loading = true
+        error = null
+        val next = if (reset) 0 else page + 1
+        runCatching {
+            container.communityApi.list(
+                page = next,
+                kind = kind,
+                sort = if (hot) CommunityApi.SORT_HOT else CommunityApi.SORT_NEW,
+            )
+        }.onSuccess { p ->
+            items = if (reset) p.items else items + p.items
+            hasMore = p.hasMore
+            page = next
+            loadedOnce = true
+        }.onFailure { e ->
+            error = e.message ?: "加载失败"
+            // 首次失败也要把 loadedOnce 立起来，否则界面永远停在"加载中"
+            loadedOnce = true
+        }
+        loading = false
+    }
+
+    LaunchedEffect(kind, hot) { load(reset = true) }
+
+    WatchScaffold(
+        title = "社区",
+        onBack = { nav.pop() },
+        subtitle = if (account.signedIn) account.username else null,
+        actions = {
+            IconTap(Icons.Outlined.CloudUpload, "我的投稿") {
+                if (account.signedIn) nav.push(Screen.CommunityMine) else nav.push(Screen.CommunityAuth)
+            }
+            IconTap(Icons.Outlined.AccountCircle, "社区账号") {
+                nav.push(Screen.CommunityAuth)
+            }
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .wearVerticalScroll(rememberScrollState())
+                .padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 三个筛选 + 一个排序挤在一行：手表上再多一行就吃掉了半张卡的位置
+                Chip("全部", selected = kind == null) { kind = null }
+                Chip("酒馆", selected = kind == Scenes.TAVERN) { kind = Scenes.TAVERN }
+                Chip("写作", selected = kind == Scenes.WRITING) { kind = Scenes.WRITING }
+                Spacer(Modifier.width(2.dp))
+                Chip(if (hot) "最热" else "最新", selected = hot) { hot = !hot }
+            }
+
+            error?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                WatchGhostButton(text = "重试", modifier = Modifier.fillMaxWidth()) {
+                    scope.launch { load(reset = true) }
+                }
+            }
+
+            if (loading && items.isEmpty()) {
+                HintText("正在从社区取卡…")
+            }
+            if (loadedOnce && items.isEmpty() && error == null) {
+                EmptyState(
+                    title = "社区还没有卡",
+                    hint = "你可以在角色卡的编辑页把它分享上去",
+                )
+            }
+
+            items.forEach { card ->
+                CommunityRow(card = card, onClick = {
+                    nav.push(Screen.CommunityCard(card.id))
+                })
+            }
+
+            if (hasMore) {
+                WatchGhostButton(
+                    text = if (loading) "加载中…" else "加载更多",
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading,
+                ) { scope.launch { load(reset = false) } }
+            }
+            if (items.isNotEmpty()) {
+                HintText("点一张卡看全文，喜欢就导入到自己的酒馆")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommunityRow(card: CommunityCard, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassSurface(shape = RoundedCornerShape(20.dp), cornerRadius = 20.dp)
+            .tap(onClick = withHaptic(onClick))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = card.name.take(1),
+                    style = MaterialTheme.typography.titleSmall.copy(fontSize = 15.sp),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = card.name.ifBlank { "未命名" },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (card.tagline.isNotBlank()) {
+                    Text(
+                        text = card.tagline,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = listOf(
+                if (card.kind == Scenes.WRITING) "写作" else "酒馆",
+                "@" + card.author.ifBlank { "匿名" },
+                "↓" + card.downloads,
+                "♥" + card.likes,
+            ).joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            color = MaterialTheme.colorScheme.outline,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 相对时间。
+ *
+ * 不直接显示日期：社区里最新的卡几乎都是"这两天"，写"3 小时前"比
+ * "2026-11-28 09:12"更好判断新旧；超过一周才退回日期。
+ */
+internal fun relativeTime(seconds: Long): String {
+    if (seconds <= 0) return ""
+    val now = System.currentTimeMillis() / 1000
+    val d = now - seconds
+    return when {
+        d < 60 -> "刚刚"
+        d < 3600 -> "${d / 60} 分钟前"
+        d < 86400 -> "${d / 3600} 小时前"
+        d < 86400 * 7 -> "${d / 86400} 天前"
+        else -> {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = seconds * 1000 }
+            val y = cal.get(java.util.Calendar.YEAR)
+            val m = cal.get(java.util.Calendar.MONTH) + 1
+            val day = cal.get(java.util.Calendar.DAY_OF_MONTH)
+            val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+            if (y == thisYear) "$m 月 $day 日" else "$y-$m-$day"
+        }
+    }
+}
+
+/** 统一把异常翻成一句话；服务端的错误本来就是给用户看的，原样透传 */
+internal fun describeError(e: Throwable): String =
+    (e as? CommunityException)?.message ?: (e.message ?: "出错了，稍后再试")

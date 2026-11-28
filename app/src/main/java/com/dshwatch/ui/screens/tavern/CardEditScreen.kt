@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dshwatch.core.AppContainer
 import com.dshwatch.domain.roleplay.CardField
 import com.dshwatch.domain.roleplay.LoreEntry
@@ -80,6 +81,11 @@ fun CardEditScreen(
     var loaded by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmShare by remember { mutableStateOf(false) }
+    var shareBusy by remember { mutableStateOf(false) }
+    var shareNotice by remember { mutableStateOf<String?>(null) }
+    var shareFailed by remember { mutableStateOf(false) }
+    val community by container.communityAccount.state.collectAsStateWithLifecycle()
 
     LaunchedEffect(cardId) {
         if (cardId.isNotBlank()) {
@@ -93,11 +99,18 @@ fun CardEditScreen(
         dirty = true
     }
 
+    /** 存盘但不离开页面：投稿前要先落盘，否则投出去的是上一次保存的内容 */
+    suspend fun persist(): RoleCard? =
+        runCatching { container.roleCardStore.save(card) }
+            .onSuccess {
+                card = it
+                dirty = false
+            }
+            .getOrNull()
+
     fun save(thenChat: Boolean) {
         scope.launch {
-            val saved = runCatching { container.roleCardStore.save(card) }.getOrNull() ?: return@launch
-            card = saved
-            dirty = false
+            val saved = persist() ?: return@launch
             if (thenChat) {
                 val s = container.settings.value
                 container.engine.startNew(
@@ -110,6 +123,59 @@ fun CardEditScreen(
             } else {
                 nav.pop()
             }
+        }
+    }
+
+    /**
+     * 投稿。
+     *
+     * 三件必须先做的事，缺一件用户就会看到一个莫名其妙的错误：
+     *  1. **先存盘** —— 手上是编辑中的 `card`，可能是刚改过还没保存的版本；
+     *  2. **本地先自查名字与设定长度** —— 服务端的错误确实会返回，
+     *     但等到一个来回再说「名字不能为空」很蠢，尤其是手表网络慢；
+     *  3. **查有没有投过** —— 投过就带上远端 id 走改稿，否则社区里会出现两张同名的卡。
+     */
+    fun submitToCommunity() {
+        if (card.name.isBlank()) {
+            shareFailed = true
+            shareNotice = "先给这张卡起个名字"
+            return
+        }
+        if (card.persona.trim().length < 20) {
+            shareFailed = true
+            shareNotice = "角色设定太短了（至少 20 字）"
+            return
+        }
+        shareBusy = true
+        shareNotice = null
+        scope.launch {
+            val saved = persist()
+            if (saved == null) {
+                shareBusy = false
+                shareFailed = true
+                shareNotice = "保存失败，先检查一下存储权限"
+                return@launch
+            }
+            val remote = container.communityAccount.remoteIdOf(saved.id)
+            runCatching {
+                container.communityApi.submit(
+                    token = container.communityAccount.token,
+                    card = saved,
+                    remoteId = remote,
+                )
+            }.onSuccess { id ->
+                container.communityAccount.rememberSubmission(saved.id, id)
+                shareFailed = false
+                shareNotice = if (remote > 0) {
+                    "已更新，会重新走一遍审核"
+                } else {
+                    "提交成功，通过审核后就会出现在社区"
+                }
+            }.onFailure { e ->
+                shareFailed = true
+                shareNotice = com.dshwatch.ui.screens.community.describeError(e)
+            }
+            shareBusy = false
         }
     }
 
@@ -333,6 +399,45 @@ fun CardEditScreen(
             if (card.builtin) {
                 HintText("这是内置卡，改动会直接生效；想保留原样可以先把名字改掉再保存")
             }
+
+            /*
+             * 分享到社区。
+             *
+             * 放在保存 / 取消之后而不是顶栏：投稿是低频动作，顶栏那排图标
+             * 留给「每次都点」的功能。但它必须在**编辑页**里 —— 用户刚写完一张卡
+             * 是最想分享的时候，让他回到列表再找入口，八成就不投了。
+             *
+             * 未登录时不清空任何内容、也不跳走太远：登录页是压在编辑页上面的一层，
+             * 返回就回到这张卡，填过的字段都还在内存里。
+             */
+            Spacer(Modifier.height(16.dp))
+            WatchGhostButton(
+                text = if (shareBusy) "正在提交…" else "分享到社区",
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !shareBusy,
+                onClick = {
+                    if (!community.signedIn) {
+                        shareFailed = false
+                        shareNotice = "先登录社区账号，回来再点一次"
+                        nav.push(Screen.CommunityAuth)
+                    } else {
+                        confirmShare = true
+                    }
+                },
+            )
+            shareNotice?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (shareFailed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+            HintText(
+                if (community.signedIn) "会公开设定、开场白与世界书；通过审核后才出现在社区"
+                else "投稿需要一个社区账号（2~20 位用户名 + 6 位密码）"
+            )
             /*
              * 删除入口。
              *
@@ -381,6 +486,40 @@ fun CardEditScreen(
                     },
                 ) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+        )
+    }
+
+    if (confirmShare) {
+        GlassDialog(
+            onDismissRequest = { confirmShare = false },
+            title = "分享到社区？",
+            content = {
+                Column {
+                    Text(
+                        text = "「${card.displayName}」会提交给管理员审核，通过后所有人都能看到并下载。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "包含：设定 ${card.persona.length} 字、开场白 ${card.greeting.length} 字、"
+                            + "世界书 ${card.entries.size} 条。提示插件不会上传。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            buttons = {
+                TextButton(onClick = { confirmShare = false }) { Text("再想想") }
+                TextButton(
+                    onClick = {
+                        confirmShare = false
+                        submitToCommunity()
+                    },
+                ) {
+                    Text("提交")
                 }
             },
         )
