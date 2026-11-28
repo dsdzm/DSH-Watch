@@ -200,6 +200,8 @@ curl -s https://api.github.com/repos/dsdzm/DSH-Watch/releases | \
 | 「已是最新」但其实有新包 | 资产名不是 `dshwatch-<code>.apk`，或 tag 不匹配 | 改名重建 Release |
 | 检查更新报「GitHub 限流」 | 匿名 API 60 次/小时/IP | 等一小时，或给 token（当前实现不带） |
 | 旧版 App 注册失败 | 服务端已要求 email，旧版不传 | 让用户升级；或在服务端放宽 email 必填 |
+| 旧版 App 登录/投稿「点了没反应」 | 站点已 301 跳 https，旧版 POST 被改成 GET | 让用户升到 beta.24+ |
+| 浏览器打开站点一直跳 https、想回退 | 301 被浏览器缓存 | 清缓存，或让主机商改回 302 |
 | `assembleRelease` 找不到 keystore | `keystore.properties` 里是旧机器的绝对路径 | 改成新路径 |
 | Gradle 构建中途无输出中断 | 守护进程被 OOM 杀 | `./gradlew --stop`，测试和打包分开跑 |
 | 云端编译 `Unresolved reference 'build'` | `.gitignore` 写了裸 `build/` | 改成 `/build` 和 `app/build/` |
@@ -212,7 +214,7 @@ curl -s https://api.github.com/repos/dsdzm/DSH-Watch/releases | \
 | 优先级 | 事项 | 说明 |
 |---|---|---|
 | 高 | **证书 2027-02-26 到期** | 提前一个月续。续完确认新链锚在哪条根，锚到新根就得再发一版 App 内置 |
-| 高 | **HTTP 强制跳转 HTTPS 还没开** | 等所有活跃用户升到 beta.24+ 再开，否则旧版投稿会 POST→GET 静默失败 |
+| 中 | **HTTP 强制跳转 HTTPS 已开**（2026-11-28） | 站内已全 301。≤ beta.23 的客户端 POST 会被改写成 GET，登录/投稿静默失败；beta.24+ 不受影响。浏览器会缓存 301，别来回切 |
 | 中 | 服务端无版本控制 | 建议接手后给 `dshwatch-ugc/` 建**私有**仓库（`config.php` 先移到仓库外） |
 | 中 | 无自动备份 | 建议加个每月导出 SQL 的提醒 |
 | 低 | QQ 通道未完成 | 缺 `qq-sdk.jar` 与 `arm64-v8a` so；OneBot 方案可用但未接完 |

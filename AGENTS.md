@@ -284,10 +284,16 @@ curl -s https://api.github.com/repos/dsdzm/DSH-Watch/releases/latest | grep brow
   得把新根再打进 App 发一版。`crt.sh` 查中间证书有哪些签发版本。
 - **证书 2027-02-26 到期，到期前必须续**，步骤见 `dshwatch-ugc/README.md`。
 
-### 6.2 「HTTP 强制跳转 HTTPS」开关暂时是关的
+### 6.2 HTTP 强制跳转 HTTPS 已开启（2026-11-28）
 
-旧版（≤ beta.23）走 http，开跳转会让它们的 POST 被 302 成 GET，投稿静默失败。
-**要等所有人升到 beta.24+ 再开。** 这是当前唯一一个有意的「待办开关」。
+站点现在对 `http://` 一律返回 **301** 到 `https://`，**包括 POST**。
+browser 与 OkHttp 跟随 301 时会把 POST 改写成 GET —— 旧版（≤ beta.23）的
+登录 / 投稿 / 评论因此会静默失败（不报错，就是不生效）。
+
+现状：beta.24+ 的 `CommunityApi.BASE_URL` 已是 https，不受影响。
+若还有用户反馈「点了没反应」，先让他升级。
+
+副作用记录：浏览器会缓存 301，改回 http 需要清缓存，所以这个开关**不要随手来回切**。
 
 ### 6.3 面板 webftp 的两个坑
 
@@ -356,9 +362,9 @@ curl -s https://api.github.com/repos/dsdzm/DSH-Watch/releases/latest | grep brow
 
 | 事项 | 触发条件 | 说明 |
 |---|---|---|
-| 开「HTTP 强制跳转 HTTPS」 | 用户确认装了 beta.24+ | 见 §6.2 |
 | 证书续期 | 2027-02-26 前 | 见 §6.1 |
 | 源码推送 | 攒满 5 次 beta | 见 §5.2 |
+| 观察旧版反馈 | 持续 | 跳转已开，≤ beta.23 的客户端会失败，见 §6.2 |
 
 ### 7.3 暂停 / 未完成
 
