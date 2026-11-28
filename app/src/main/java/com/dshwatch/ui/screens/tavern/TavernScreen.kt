@@ -128,11 +128,6 @@ fun TavernScreen(
     WatchScaffold(
         title = "酒馆",
         actions = {
-            // 社区入口。放在场景胶囊和齿轮之间：这三颗里只有它是"去别处看看"，
-            // 另外两颗管的是当前页（切模式）和全局（设置）。
-            IconTap(Icons.Outlined.Public, "社区") {
-                nav.push(Screen.Community)
-            }
             ScenePill(Scenes.TAVERN) { showPicker = true }
             // 设置入口。这三个场景页原先把「切换模式」放在了顶栏，却忘了设置 ——
             // 结果是进了酒馆就出不去设置，只能先切回编程模式。设置是全局的
@@ -170,6 +165,19 @@ fun TavernScreen(
                 text = "新建角色卡",
                 icon = Icons.Filled.Add,
                 onClick = { nav.push(Screen.CardEdit(Scenes.TAVERN, "")) },
+            )
+            /*
+             * 社区入口放在列表末尾，不进顶栏。
+             *
+             * 顶栏那一行在圆屏上只有一百七十多 dp：场景胶囊 + 齿轮已经占掉一半，
+             * 再塞第三颗图标，标题「酒馆」会被压成省略号。而"看看别人写的卡"
+             * 本来就是浏览完自己的清单之后才会做的动作 —— 排在末尾正好。
+             */
+            Spacer(Modifier.height(6.dp))
+            WatchGhostButton(
+                text = "社区 · 看看别人写的卡",
+                icon = Icons.Outlined.Public,
+                onClick = { nav.push(Screen.Community) },
             )
         }
     }

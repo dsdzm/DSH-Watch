@@ -130,8 +130,8 @@ android {
         //   · Rhino 1.9.1 的 module-info.class 让 D8 直接要求 26+
         minSdk = 26
         targetSdk = 34
-        versionCode = 170
-        versionName = "1.24.2-beta.20"
+        versionCode = 171
+        versionName = "1.24.2-beta.21"
 
         vectorDrawables { useSupportLibrary = true }
         // 只保留中英资源，减小安装包体积（手表存储紧张）

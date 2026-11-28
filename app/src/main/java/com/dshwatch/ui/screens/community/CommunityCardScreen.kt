@@ -194,10 +194,10 @@ fun CommunityCardScreen(
                     text = if (importedKind == Scenes.WRITING) "去写作看看" else "去酒馆看看",
                     icon = Icons.Filled.Check,
                     onClick = {
-                        // 先退到根再压一页：用户下一步一定是想聊这张卡，
-                        // 如果只 pop，他会落在社区列表里，还得自己找一遍
-                        nav.popToRoot()
-                        nav.push(
+                        // 直接把这一页换成目标列表，而不是先退到根再压一层：
+                        // 详情页此时已经没有用了，换成列表后返回键回到社区，
+                        // 用户还能接着看别的卡
+                        nav.replaceTop(
                             if (importedKind == Scenes.WRITING) Screen.WritingHome
                             else Screen.TavernHome
                         )

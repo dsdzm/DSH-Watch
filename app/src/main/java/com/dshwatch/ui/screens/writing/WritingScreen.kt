@@ -133,10 +133,6 @@ fun WritingScreen(
     WatchScaffold(
         title = "写作",
         actions = {
-            // 社区里也有写作设定（世界、人物、文风），入口和酒馆保持一致
-            IconTap(Icons.Outlined.Public, "社区") {
-                nav.push(Screen.Community)
-            }
             ScenePill(Scenes.WRITING) { showPicker = true }
             // 与酒馆页同理：场景根页面必须能直达设置，否则用户得先切回编程模式。
             IconTap(Icons.Outlined.Settings, LocalStrings.current.navSettings) {
@@ -169,6 +165,13 @@ fun WritingScreen(
                 text = "新建作品设定",
                 icon = Icons.Filled.Add,
                 onClick = { nav.push(Screen.CardEdit(Scenes.WRITING, "")) },
+            )
+            // 与酒馆页同理：社区里也有写作设定，入口排在自己的清单之后
+            Spacer(Modifier.height(6.dp))
+            WatchGhostButton(
+                text = "社区 · 看看别人写的设定",
+                icon = Icons.Outlined.Public,
+                onClick = { nav.push(Screen.Community) },
             )
         }
     }

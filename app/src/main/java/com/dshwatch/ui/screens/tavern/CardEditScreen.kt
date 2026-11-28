@@ -94,6 +94,16 @@ fun CardEditScreen(
         loaded = true
     }
 
+    /*
+     * 从登录页回来时把那句「先登录社区账号，回来再点一次」擦掉。
+     *
+     * 否则它会一直挂在按钮下面：用户明明已经登录了，界面还在教他去登录，
+     * 看起来像没登上。登录态一变就清空，提示由下一次点击重新生成。
+     */
+    LaunchedEffect(community.signedIn) {
+        if (community.signedIn) shareNotice = null
+    }
+
     fun edit(block: (RoleCard) -> RoleCard) {
         card = block(card)
         dirty = true

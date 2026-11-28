@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +71,7 @@ import kotlinx.coroutines.launch
  * 而且社区主机在境外，一次多拉 20 条比来回三次更省时间。给一颗明确的按钮，
  * 用户知道自己在等什么。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CommunityScreen(
     container: AppContainer,
@@ -87,27 +91,39 @@ fun CommunityScreen(
     var loadedOnce by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    /*
+     * 请求代次。
+     *
+     * 以前这里是「`if (loading) return` 丢掉并发请求」，后果很具体：
+     * 列表还在加载时用户点了「写作」筛选 —— 第二次请求被丢掉，
+     * 屏幕上留下的却是上一次「全部」的结果，而 Chip 已经显示"写作"选中。
+     * 现在每次请求都发，回来时比对代次，过期的直接扔。
+     */
+    var generation by remember { mutableIntStateOf(0) }
+
     suspend fun load(reset: Boolean) {
-        if (loading) return
+        val mine = ++generation
         loading = true
-        error = null
+        if (reset) error = null
         val next = if (reset) 0 else page + 1
-        runCatching {
+        val result = runCatching {
             container.communityApi.list(
                 page = next,
                 kind = kind,
                 sort = if (hot) CommunityApi.SORT_HOT else CommunityApi.SORT_NEW,
             )
-        }.onSuccess { p ->
+        }
+        // 过期响应：已经有更新的请求在路上（或已经回来），这一份的 items 是旧筛选的
+        if (mine != generation) return
+        result.onSuccess { p ->
             items = if (reset) p.items else items + p.items
             hasMore = p.hasMore
             page = next
-            loadedOnce = true
         }.onFailure { e ->
             error = e.message ?: "加载失败"
-            // 首次失败也要把 loadedOnce 立起来，否则界面永远停在"加载中"
-            loadedOnce = true
         }
+        // 首次失败也要把 loadedOnce 立起来，否则界面永远停在"加载中"
+        loadedOnce = true
         loading = false
     }
 
@@ -133,15 +149,20 @@ fun CommunityScreen(
                 .padding(bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
+            /*
+             * 筛选条用 FlowRow 而不是 Row。
+             *
+             * 圆屏顶部可用宽度只有一百七十多 dp，四个 Chip 加上间距刚好在边界上，
+             * 换一套字号 / 换 M3E 主题就会把最后一个裁掉一半。让它自己换行，
+             * 多占的那一行高度比"看不见最热按钮"划算得多。
+             */
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // 三个筛选 + 一个排序挤在一行：手表上再多一行就吃掉了半张卡的位置
                 Chip("全部", selected = kind == null) { kind = null }
                 Chip("酒馆", selected = kind == Scenes.TAVERN) { kind = Scenes.TAVERN }
                 Chip("写作", selected = kind == Scenes.WRITING) { kind = Scenes.WRITING }
-                Spacer(Modifier.width(2.dp))
                 Chip(if (hot) "最热" else "最新", selected = hot) { hot = !hot }
             }
 
