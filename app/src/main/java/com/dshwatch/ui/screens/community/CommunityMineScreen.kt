@@ -27,9 +27,11 @@ import com.dshwatch.core.AppContainer
 import com.dshwatch.data.community.CachedPage
 import com.dshwatch.data.community.CommunityCache
 import com.dshwatch.data.community.CommunityCard
+import com.dshwatch.data.community.CommunityNotice
 import com.dshwatch.domain.roleplay.Scenes
 import com.dshwatch.ui.components.EmptyState
 import com.dshwatch.ui.components.HintText
+import com.dshwatch.ui.components.SectionHeader
 import com.dshwatch.ui.components.WatchButton
 import com.dshwatch.ui.components.WatchGhostButton
 import com.dshwatch.ui.components.WatchScaffold
@@ -42,7 +44,15 @@ import com.dshwatch.ui.wear.wearVerticalScroll
 import kotlinx.coroutines.launch
 
 /**
- * 我的投稿。
+ * 个人中心：消息 + 我的投稿。
+ *
+ * ## 为什么把「消息」放在这一页的最上面
+ *
+ * 「有人赞了你的评论」是一件**只有别人主动看你的卡时才会发生**的事，
+ * 用户没有理由每天来刷。放在这里，进来第一眼就能看到有没有新消息；
+ * 未读用颜色区分，点一下就算已读，不需要"消息中心"这种第二层结构。
+ *
+ * ## 我的投稿
  *
  * 这一页回答的是「我交上去的卡现在怎么样了」—— 以前投稿之后在 App 里
  * 完全看不到进展，用户只能猜、或者去网页上看。审核状态和拒绝理由
@@ -55,6 +65,32 @@ fun CommunityMineScreen(
 ) {
     val scope = rememberCoroutineScope()
     val account by container.communityAccount.state.collectAsStateWithLifecycle()
+
+    /*
+     * 消息列表不缓存：它本来就是"有没有新东西"的答案，缓存一份旧的是负价值。
+     * 每次进这一页拉一次，数据量很小（最多 50 条、每条一行）。
+     */
+    var notices by remember { mutableStateOf<List<CommunityNotice>>(emptyList()) }
+    var unread by remember { mutableStateOf(0) }
+    var noticesLoaded by remember { mutableStateOf(false) }
+    var noticesError by remember { mutableStateOf<String?>(null) }
+
+    fun loadNotices() {
+        if (!account.signedIn) {
+            noticesLoaded = true
+            return
+        }
+        scope.launch {
+            runCatching { container.communityApi.notices(container.communityAccount.token) }
+                .onSuccess { p ->
+                    notices = p.items
+                    unread = p.unread
+                    noticesError = null
+                }
+                .onFailure { noticesError = describeError(it) }
+            noticesLoaded = true
+        }
+    }
 
     /*
      * 和社区列表共用一套缓存，只是 key 前缀不同。
@@ -96,10 +132,13 @@ fun CommunityMineScreen(
         loading = false
     }
 
-    LaunchedEffect(cacheKey, depth, account.signedIn) { load(force = false) }
+    LaunchedEffect(cacheKey, depth, account.signedIn) {
+        load(force = false)
+        loadNotices()
+    }
 
     WatchScaffold(
-        title = "我的投稿",
+        title = "个人中心",
         onBack = { nav.pop() },
         subtitle = if (account.signedIn) account.username else null,
     ) {
@@ -107,14 +146,64 @@ fun CommunityMineScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .wearVerticalScroll(rememberScrollState())
-                .padding(bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(top = 8.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (!account.signedIn) {
                 EmptyState(title = "先登录", hint = "投稿需要账号，这样才知道卡是谁写的")
                 WatchButton(text = "去登录", onClick = { nav.push(Screen.CommunityAuth) })
                 return@Column
             }
+
+            // ---------------- 消息 ----------------
+            SectionHeader(if (unread > 0) "消息 · $unread 条未读" else "消息")
+
+            noticesError?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+
+            if (noticesLoaded && notices.isEmpty() && noticesError == null) {
+                HintText("还没有消息。有人赞你的评论时会出现在这里")
+            }
+
+            notices.forEach { n ->
+                NoticeRow(
+                    notice = n,
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                container.communityApi.readNotices(container.communityAccount.token, n.id)
+                            }.onSuccess { left ->
+                                unread = left
+                                notices = notices.map {
+                                    if (it.id == n.id) it.copy(read = true) else it
+                                }
+                            }
+                        }
+                        if (n.cardId > 0) nav.push(Screen.CommunityCard(n.cardId))
+                    },
+                )
+            }
+
+            if (unread > 0) {
+                WatchGhostButton(text = "全部标为已读", modifier = Modifier.fillMaxWidth()) {
+                    scope.launch {
+                        runCatching {
+                            container.communityApi.readNotices(container.communityAccount.token)
+                        }.onSuccess {
+                            unread = 0
+                            notices = notices.map { it.copy(read = true) }
+                        }
+                    }
+                }
+            }
+
+            // ---------------- 我的投稿 ----------------
+            SectionHeader("我的投稿")
 
             if (loading && items.isEmpty()) HintText("正在取你的投稿…")
 
@@ -152,10 +241,55 @@ fun CommunityMineScreen(
             if (items.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
                 WatchGhostButton(text = "刷新", modifier = Modifier.fillMaxWidth()) {
-                    scope.launch { load(force = true) }
+                    scope.launch {
+                        load(force = true)
+                        loadNotices()
+                    }
                 }
             }
         }
+    }
+}
+
+/** 一条消息：谁赞了你的哪条评论。未读用主题色标出来，点一下进那张卡 */
+@Composable
+private fun NoticeRow(notice: CommunityNotice, onClick: () -> Unit) {
+    val color = if (notice.read) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassSurface(shape = RoundedCornerShape(16.dp), cornerRadius = 16.dp)
+            .tap(onClick = withHaptic(onClick))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = when (notice.kind) {
+                "clike" -> "@" + notice.actor.ifBlank { "有人" } + " 赞了你的评论"
+                else -> "@" + notice.actor.ifBlank { "有人" } + " 有新的互动"
+            },
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+            color = color,
+        )
+        if (notice.body.isNotBlank()) {
+            Text(
+                text = "「" + notice.body + "」",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = (if (notice.read) "" else "● ") + relativeTime(notice.createdAt),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            color = if (notice.read) MaterialTheme.colorScheme.outline
+            else MaterialTheme.colorScheme.primary,
+        )
     }
 }
 

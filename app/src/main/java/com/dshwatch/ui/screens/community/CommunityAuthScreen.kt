@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +64,7 @@ fun CommunityAuthScreen(
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
@@ -75,12 +77,30 @@ fun CommunityAuthScreen(
             isError = true
             return
         }
+        /*
+         * 邮箱只在注册时必填（服务端也是这个规则）。登录不校验 ——
+         * 老账号是在邮箱必填之前注册的，拿出来挡登录等于把人锁在门外。
+         * 也不做验证码：没有发信通道，加了只会多一道死路。
+         */
+        val mail = email.trim()
+        if (register) {
+            if (mail.isBlank()) {
+                notice = "注册要填邮箱"
+                isError = true
+                return
+            }
+            if (!looksLikeEmail(mail)) {
+                notice = "邮箱格式不对，比如 name@example.com"
+                isError = true
+                return
+            }
+        }
         busy = true
         notice = null
         scope.launch {
             runCatching {
                 if (register) {
-                    container.communityApi.register(name, password)
+                    container.communityApi.register(name, password, mail)
                 } else {
                     container.communityApi.login(name, password)
                 }
@@ -127,7 +147,7 @@ fun CommunityAuthScreen(
 
                 Spacer(Modifier.height(4.dp))
                 WatchButton(
-                    text = "我的投稿",
+                    text = "个人中心",
                     onClick = { nav.push(Screen.CommunityMine) },
                 )
                 WatchGhostButton(
@@ -154,6 +174,19 @@ fun CommunityAuthScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
+                    imeAction = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("邮箱（注册用）", style = MaterialTheme.typography.labelSmall) },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    keyboardType = KeyboardType.Email,
                     imeAction = ImeAction.Next,
                 ),
                 modifier = Modifier.fillMaxWidth(),
@@ -195,7 +228,23 @@ fun CommunityAuthScreen(
                     onClick = { submit(register = true) },
                 )
             }
-            HintText("用户名 2~20 位（中文/字母/数字/下划线），密码至少 6 位。投稿要审核，通过了才会出现在社区里。")
+            HintText("用户名 2~20 位（中文/字母/数字/下划线），密码至少 6 位。注册要填邮箱（暂时不发验证码）。投稿要审核，通过了才会出现在社区里。")
         }
     }
+}
+
+/**
+ * 邮箱的粗校验。
+ *
+ * 服务端用 `filter_var(..., FILTER_VALIDATE_EMAIL)`，这里只做"明显不是邮箱"
+ * 的前置拦截（少一次往返、错误提示更快），真正的判定在服务端。
+ * 不追求 RFC 完整性 —— 手表上一串正则报错不如一句"格式不对"有用。
+ */
+private fun looksLikeEmail(s: String): Boolean {
+    if (s.length > 120 || s.count { it == '@' } != 1) return false
+    val at = s.indexOf('@')
+    if (at <= 0 || at == s.lastIndex) return false
+    val domain = s.substring(at + 1)
+    return domain.contains('.') && !domain.startsWith('.') && !domain.endsWith('.') &&
+        s.none { it.isWhitespace() }
 }

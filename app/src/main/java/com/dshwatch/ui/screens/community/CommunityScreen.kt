@@ -166,7 +166,7 @@ fun CommunityScreen(
         onBack = { nav.pop() },
         subtitle = if (account.signedIn) account.username else null,
         actions = {
-            IconTap(Icons.Outlined.CloudUpload, "我的投稿") {
+            IconTap(Icons.Outlined.CloudUpload, "个人中心") {
                 if (account.signedIn) nav.push(Screen.CommunityMine) else nav.push(Screen.CommunityAuth)
             }
             IconTap(Icons.Outlined.AccountCircle, "社区账号") {

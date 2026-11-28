@@ -90,16 +90,21 @@ class CommunityWiringTest {
     }
 
     @Test
-    fun `评论页在 ScreenHost 里分发且真的调接口`() {
+    fun `评论区内嵌在详情页，不再单独一页`() {
+        // 以前的「评论 N 条」会 push 一页 CommunityComments，看完还得退回来才能导入。
+        // 现在评论区就在点赞按钮下面，这里守两件事：页面真的接了接口、路由没有被加回来。
         val appRoot = read("ui/AppRoot.kt")
-        assertTrue(appRoot.contains("CommunityCommentsScreen("))
-        assertTrue(appRoot.contains("is Screen.CommunityComments ->"))
+        assertTrue(!appRoot.contains("CommunityCommentsScreen("))
 
-        val src = read("ui/screens/community/CommunityCommentsScreen.kt")
+        val src = read("ui/screens/community/CommunityCardScreen.kt")
         assertTrue(src.contains("communityApi.comments("))
         assertTrue(src.contains("communityApi.postComment("))
+        assertTrue(src.contains("communityApi.likeComment("))
         // 未登录要能去登录，而不是让输入框白写一通
         assertTrue(src.contains("Screen.CommunityAuth"))
+        // 下滑续页靠 hasMore + 滚动位置，不能退回手动按钮才加载
+        assertTrue(src.contains("commentsHasMore"))
+        assertTrue(src.contains("scroll.maxValue"))
     }
 
     @Test

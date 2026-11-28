@@ -338,4 +338,136 @@ class CommunityApiTest {
         assertThat(req.path).contains("a=delete")
         assertThat(req.body.readUtf8()).contains("\"id\":7")
     }
+
+    // ------------------------------------------------ 邮箱 / 回复 / 消息
+
+    @Test
+    fun `注册把邮箱一并发出去`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"token":"t1","user":{"id":1,"username":"阿糖","email":"a@b.com"}}"""
+            )
+        )
+
+        val auth = api.register("阿糖", "secret1", "a@b.com")
+
+        assertThat(auth.token).isEqualTo("t1")
+        assertThat(auth.email).isEqualTo("a@b.com")
+        val req = server.takeRequest()
+        assertThat(req.path).contains("a=register")
+        val body = req.body.readUtf8()
+        assertThat(body).contains("\"email\":\"a@b.com\"")
+    }
+
+    @Test
+    fun `登录不发邮箱字段`() = runTest {
+        server.enqueue(
+            MockResponse().setBody("""{"ok":true,"token":"t1","user":{"id":1,"username":"阿糖"}}""")
+        )
+
+        api.login("阿糖", "secret1")
+
+        assertThat(server.takeRequest().body.readUtf8()).doesNotContain("\"email\"")
+    }
+
+    @Test
+    fun `评论解析回复与点赞状态`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {"ok":true,"items":[
+                  {"id":3,"author":"阿糖","body":"写得好","createdAt":1795847119,
+                   "likes":2,"liked":true,"mine":false,
+                   "replies":[
+                     {"id":4,"author":"站长","body":"谢谢","createdAt":1795847222,
+                      "likes":0,"liked":false,"mine":true,"parentId":3}
+                   ]}
+                ],"page":0,"hasMore":true}
+                """.trimIndent()
+            )
+        )
+
+        val p = api.comments(4, token = "tok")
+
+        assertThat(p.items[0].likes).isEqualTo(2)
+        assertThat(p.items[0].liked).isTrue()
+        assertThat(p.items[0].replies).hasSize(1)
+        assertThat(p.items[0].replies[0].parentId).isEqualTo(3L)
+        assertThat(p.items[0].replies[0].mine).isTrue()
+        // 带 token 才会返回 liked / mine
+        assertThat(server.takeRequest().getHeader("Authorization")).isEqualTo("Bearer tok")
+    }
+
+    @Test
+    fun `回复评论带上 parent id`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"comment":{"id":9,"author":"阿糖","body":"回你","createdAt":1,"parentId":3}}"""
+            )
+        )
+
+        val c = api.postComment("tok", 4, "回你", parentId = 3)
+
+        assertThat(c.parentId).isEqualTo(3L)
+        assertThat(server.takeRequest().body.readUtf8()).contains("\"parent\":3")
+    }
+
+    @Test
+    fun `评论点赞是 clike 且返回新数字`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"likes":7,"liked":true}"""))
+
+        val likes = api.likeComment("tok", 12)
+
+        assertThat(likes).isEqualTo(7)
+        val req = server.takeRequest()
+        assertThat(req.path).contains("a=clike")
+        assertThat(req.body.readUtf8()).contains("\"id\":12")
+    }
+
+    @Test
+    fun `消息列表读出未读数与内容`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """
+                {"ok":true,"unread":2,"items":[
+                  {"id":5,"kind":"clike","cardId":4,"commentId":3,"actor":"阿糖",
+                   "body":"写得好","createdAt":1795847119,"read":false}
+                ]}
+                """.trimIndent()
+            )
+        )
+
+        val p = api.notices("tok")
+
+        assertThat(p.unread).isEqualTo(2)
+        assertThat(p.items[0].actor).isEqualTo("阿糖")
+        assertThat(p.items[0].read).isFalse()
+    }
+
+    @Test
+    fun `标记全部已读不带 id`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"unread":0}"""))
+
+        val left = api.readNotices("tok")
+
+        assertThat(left).isEqualTo(0)
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).doesNotContain("\"id\"")
+    }
+
+    @Test
+    fun `详情读出我赞过没有`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"ok":true,"item":{"id":4,"kind":"tavern","name":"x","downloads":0,"likes":2,
+                   "createdAt":1,"updatedAt":1,"myScore":0,"liked":true,"mine":false,
+                   "card":{"kind":"tavern","name":"x","persona":"p"}}}"""
+            )
+        )
+
+        val d = api.detail(4, token = "tok")
+
+        assertThat(d.liked).isTrue()
+        assertThat(d.myScore).isEqualTo(0)
+    }
 }

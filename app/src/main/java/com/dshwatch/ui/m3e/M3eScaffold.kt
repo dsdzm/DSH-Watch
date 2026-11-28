@@ -129,10 +129,19 @@ fun M3eScaffold(
      * 弦内余量。方屏（LocalCircle == null）保持原样。
      */
     val circle = LocalCircle.current
+    /*
+     * 方屏上给时间文字让位的高度要跟着系统字号走。
+     *
+     * 32dp 是按 1.0 字号量出来的；用户把字号调到 1.15 / 1.3（老花眼很常见），
+     * Wear 的 TimeText 会等比变高，而它又是浮层、不参与布局 —— 结果就是
+     * 顶栏标题的上沿被时间文字盖掉一截，看着像"被切掉了"。
+     * 这里按 fontScale 放大，封顶 1.6 倍，再多就把一屏内容挤没了。
+     */
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
     val barGap: Dp = if (circle != null) {
         (circle.top.value + circle.diameter.value * 0.072f).dp
     } else {
-        M3eTimeTextInset
+        (M3eTimeTextInset.value * fontScale.coerceIn(1f, 1.6f)).dp
     }
     val barInset: Dp = if (circle != null) {
         // 顶栏中线：(起点 + 约半行高)。边长按这一行算，按钮才不会越界

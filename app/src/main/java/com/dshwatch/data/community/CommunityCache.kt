@@ -27,13 +27,17 @@ data class CachedDetail(
     val meta: CommunityCard,
     val card: com.dshwatch.domain.roleplay.RoleCard,
     /**
-     * 我打的分、这张卡是不是我投的。
+     * 我打的分、赞没赞过、这张卡是不是我投的。
      *
      * 也进缓存，否则作者在 30 分钟 TTL 内点进自己的卡会看不到删除按钮 ——
      * 那是个一眼就能发现的功能缺失。旧缓存没有这两个字段，读出来是 0 / false，
      * 下次联网刷新就补上了。
+     *
+     * [myScore] / [liked] 是"一次性状态"：点下去就本地先写，再等服务端确认。
+     * 写进缓存是为了杀进程再进来，按钮仍然是灰的，不会让人以为还能再点一次。
      */
     val myScore: Int = 0,
+    val liked: Boolean = false,
     val mine: Boolean = false,
 )
 

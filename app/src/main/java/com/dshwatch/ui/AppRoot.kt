@@ -467,10 +467,5 @@ internal fun ScreenHost(
             container = container,
             nav = nav,
         )
-        is Screen.CommunityComments -> com.dshwatch.ui.screens.community.CommunityCommentsScreen(
-            container = container,
-            nav = nav,
-            cardId = page.id,
-        )
     }
 }

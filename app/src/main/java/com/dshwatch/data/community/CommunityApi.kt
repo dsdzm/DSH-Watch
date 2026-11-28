@@ -74,16 +74,26 @@ class CommunityApi(
 
     // ---------------- 账号 ----------------
 
-    suspend fun register(username: String, password: String): Auth =
-        auth("register", username, password)
+    /**
+     * 注册。邮箱是必填的（服务端会校验格式与重复），但**没有验证码** ——
+     * 目前没有发信通道，加一步验证只会让注册流程断掉。
+     */
+    suspend fun register(username: String, password: String, email: String): Auth =
+        auth("register", username, password, email)
 
     suspend fun login(username: String, password: String): Auth =
         auth("login", username, password)
 
-    private suspend fun auth(action: String, username: String, password: String): Auth {
+    private suspend fun auth(
+        action: String,
+        username: String,
+        password: String,
+        email: String = "",
+    ): Auth {
         val body = buildJsonObject {
             put("username", username.trim())
             put("password", password)
+            if (email.isNotBlank()) put("email", email.trim())
         }
         val obj = post(action, body, token = null)
         val token = obj["token"]?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -92,6 +102,7 @@ class CommunityApi(
         return Auth(
             token = token,
             username = user?.get("username")?.jsonPrimitive?.contentOrNull.orEmpty(),
+            email = user?.get("email")?.jsonPrimitive?.contentOrNull.orEmpty(),
         )
     }
 
@@ -152,6 +163,7 @@ class CommunityApi(
             meta = meta,
             card = toRoleCard(payload, meta),
             myScore = item["myScore"]?.jsonPrimitive?.intOrNull ?: 0,
+            liked = item["liked"]?.jsonPrimitive?.booleanOrNull == true,
             mine = item["mine"]?.jsonPrimitive?.booleanOrNull == true,
         )
     }
@@ -169,9 +181,14 @@ class CommunityApi(
 
     // ---------------- 评论 / 评分 / 举报 ----------------
 
-    /** 一张卡的评论，最新在前 */
-    suspend fun comments(cardId: Long, page: Int = 0, size: Int = 20): CommentPage {
-        val obj = get("?a=comments&id=$cardId&page=$page&size=$size", token = null)
+    /** 一张卡的评论，最新在前。主评论下面带一层回复（见 [CommunityComment.replies]） */
+    suspend fun comments(
+        cardId: Long,
+        page: Int = 0,
+        size: Int = 10,
+        token: String? = null,
+    ): CommentPage {
+        val obj = get("?a=comments&id=$cardId&page=$page&size=$size", token?.takeIf { it.isNotBlank() })
         val raw = obj["items"]?.jsonArray ?: JsonArray(emptyList())
         return CommentPage(
             items = raw.mapNotNull { it as? JsonObject }.map(::readComment),
@@ -179,12 +196,19 @@ class CommunityApi(
         )
     }
 
-    suspend fun postComment(token: String, cardId: Long, body: String): CommunityComment {
+    /** 发评论；[parentId] > 0 表示回复某条主评论 */
+    suspend fun postComment(
+        token: String,
+        cardId: Long,
+        body: String,
+        parentId: Long = 0L,
+    ): CommunityComment {
         val obj = post(
             "comment",
             buildJsonObject {
                 put("id", cardId)
                 put("body", body.trim())
+                if (parentId > 0) put("parent", parentId)
             },
             token,
         )
@@ -192,9 +216,31 @@ class CommunityApi(
         return readComment(c)
     }
 
+    /** 给评论点赞。一次性：重复点返回当前数字，不取消 */
+    suspend fun likeComment(token: String, commentId: Long): Int {
+        val obj = post("clike", buildJsonObject { put("id", commentId) }, token)
+        return obj["likes"]?.jsonPrimitive?.intOrNull ?: 0
+    }
+
+    /** 站内消息（目前是「你的评论被赞」），[unread] 是未读数 */
+    suspend fun notices(token: String): NoticePage {
+        val obj = get("?a=notices", token)
+        val items = obj["items"]?.jsonArray ?: JsonArray(emptyList())
+        return NoticePage(
+            items = items.mapNotNull { it as? JsonObject }.map(::readNotice),
+            unread = obj["unread"]?.jsonPrimitive?.intOrNull ?: 0,
+        )
+    }
+
+    /** 标记已读；[id] 传 0 表示全部 */
+    suspend fun readNotices(token: String, id: Long = 0L): Int {
+        val obj = post("notice_read", buildJsonObject { if (id > 0) put("id", id) }, token)
+        return obj["unread"]?.jsonPrimitive?.intOrNull ?: 0
+    }
+
     /**
-     * 打分。一人一卡一分，重复调用就是改分 —— 服务端是 upsert，
-     * 这里不需要先查「我打过没有」。
+     * 打分。一人一卡一分，**打过就不能改** —— 服务端返回 409 时抛
+     * `CommunityException("你已经打过分了，评分不能修改")`，界面原样展示。
      */
     suspend fun rate(token: String, cardId: Long, score: Int): RatingResult {
         val obj = post(
@@ -234,6 +280,25 @@ class CommunityApi(
         author = o["author"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         body = o["body"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         createdAt = o["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+        likes = o["likes"]?.jsonPrimitive?.intOrNull ?: 0,
+        liked = o["liked"]?.jsonPrimitive?.booleanOrNull == true,
+        mine = o["mine"]?.jsonPrimitive?.booleanOrNull == true,
+        parentId = o["parentId"]?.jsonPrimitive?.longOrNull ?: 0L,
+        replies = o["replies"]?.jsonArray
+            ?.mapNotNull { it as? JsonObject }
+            ?.map(::readComment)
+            .orEmpty(),
+    )
+
+    private fun readNotice(o: JsonObject): CommunityNotice = CommunityNotice(
+        id = o["id"]?.jsonPrimitive?.longOrNull ?: 0L,
+        kind = o["kind"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        cardId = o["cardId"]?.jsonPrimitive?.longOrNull ?: 0L,
+        commentId = o["commentId"]?.jsonPrimitive?.longOrNull ?: 0L,
+        actor = o["actor"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        body = o["body"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        createdAt = o["createdAt"]?.jsonPrimitive?.longOrNull ?: 0L,
+        read = o["read"]?.jsonPrimitive?.booleanOrNull == true,
     )
 
     // ---------------- 投稿 ----------------
@@ -460,7 +525,7 @@ class CommunityApi(
 }
 
 /** 注册 / 登录成功后的凭证 */
-data class Auth(val token: String, val username: String)
+data class Auth(val token: String, val username: String, val email: String = "")
 
 /** 一页社区列表 */
 data class Page(val items: List<CommunityCard>, val hasMore: Boolean)
@@ -468,24 +533,51 @@ data class Page(val items: List<CommunityCard>, val hasMore: Boolean)
 /**
  * 详情：元信息 + 可直接入库的本地卡。
  *
- * [myScore] / [mine] 只有带着 token 请求时才有意义 —— 没登录时是 0 / false，
- * 界面上就是不显示"我的评分"和删除按钮，正好。
+ * [myScore] / [liked] / [mine] 只有带着 token 请求时才有意义 —— 没登录时
+ * 是 0 / false，界面上就是不显示"我的评分"、点赞不可点、删除按钮不出现，正好。
  */
 data class CommunityDetail(
     val meta: CommunityCard,
     val card: RoleCard,
     val myScore: Int = 0,
+    val liked: Boolean = false,
     val mine: Boolean = false,
 )
 
 /** 评论列表的一页 */
 data class CommentPage(val items: List<CommunityComment>, val hasMore: Boolean)
 
+/**
+ * 一条评论。
+ *
+ * [replies] 只有主评论才有：服务端把回复跟着主评论一起下发，
+ * 前端不用为了几条回复再发一次请求。[liked] 是"我赞过没有"。
+ */
 data class CommunityComment(
     val id: Long,
     val author: String,
     val body: String,
     val createdAt: Long,
+    val likes: Int = 0,
+    val liked: Boolean = false,
+    val mine: Boolean = false,
+    val parentId: Long = 0L,
+    val replies: List<CommunityComment> = emptyList(),
+)
+
+/** 一页站内消息 */
+data class NoticePage(val items: List<CommunityNotice>, val unread: Int)
+
+/** 站内消息：目前只有「你的评论被赞」（kind = clike） */
+data class CommunityNotice(
+    val id: Long,
+    val kind: String,
+    val cardId: Long,
+    val commentId: Long,
+    val actor: String,
+    val body: String,
+    val createdAt: Long,
+    val read: Boolean,
 )
 
 /** 打分后的回执：新的均分、评分人数、我打了几分 */
